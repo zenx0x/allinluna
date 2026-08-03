@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from copy import deepcopy
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PLAN = ROOT / "plugins" / "allinluna" / "skills" / "allinluna-plan"
+RUN = ROOT / "plugins" / "allinluna" / "skills" / "allinluna-run"
+SCRIPTS = RUN / "scripts"
+EXAMPLE = PLAN / "assets" / "development-plan.example.json"
+
+
+def command(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, *args],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+class RunLifecycleTests(unittest.TestCase):
+    def init(self, root: Path, profile: str = "balanced", plan: Path = EXAMPLE, *extra: str) -> Path:
+        result = command(
+            str(SCRIPTS / "init_run.py"),
+            str(plan),
+            "--profile",
+            profile,
+            "--state-root",
+            str(root),
+            "--run-id",
+            "test-run",
+            *extra,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return root / "test-run"
+
+    def update(self, run: Path, *args: str, expected: int = 0) -> dict:
+        result = command(str(SCRIPTS / "update_run.py"), str(run), *args)
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_initial_state_and_complete_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary))
+            validation = command(str(SCRIPTS / "validate_run.py"), str(run))
+            self.assertEqual(validation.returncode, 0, validation.stdout)
+            self.update(run, "--task", "T1-domain-api", "--status", "running", "--reason", "start")
+            self.update(
+                run,
+                "--task",
+                "T1-domain-api",
+                "--status",
+                "completed",
+                "--reason",
+                "done",
+                "--check",
+                "focused API checks passed",
+                "--final-commit",
+                "a" * 40,
+            )
+            self.update(run, "--task", "T2-ui", "--status", "running", "--reason", "start")
+            self.update(
+                run,
+                "--task",
+                "T2-ui",
+                "--status",
+                "completed",
+                "--reason",
+                "done",
+                "--check",
+                "focused UI checks passed",
+                "--final-commit",
+                "b" * 40,
+            )
+            self.update(run, "--task", "T3-accept", "--status", "running", "--reason", "start")
+            self.update(
+                run,
+                "--task",
+                "T3-accept",
+                "--status",
+                "completed",
+                "--reason",
+                "accepted",
+                "--check",
+                "independent journeys passed",
+            )
+            self.update(run, "--run-status", "completed", "--reason", "completion standard met")
+            validation = command(str(SCRIPTS / "validate_run.py"), str(run))
+            self.assertEqual(validation.returncode, 0, validation.stdout)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "completed")
+            self.assertTrue(all(task["status"] == "completed" for task in state["tasks"].values()))
+
+    def test_cannot_complete_incomplete_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary))
+            result = self.update(
+                run,
+                "--run-status",
+                "completed",
+                "--reason",
+                "too early",
+                expected=1,
+            )
+            self.assertFalse(result["ok"])
+
+    def test_mad_luna_rejects_non_luna_actual_model(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary), profile="mad-luna")
+            result = self.update(
+                run,
+                "--task",
+                "T1-domain-api",
+                "--status",
+                "running",
+                "--reason",
+                "wrong assignment",
+                "--actual-model",
+                "example-sol-model",
+                expected=1,
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("hard model lock", result["errors"][0])
+
+    def test_top_level_task_requires_explicit_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary))
+            result = self.update(
+                run,
+                "--task",
+                "T1-domain-api",
+                "--status",
+                "running",
+                "--reason",
+                "unauthorized tier",
+                "--actual-delegation",
+                "top-level-task",
+                expected=1,
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("authorization", result["errors"][0])
+
+    def test_hard_budget_pauses_new_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["resource_policy"]["budget"] = {
+                "metric": "credits",
+                "soft_limit": 8,
+                "hard_limit": 10,
+            }
+            plan_path = temp / "budget-plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            run = self.init(temp / "state", plan=plan_path)
+            result = self.update(
+                run,
+                "--usage-credits",
+                "10",
+                "--reason",
+                "credit update",
+            )
+            self.assertEqual(result["run_status"], "paused")
+            validation = command(str(SCRIPTS / "validate_run.py"), str(run))
+            self.assertEqual(validation.returncode, 0, validation.stdout)
+
+    def test_goal_requires_plan_and_command_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["mode"] = "goal-ready"
+            plan["authorizations"]["goal_creation"] = True
+            plan_path = temp / "goal-plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            denied = command(
+                str(SCRIPTS / "init_run.py"),
+                str(plan_path),
+                "--state-root",
+                str(temp / "denied"),
+            )
+            self.assertNotEqual(denied.returncode, 0)
+            run = self.init(temp / "allowed", "balanced", plan_path, "--goal-authorized")
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertTrue(state["goal_authorized"])
+
+    def test_plan_snapshot_tampering_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary))
+            plan = json.loads((run / "plan.json").read_text(encoding="utf-8"))
+            plan["title"] = "tampered"
+            (run / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            result = command(str(SCRIPTS / "validate_run.py"), str(run))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("hash", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

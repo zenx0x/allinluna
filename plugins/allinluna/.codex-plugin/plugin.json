@@ -1,0 +1,39 @@
+{
+  "name": "allinluna",
+  "version": "0.1.0",
+  "description": "Plan and run complete, resource-aware agent development workflows.",
+  "author": {
+    "name": "zenx0x",
+    "url": "https://github.com/zenx0x"
+  },
+  "homepage": "https://github.com/zenx0x/allinluna",
+  "repository": "https://github.com/zenx0x/allinluna",
+  "license": "Apache-2.0",
+  "keywords": [
+    "development",
+    "planning",
+    "agent-orchestration",
+    "resource-management",
+    "worktrees",
+    "luna"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "All in Luna",
+    "shortDescription": "Plan and run complete agent development workflows",
+    "longDescription": "Inspect an existing repository or greenfield idea, plan complete work, choose explicit model and reasoning profiles, coordinate isolated parallel tasks, and resume long-running development without shrinking scope.",
+    "developerName": "zenx0x",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/zenx0x/allinluna",
+    "defaultPrompt": [
+      "Plan this project with All in Luna.",
+      "Execute this plan with isolated parallel tasks and an explicit resource mode.",
+      "Resume the saved All in Luna workflow."
+    ]
+  }
+}

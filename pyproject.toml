@@ -1,0 +1,16 @@
+[project]
+name = "allinluna"
+version = "0.1.0"
+description = "Complete, resource-aware agent development workflows for Codex"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "zenx0x" }]
+
+[project.urls]
+Homepage = "https://github.com/zenx0x/allinluna"
+Repository = "https://github.com/zenx0x/allinluna"
+Issues = "https://github.com/zenx0x/allinluna/issues"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -1,0 +1,7 @@
+interface:
+  display_name: "All in Luna — Run"
+  short_description: "Execute plans with agents and explicit resource controls"
+  default_prompt: "Use $allinluna-run to execute this plan completely with the requested models, reasoning, parallelism, recovery, and verification."
+
+policy:
+  allow_implicit_invocation: true

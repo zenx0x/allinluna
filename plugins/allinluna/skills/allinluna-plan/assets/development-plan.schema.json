@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/development-plan.schema.json",
+  "title": "All in Luna Development Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "title",
+    "mode",
+    "objective",
+    "completion_standard",
+    "repository",
+    "authorizations",
+    "resource_policy",
+    "tasks",
+    "milestones",
+    "assumptions",
+    "unknowns"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "plan_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$" },
+    "title": { "type": "string", "minLength": 3 },
+    "mode": { "enum": ["plan-only", "execute-ready", "goal-ready"] },
+    "objective": { "type": "string", "minLength": 10 },
+    "completion_standard": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 3 }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "roots", "instructions", "protected_paths"],
+      "properties": {
+        "mode": { "enum": ["existing", "greenfield", "multi-repository"] },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "git", "branch", "head", "dirty_state"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "git": { "type": "boolean" },
+              "branch": { "type": ["string", "null"] },
+              "head": { "type": ["string", "null"] },
+              "dirty_state": { "enum": ["clean", "dirty", "not-git", "unknown"] }
+            }
+          }
+        },
+        "instructions": { "type": "array", "items": { "type": "string" } },
+        "protected_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "authorizations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_writes",
+        "git_operations",
+        "goal_creation",
+        "top_level_tasks",
+        "destructive_operations",
+        "live_external_mutation",
+        "publication"
+      ],
+      "properties": {
+        "implementation_writes": { "type": "boolean" },
+        "git_operations": { "type": "boolean" },
+        "goal_creation": { "type": "boolean" },
+        "top_level_tasks": { "type": "boolean" },
+        "destructive_operations": { "type": "boolean" },
+        "live_external_mutation": { "type": "boolean" },
+        "publication": { "type": "boolean" }
+      }
+    },
+    "resource_policy": { "$ref": "#/$defs/resourcePolicy" },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/task" }
+    },
+    "milestones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/milestone" }
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "unknowns": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "resourcePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "hard_model_lock",
+        "unavailable_action",
+        "fallback_models",
+        "concurrency",
+        "budget",
+        "role_overrides"
+      ],
+      "properties": {
+        "profile": {
+          "enum": ["premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"]
+        },
+        "hard_model_lock": { "type": ["string", "null"] },
+        "unavailable_action": { "enum": ["pause", "ask", "fallback-list"] },
+        "fallback_models": { "type": "array", "items": { "type": "string" } },
+        "concurrency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desired", "host_cap_behavior"],
+          "properties": {
+            "desired": { "type": "integer", "minimum": 1 },
+            "host_cap_behavior": { "const": "cap-at-runtime" }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric", "soft_limit", "hard_limit"],
+          "properties": {
+            "metric": { "enum": ["none", "tokens", "credits", "time-minutes", "currency", "custom"] },
+            "soft_limit": { "type": ["number", "null"], "minimum": 0 },
+            "hard_limit": { "type": ["number", "null"], "minimum": 0 }
+          }
+        },
+        "role_overrides": { "type": "object" }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "phase",
+        "description",
+        "dependencies",
+        "ownership",
+        "role",
+        "resource_class",
+        "deliverables",
+        "verification",
+        "external_side_effects",
+        "acceptance_required"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "title": { "type": "string", "minLength": 3 },
+        "phase": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 10 },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "ownership": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["paths", "non_file_scope", "exclusive"],
+          "properties": {
+            "paths": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+            "non_file_scope": { "type": ["string", "null"] },
+            "exclusive": { "type": "boolean" }
+          }
+        },
+        "role": { "type": "string", "minLength": 1 },
+        "resource_class": {
+          "enum": ["authority", "architecture", "implementation-complex", "implementation-clear", "mechanical", "integration", "acceptance"]
+        },
+        "deliverables": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 3 } },
+        "verification": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 3 } },
+        "external_side_effects": { "type": "array", "items": { "type": "string" } },
+        "acceptance_required": { "type": "boolean" }
+      }
+    },
+    "milestone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "task_ids", "integration_evidence", "acceptance_evidence", "unlocks"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 3 },
+        "task_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "integration_evidence": { "type": "array", "items": { "type": "string" } },
+        "acceptance_evidence": { "type": "array", "items": { "type": "string" } },
+        "unlocks": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    }
+  }
+}

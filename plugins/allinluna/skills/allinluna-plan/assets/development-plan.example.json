@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "plan_id": "example-feature",
+  "title": "Example full-stack feature",
+  "mode": "execute-ready",
+  "objective": "Add a project-aware feature through the domain, API, client, user interface, and focused verification layers.",
+  "completion_standard": [
+    "The feature works end to end for two isolated projects.",
+    "Failure, permission, empty, and recovery states are tested.",
+    "Integration and independent acceptance pass on the recorded baseline."
+  ],
+  "repository": {
+    "mode": "existing",
+    "roots": [
+      {
+        "path": ".",
+        "git": true,
+        "branch": "main",
+        "head": "runtime-verify",
+        "dirty_state": "unknown"
+      }
+    ],
+    "instructions": ["AGENTS.md"],
+    "protected_paths": ["data/authoritative/"]
+  },
+  "authorizations": {
+    "implementation_writes": true,
+    "git_operations": true,
+    "goal_creation": false,
+    "top_level_tasks": false,
+    "destructive_operations": false,
+    "live_external_mutation": false,
+    "publication": false
+  },
+  "resource_policy": {
+    "profile": "balanced",
+    "hard_model_lock": null,
+    "unavailable_action": "ask",
+    "fallback_models": [],
+    "concurrency": {
+      "desired": 3,
+      "host_cap_behavior": "cap-at-runtime"
+    },
+    "budget": {
+      "metric": "none",
+      "soft_limit": null,
+      "hard_limit": null
+    },
+    "role_overrides": {}
+  },
+  "tasks": [
+    {
+      "id": "T1-domain-api",
+      "title": "Domain and API vertical",
+      "phase": "implementation",
+      "description": "Implement project-aware domain state, service behavior, API contracts, and generated-client synchronization.",
+      "dependencies": [],
+      "ownership": {
+        "paths": ["src/domain/", "src/api/", "generated/client/"],
+        "non_file_scope": null,
+        "exclusive": true
+      },
+      "role": "backend-owner",
+      "resource_class": "implementation-complex",
+      "deliverables": ["Domain-to-generated-client implementation", "Focused API tests"],
+      "verification": ["Run the focused service/API/client test command recorded from the repository"],
+      "external_side_effects": [],
+      "acceptance_required": true
+    },
+    {
+      "id": "T2-ui",
+      "title": "User journey",
+      "phase": "implementation",
+      "description": "Implement the sole user interface against the generated client, including empty, failure, and recovery states.",
+      "dependencies": ["T1-domain-api"],
+      "ownership": {
+        "paths": ["frontend/"],
+        "non_file_scope": null,
+        "exclusive": true
+      },
+      "role": "frontend-owner",
+      "resource_class": "implementation-clear",
+      "deliverables": ["Complete user journey", "Focused component and interaction tests"],
+      "verification": ["Run focused UI tests and production typecheck/build"],
+      "external_side_effects": [],
+      "acceptance_required": true
+    },
+    {
+      "id": "T3-accept",
+      "title": "Independent milestone acceptance",
+      "phase": "acceptance",
+      "description": "Exercise the integrated real-data journey, isolation, failure, permission, and recovery behavior without modifying implementation.",
+      "dependencies": ["T2-ui"],
+      "ownership": {
+        "paths": [],
+        "non_file_scope": "Read-only acceptance of the integrated baseline",
+        "exclusive": false
+      },
+      "role": "acceptance-owner",
+      "resource_class": "acceptance",
+      "deliverables": ["Evidence-backed PASS, FAIL, or BLOCKED result"],
+      "verification": ["Exercise required user journeys and inspect protected-path invariance"],
+      "external_side_effects": [],
+      "acceptance_required": false
+    }
+  ],
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "Feature milestone",
+      "task_ids": ["T1-domain-api", "T2-ui", "T3-accept"],
+      "integration_evidence": ["Recorded integration commit and cross-layer tests"],
+      "acceptance_evidence": ["Independent real-data journey PASS"],
+      "unlocks": []
+    }
+  ],
+  "assumptions": ["Repository commands will be confirmed from local manifests before execution."],
+  "unknowns": ["The host model catalog and maximum concurrency are resolved at runtime."]
+}

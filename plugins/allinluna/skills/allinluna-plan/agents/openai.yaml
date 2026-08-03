@@ -1,0 +1,7 @@
+interface:
+  display_name: "All in Luna — Plan"
+  short_description: "Turn a repo or idea into a complete executable plan"
+  default_prompt: "Use $allinluna-plan to inspect this project or idea and produce a complete, dependency-aware plan with an explicit resource mode."
+
+policy:
+  allow_implicit_invocation: true

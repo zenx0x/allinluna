@@ -1,0 +1,17 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+.DS_Store
+Thumbs.db
+
+# Runtime state is intentionally user-local and must not be committed.
+.allinluna/
+
+# Forward-test outputs are generated, not source.
+eval-workspace/

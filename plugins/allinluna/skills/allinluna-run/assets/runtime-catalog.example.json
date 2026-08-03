@@ -1,0 +1,17 @@
+{
+  "max_concurrency": 4,
+  "models": [
+    {
+      "id": "example-frontier-model",
+      "families": ["example"],
+      "tiers": ["frontier"],
+      "reasoning": ["low", "medium", "high", "xhigh", "max"]
+    },
+    {
+      "id": "example-luna-model",
+      "families": ["luna"],
+      "tiers": ["fast", "standard"],
+      "reasoning": ["low", "medium", "high", "max"]
+    }
+  ]
+}

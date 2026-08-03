@@ -27,9 +27,9 @@ On Codex App, build the top-level catalog from the `codex_app__create_thread` to
 | `mad-luna` | 8, host-capped | hard Luna lock | independent Luna max |
 | `custom` | user-defined | user-defined | user-defined |
 
-Effective concurrency is always capped by the host, dependencies, writable ownership, and budget.
+The table values are defaults, not user-facing ceilings. A user may request any positive desired concurrency. Effective concurrency is still limited by the host's actual capacity, dependency-ready work, writable ownership, and budget.
 
-Use `modifiers: ["speed"]` to compose the speed scheduling strategy with another base profile. In particular, `all-luna + speed` keeps every Luna role and hard lock while raising desired concurrency to 6; it never imports the mixed-model role assignments from `speed`.
+Use `modifiers: ["speed"]` to compose the speed scheduling strategy with another base profile. In particular, `all-luna + speed` keeps every Luna role and hard lock while defaulting desired concurrency to 6; an explicit user value overrides that number without importing the mixed-model role assignments from `speed`.
 
 Every built-in profile defaults substantive root-level owner lanes to user-visible top-level Codex tasks. Each profile keeps root-level `subagent` then `sequential` as its runtime fallback order. After the host tool catalog has been fully checked and the top-level task tool is genuinely absent, fallback is automatic and is recorded as `top-level-tool-unavailable`; it does not rewrite the plan authorization or masquerade as a top-level task. A hard model lock still blocks any fallback surface that cannot satisfy it. Once assigned, a top-level owner may use bounded internal subagents under the same ownership and model policy.
 

@@ -54,9 +54,13 @@ A hard model lock means every actual assignment must match the lock. Legal polic
 
 ## Concurrency
 
+When the user has not chosen resource settings, planning should offer one optional preset choice and otherwise default to `balanced` with desired concurrency 3. The choice belongs in planning, not as a repeated Run-stage authorization. Any positive user-supplied value replaces the numeric default.
+
+The planner automatically extracts independent owner lanes using the dependency DAG and exclusive writable ownership. All ready, conflict-free lanes may run together up to the desired target. Concurrency is therefore a scheduling target, not a request for artificial task fragmentation.
+
 The effective concurrency is the minimum of:
 
-- profile request;
+- the user's requested concurrency, or the profile default when none was requested;
 - host limit;
 - number of dependency-ready tasks;
 - number of conflict-free writable ownership sets;
@@ -64,4 +68,4 @@ The effective concurrency is the minimum of:
 
 More agents do not help tightly coupled work. Plan those steps sequentially or give shared files to integration.
 
-Do not encode current dependency readiness as desired concurrency. Desired concurrency remains the selected profile target; the runtime effective value is capped independently. Empty or non-Git projects first receive a coordinator Git-bootstrap dependency and then use top-level owner tasks.
+Profile concurrency values are defaults rather than ceilings. Preserve any positive value explicitly requested by the user; otherwise use the selected profile default. Do not encode current dependency readiness as desired concurrency. The runtime effective value is capped independently by actual host capacity, ready work, ownership safety, and budget. Empty or non-Git projects first receive a coordinator Git-bootstrap dependency and then use top-level owner tasks.

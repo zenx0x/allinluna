@@ -217,6 +217,7 @@ def build_initial_state(
         },
         "repository": deepcopy(plan["repository"]),
         "authorizations": deepcopy(plan["authorizations"]),
+        "orchestration": deepcopy(plan["orchestration"]),
         "completion_standard": deepcopy(plan["completion_standard"]),
         "tasks": tasks,
         "milestones": deepcopy(plan["milestones"]),

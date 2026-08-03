@@ -18,6 +18,7 @@
     "usage",
     "repository",
     "authorizations",
+    "orchestration",
     "completion_standard",
     "tasks",
     "milestones",
@@ -56,6 +57,16 @@
     },
     "repository": { "type": "object" },
     "authorizations": { "type": "object" },
+    "orchestration": {
+      "type": "object",
+      "required": ["root_role", "root_product_implementation", "owner_delegation", "owner_subagents"],
+      "properties": {
+        "root_role": { "const": "coordinator" },
+        "root_product_implementation": { "const": "forbidden" },
+        "owner_delegation": { "const": "top-level-task" },
+        "owner_subagents": { "const": "allowed-bounded" }
+      }
+    },
     "completion_standard": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "tasks": {
       "type": "object",

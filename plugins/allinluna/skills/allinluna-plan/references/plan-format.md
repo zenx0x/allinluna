@@ -12,6 +12,7 @@ The canonical artifact is JSON conforming to `assets/development-plan.schema.jso
 - `completion_standard`: measurable conditions for whole-plan completion.
 - `repository`: existing/greenfield mode, roots, revision evidence, and dirty-state notes.
 - `authorizations`: explicit action permissions.
+- `orchestration`: mandatory root coordinator, forbidden root product implementation, top-level owners, and bounded owner subagents.
 - `resource_policy`: profile, locks, fallback, concurrency, and budget.
 - `tasks`: dependency graph and ownership.
 - `milestones`: phase-level integration and acceptance.

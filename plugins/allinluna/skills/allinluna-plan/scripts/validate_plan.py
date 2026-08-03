@@ -38,6 +38,7 @@ REQUIRED_TOP = {
     "completion_standard",
     "repository",
     "authorizations",
+    "orchestration",
     "resource_policy",
     "tasks",
     "milestones",
@@ -178,6 +179,20 @@ def validate(data: Any) -> dict[str, Any]:
         errors.append("goal_creation can be true only for goal-ready mode")
     if data.get("mode") == "goal-ready" and not auth.get("goal_creation"):
         errors.append("goal-ready mode requires explicit goal_creation authorization")
+
+    orchestration = data.get("orchestration")
+    required_orchestration = {
+        "root_role": "coordinator",
+        "root_product_implementation": "forbidden",
+        "owner_delegation": "top-level-task",
+        "owner_subagents": "allowed-bounded",
+    }
+    if not isinstance(orchestration, dict):
+        errors.append("orchestration must be an object")
+    else:
+        for field, expected in required_orchestration.items():
+            if orchestration.get(field) != expected:
+                errors.append(f"orchestration.{field} must be {expected}")
     if data.get("mode") == "plan-only" and auth.get("implementation_writes"):
         warnings.append("plan-only mode authorizes implementation writes; execution must still wait for a request")
 
@@ -196,22 +211,19 @@ def validate(data: Any) -> dict[str, Any]:
     concurrency = policy.get("concurrency")
     if not isinstance(concurrency, dict) or not isinstance(concurrency.get("desired"), int) or concurrency.get("desired", 0) < 1:
         errors.append("resource_policy.concurrency.desired must be a positive integer")
-    elif profile in PROFILE_CONCURRENCY and "speed" not in (modifiers or []):
-        expected = PROFILE_CONCURRENCY[profile]
+    elif profile in PROFILE_CONCURRENCY:
+        expected = 6 if "speed" in (modifiers or []) else PROFILE_CONCURRENCY[profile]
         if concurrency.get("desired") != expected:
-            errors.append(
-                f"{profile} requires resource_policy.concurrency.desired={expected}; "
-                "dependencies and Git readiness cap runtime concurrency, not the plan target"
+            warnings.append(
+                f"resource_policy.concurrency.desired={concurrency.get('desired')} overrides "
+                f"the {profile}{' + speed' if 'speed' in (modifiers or []) else ''} "
+                f"default of {expected}"
             )
     if policy.get("unavailable_action") == "fallback-list" and not policy.get("fallback_models"):
         errors.append("fallback-list policy requires fallback_models")
     hard_lock = policy.get("hard_model_lock")
     if profile in {"all-luna", "mad-luna"} and (not isinstance(hard_lock, str) or "luna" not in hard_lock.lower()):
         errors.append(f"{profile} requires a Luna hard_model_lock")
-    if "speed" in (modifiers or []) and (
-        not isinstance(concurrency, dict) or concurrency.get("desired") != 6
-    ):
-        errors.append("speed modifier requires resource_policy.concurrency.desired=6")
     if hard_lock and policy.get("fallback_models"):
         outside = [item for item in policy["fallback_models"] if hard_lock.lower() not in item.lower()]
         if outside:

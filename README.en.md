@@ -59,9 +59,13 @@ All in Luna **does not default to completing everything sequentially inside the 
 4. lets every top-level owner create bounded internal subagents when useful; and
 5. serializes one or more top-level owners when work is small, tightly coupled, or cannot be parallelized safely.
 
+The root coordinator is the mandatory default execution role and does not require a separate user toggle. New plans contain a structured orchestration contract, and execute-ready revision automatically upgrades older plans. The coordinator does not perform substantive product implementation unless the host genuinely lacks top-level task capability and a runtime fallback is recorded honestly.
+
 “Sequential” here means dependencies between top-level owners, not product implementation by the root coordinator. Even when only one owner is currently ready, the coordinator creates that top-level task, waits, and dispatches the next owner afterward. A `balanced` plan always keeps desired concurrency at 3; current readiness or missing Git setup cannot rewrite it to 1.
 
 Desired concurrency by profile is: `balanced` 3, `premium` 4, `economy` 2, `speed` 6, `all-luna` 4, and `mad-luna` 8. Actual concurrency is limited by the host, dependencies, and ownership safety. All in Luna does not create a top-level task for every micro-fix merely to reach a number.
+
+These values are defaults, not fixed ceilings. During Plan, a user may provide any positive desired concurrency and it is preserved. If no value is given, Plan offers one non-blocking resource/concurrency choice and continues with `balanced + 3` when unanswered; Run does not ask again. The planner automatically decomposes work into dependency-safe owner lanes with exclusive writable ownership and dispatches ready, conflict-free lanes concurrently, without requiring manual task splitting or creating artificial micro-tasks.
 
 Every All in Luna plan must record `top_level_tasks=true` and `top_level_tasks_basis=allinluna-default`; there is no mode that emits `false`. The authorization remains true for small, non-Git, plan-only, or tightly coupled projects even when dependency analysis ultimately yields only one owner.
 

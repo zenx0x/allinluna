@@ -49,6 +49,16 @@ def main(argv: list[str] | None = None) -> int:
             revised["resource_policy"]["modifiers"] = []
             changed.append("resource_policy.modifiers")
 
+        required_orchestration = {
+            "root_role": "coordinator",
+            "root_product_implementation": "forbidden",
+            "owner_delegation": "top-level-task",
+            "owner_subagents": "allowed-bounded",
+        }
+        if revised.get("orchestration") != required_orchestration:
+            revised["orchestration"] = required_orchestration
+            changed.append("orchestration")
+
         if args.authorize_implementation_writes:
             revised["authorizations"]["implementation_writes"] = True
             if revised["mode"] == "plan-only":

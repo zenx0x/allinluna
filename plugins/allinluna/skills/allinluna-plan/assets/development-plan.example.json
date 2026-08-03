@@ -33,6 +33,12 @@
     "live_external_mutation": false,
     "publication": false
   },
+  "orchestration": {
+    "root_role": "coordinator",
+    "root_product_implementation": "forbidden",
+    "owner_delegation": "top-level-task",
+    "owner_subagents": "allowed-bounded"
+  },
   "resource_policy": {
     "profile": "balanced",
     "modifiers": [],

@@ -35,6 +35,13 @@
     "must_not": ["concurrent overlapping writers", "task per micro-fix"]
   },
   {
+    "id": "plan-resource-choice-and-user-concurrency",
+    "skill": "allinluna-plan",
+    "prompt": "Use All in Luna to plan this project. I have not chosen a resource mode or concurrency yet.",
+    "must": ["offer one non-blocking planning-stage resource choice", "default to balanced concurrency 3 when unanswered", "accept any positive user concurrency", "automatically decompose independent owner lanes"],
+    "must_not": ["block planning for an answer", "ask again during Run", "treat profile concurrency as a ceiling", "create micro-tasks to fill concurrency"]
+  },
+  {
     "id": "plan-top-level-always-true",
     "skill": "allinluna-plan",
     "prompt": "Use All in Luna to plan this small non-Git project only; do not implement yet.",
@@ -115,8 +122,8 @@
     "id": "run-two-level-topology",
     "skill": "allinluna-run",
     "prompt": "Run this normally with All in Luna.",
-    "must": ["dispatch substantive owner lanes as top-level Codex tasks", "allow bounded internal subagents inside each owner", "keep root and owner delegation distinct"],
-    "must_not": ["create a top-level task for every micro-fix", "replace owner lanes with root-level subagents", "count internal subagent output as owner completion"]
+    "must": ["enforce root_role coordinator", "forbid root product implementation", "dispatch substantive owner lanes as top-level Codex tasks", "allow bounded internal subagents inside each owner", "keep root and owner delegation distinct"],
+    "must_not": ["treat coordination as opt-in", "create a top-level task for every micro-fix", "replace owner lanes with root-level subagents", "count internal subagent output as owner completion"]
   },
   {
     "id": "run-owner-repair",

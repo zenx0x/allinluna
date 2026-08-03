@@ -18,7 +18,7 @@ Tell the user this skill is controlling execution and name the selected resource
 
 If no executable plan exists, use `$allinluna-plan` first. Do not repeatedly replan a plan whose assumptions still hold.
 
-After plan validation, remain the root coordinator. Do not start implementing product files in the current task. Initialize run state, complete or decline the Git-bootstrap decision, then create the first dependency-ready top-level owner task even when only one owner is ready. Continue dispatching newly ready owners as dependencies clear; a sequential dependency graph still uses separate top-level owners managed by the coordinator.
+After plan validation, remain the root coordinator. This is mandatory default execution topology, not an optional optimization. Verify the plan's orchestration contract and do not start implementing product files in the current task. Initialize run state, complete or decline the Git-bootstrap decision, then create the first dependency-ready top-level owner task even when only one owner is ready. Continue dispatching newly ready owners as dependencies clear; a sequential dependency graph still uses separate top-level owners managed by the coordinator.
 
 When the user asks All in Luna to execute a previously `plan-only` plan, do not run that stale snapshot and do not mutate it in place. Create a validated execution revision with `scripts/prepare_execution_plan.py`. The revision always sets `top_level_tasks=true`. “Do not create a Goal” independently keeps `goal_creation=false`.
 
@@ -120,7 +120,7 @@ Do not delete, reset, clean, force-push, rewrite history, mutate credentials, or
 
 For every ready task:
 
-1. dispatch according to dependencies, ownership, capability tier, and concurrency cap;
+1. dispatch according to dependencies, ownership, capability tier, and the requested concurrency target subject to actual runtime constraints;
 2. persist task/thread ID, host ID when available, worktree, branch, base commit, requested/actual model, and reasoning;
 3. monitor with the host's wait/status tools rather than declaring success at dispatch;
 4. require real code or project artifacts, focused tests, and an auditable commit when Git is in scope;
@@ -142,7 +142,7 @@ Use focused tests within owner lanes. Reserve broader suites for phase integrati
 - `mad-luna`: hard-lock all roles to Luna, request maximum supported reasoning and maximum safe concurrency, and add an independent Luna verifier to high-risk milestones.
 - `custom`: follow exact role assignments and limits.
 
-For `all-luna + speed`, retain the `all-luna` hard model lock and roles, apply the `speed` modifier, and target concurrency 6 subject to host and dependency caps. Do not resolve it as the mixed-model `speed` profile.
+For `all-luna + speed`, retain the `all-luna` hard model lock and roles, apply the `speed` modifier, and default to concurrency 6 subject to runtime constraints. If the user supplied another positive concurrency value, preserve it. Do not resolve the composition as the mixed-model `speed` profile.
 
 `mad-luna` is not permission to exceed host capacity, user budget, repository safety, or external-action boundaries. No mode may lower the completion standard.
 

@@ -58,11 +58,13 @@ Use the smallest topology that can complete the full scope:
 
 Every All in Luna plan must set `top_level_tasks=true`. Never emit `false`, including for plan-only, non-Git, greenfield, small, tightly coupled, or single-lane work. Design independent substantive owner lanes as user-visible top-level Codex tasks and allow each owner bounded internal subagents. A tightly coupled project may produce only one top-level owner, but the authorization remains true.
 
+Every plan must also record the mandatory orchestration contract: `root_role=coordinator`, `root_product_implementation=forbidden`, `owner_delegation=top-level-task`, and `owner_subagents=allowed-bounded`. The current/root task is always the coordinator during Run. There is no built-in mode in which the root silently becomes the product implementer; only a verified runtime fallback may change actual delegation, and that fallback must be recorded honestly.
+
 Track Goal and task authorization independently. “Do not create a Goal” sets only `goal_creation=false`; it must not be copied into `top_level_tasks=false`. All in Luna always records top-level task authorization as true.
 
 Parallelize only work that is independent in both dependencies and writable file ownership. A task with shared files must depend on the owning implementation or be assigned to the integration lane.
 
-Keep the selected profile's desired concurrency in the plan: premium 4, balanced 3, economy 2, speed 6, all-luna 4, and mad-luna 8. Never lower it because the directory is empty, non-Git, currently has only one dependency-ready task, or the host cap is unknown. Those constraints reduce effective runtime concurrency only. `all-luna + speed` uses desired 6.
+Use the selected profile's default desired concurrency when the user does not specify one: premium 4, balanced 3, economy 2, speed 6, all-luna 4, and mad-luna 8. These values are defaults, not fixed ceilings. If the user requests a positive concurrency value, record it directly in `resource_policy.concurrency.desired`, including values below or above the profile default. Never rewrite the desired value merely because the directory is empty, non-Git, currently has only one dependency-ready task, or the host cap is unknown; those constraints reduce effective runtime concurrency only. `all-luna + speed` defaults to 6 but also accepts an explicit user override.
 
 For a greenfield or non-Git root, add an initial coordinator-owned `T0-git-bootstrap` dependency that checks Git readiness and requests the combined Git installation/repository initialization/baseline commit authorization. Subsequent implementation owners remain top-level tasks. If Git preparation is declined at runtime, use the documented ordinary fallback without rewriting the plan topology.
 
@@ -76,7 +78,11 @@ parallel implementation -> one phase integration -> one milestone acceptance
 
 Use `balanced` when the user has no preference. Available profiles are `premium`, `balanced`, `economy`, `speed`, `all-luna`, `mad-luna`, and `custom`.
 
-Allow a model policy and an execution strategy to compose. Interpret `all-luna + speed` as base profile `all-luna`, modifier `speed`, Luna hard lock retained for every delegated role, and desired concurrency 6 with maximum-safe independent scheduling. Record `resource_policy.modifiers: ["speed"]`; never replace the Luna hard lock with the mixed-model `speed` profile.
+At the beginning of planning, if the user has not specified resource mode or desired concurrency, offer one compact, non-blocking resource choice when the host supports structured user input: recommended `balanced` with concurrency 3, a lower-cost option, and a higher-parallelism option. Allow a custom positive concurrency value. If the user does not answer, continue with `balanced` and 3; do not stop planning and do not ask again during Run. If structured input is unavailable, apply the same default and state that it remains user-overridable.
+
+Decompose for parallel execution by default. Identify every substantively independent owner lane whose dependencies and writable paths do not overlap, and represent those lanes as separate top-level tasks. Schedule all dependency-ready, conflict-free owners concurrently up to the desired target. Do not require the user to enumerate lanes, and do not manufacture micro-tasks merely to fill the target.
+
+Allow a model policy and an execution strategy to compose. Interpret `all-luna + speed` as base profile `all-luna`, modifier `speed`, Luna hard lock retained for every delegated role, and default desired concurrency 6 with maximum-safe independent scheduling. Record `resource_policy.modifiers: ["speed"]`; never replace the Luna hard lock with the mixed-model `speed` profile. A user-specified concurrency overrides only the numeric default, not the Luna lock or speed scheduling strategy.
 
 Keep these controls independent:
 

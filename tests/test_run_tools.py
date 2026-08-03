@@ -318,6 +318,7 @@ class RunLifecycleTests(unittest.TestCase):
             plan["authorizations"]["top_level_tasks"] = False
             plan["authorizations"].pop("top_level_tasks_basis")
             plan["resource_policy"].pop("modifiers")
+            plan.pop("orchestration")
             source.write_text(json.dumps(plan), encoding="utf-8")
             result = command(
                 str(SCRIPTS / "prepare_execution_plan.py"),
@@ -335,6 +336,11 @@ class RunLifecycleTests(unittest.TestCase):
                 "allinluna-default",
             )
             self.assertEqual(prepared["resource_policy"]["modifiers"], [])
+            self.assertEqual(prepared["orchestration"]["root_role"], "coordinator")
+            self.assertEqual(
+                prepared["orchestration"]["root_product_implementation"],
+                "forbidden",
+            )
 
     def test_execution_revision_refuses_source_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

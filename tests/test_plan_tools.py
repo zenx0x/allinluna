@@ -63,7 +63,16 @@ class PlanValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("top_level_tasks=true" in error for error in result["errors"]))
 
-    def test_all_luna_speed_requires_composed_policy(self) -> None:
+    def test_root_coordinator_topology_is_mandatory(self) -> None:
+        plan = deepcopy(self.example)
+        plan["orchestration"]["root_product_implementation"] = "allowed"
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(
+            any("root_product_implementation" in error for error in result["errors"])
+        )
+
+    def test_all_luna_speed_defaults_can_be_user_overridden(self) -> None:
         plan = deepcopy(self.example)
         plan["resource_policy"].update(
             {
@@ -74,26 +83,19 @@ class PlanValidationTests(unittest.TestCase):
         )
         plan["resource_policy"]["concurrency"]["desired"] = 6
         self.assertTrue(validate(plan)["valid"])
-        plan["resource_policy"]["concurrency"]["desired"] = 4
-        self.assertFalse(validate(plan)["valid"])
+        plan["resource_policy"]["concurrency"]["desired"] = 12
+        result = validate(plan)
+        self.assertTrue(result["valid"], result)
+        self.assertTrue(any("overrides" in warning for warning in result["warnings"]))
 
-    def test_profile_concurrency_cannot_collapse_to_one(self) -> None:
+    def test_profile_concurrency_is_a_default_not_a_fixed_limit(self) -> None:
         plan = deepcopy(self.example)
         plan["resource_policy"]["concurrency"]["desired"] = 1
         result = validate(plan)
-        self.assertFalse(result["valid"])
-        self.assertTrue(
-            any("dependencies and Git readiness cap runtime concurrency" in error for error in result["errors"])
-        )
+        self.assertTrue(result["valid"], result)
+        self.assertTrue(any("overrides" in warning for warning in result["warnings"]))
 
-        plan["resource_policy"].update(
-            {
-                "profile": "all-luna",
-                "hard_model_lock": "luna",
-                "modifiers": [],
-            }
-        )
-        plan["resource_policy"]["concurrency"]["desired"] = 4
+        plan["resource_policy"]["concurrency"]["desired"] = 24
         self.assertTrue(validate(plan)["valid"])
 
     def test_luna_profile_requires_hard_lock(self) -> None:

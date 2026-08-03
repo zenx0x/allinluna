@@ -13,6 +13,7 @@
     "completion_standard",
     "repository",
     "authorizations",
+    "orchestration",
     "resource_policy",
     "tasks",
     "milestones",
@@ -80,6 +81,17 @@
         "destructive_operations": { "type": "boolean" },
         "live_external_mutation": { "type": "boolean" },
         "publication": { "type": "boolean" }
+      }
+    },
+    "orchestration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_role", "root_product_implementation", "owner_delegation", "owner_subagents"],
+      "properties": {
+        "root_role": { "const": "coordinator" },
+        "root_product_implementation": { "const": "forbidden" },
+        "owner_delegation": { "const": "top-level-task" },
+        "owner_subagents": { "const": "allowed-bounded" }
       }
     },
     "resource_policy": { "$ref": "#/$defs/resourcePolicy" },

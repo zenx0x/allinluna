@@ -12,6 +12,14 @@ from typing import Any
 
 
 PROFILES = {"premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"}
+PROFILE_CONCURRENCY = {
+    "premium": 4,
+    "balanced": 3,
+    "economy": 2,
+    "speed": 6,
+    "all-luna": 4,
+    "mad-luna": 8,
+}
 RESOURCE_CLASSES = {
     "authority",
     "architecture",
@@ -188,6 +196,13 @@ def validate(data: Any) -> dict[str, Any]:
     concurrency = policy.get("concurrency")
     if not isinstance(concurrency, dict) or not isinstance(concurrency.get("desired"), int) or concurrency.get("desired", 0) < 1:
         errors.append("resource_policy.concurrency.desired must be a positive integer")
+    elif profile in PROFILE_CONCURRENCY and "speed" not in (modifiers or []):
+        expected = PROFILE_CONCURRENCY[profile]
+        if concurrency.get("desired") != expected:
+            errors.append(
+                f"{profile} requires resource_policy.concurrency.desired={expected}; "
+                "dependencies and Git readiness cap runtime concurrency, not the plan target"
+            )
     if policy.get("unavailable_action") == "fallback-list" and not policy.get("fallback_models"):
         errors.append("fallback-list policy requires fallback_models")
     hard_lock = policy.get("hard_model_lock")

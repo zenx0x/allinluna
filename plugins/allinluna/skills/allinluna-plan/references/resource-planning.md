@@ -63,3 +63,5 @@ The effective concurrency is the minimum of:
 - user budget cap.
 
 More agents do not help tightly coupled work. Plan those steps sequentially or give shared files to integration.
+
+Do not encode current dependency readiness as desired concurrency. Desired concurrency remains the selected profile target; the runtime effective value is capped independently. Empty or non-Git projects first receive a coordinator Git-bootstrap dependency and then use top-level owner tasks.

@@ -18,6 +18,8 @@ Tell the user this skill is controlling execution and name the selected resource
 
 If no executable plan exists, use `$allinluna-plan` first. Do not repeatedly replan a plan whose assumptions still hold.
 
+After plan validation, remain the root coordinator. Do not start implementing product files in the current task. Initialize run state, complete or decline the Git-bootstrap decision, then create the first dependency-ready top-level owner task even when only one owner is ready. Continue dispatching newly ready owners as dependencies clear; a sequential dependency graph still uses separate top-level owners managed by the coordinator.
+
 When the user asks All in Luna to execute a previously `plan-only` plan, do not run that stale snapshot and do not mutate it in place. Create a validated execution revision with `scripts/prepare_execution_plan.py`. The revision always sets `top_level_tasks=true`. “Do not create a Goal” independently keeps `goal_creation=false`.
 
 ```bash
@@ -63,6 +65,8 @@ On Codex App hosts, discover top-level capability before inspecting subagents:
 Require Git-backed isolation for parallel top-level implementation owners. Run `scripts/inspect_git_readiness.py PROJECT_ROOT --pretty` first. If Git is missing, ask once for permission to install Git with the host's supported package manager. If the directory is not a repository or has no commit, ask in the same request for permission to initialize it, preserve the existing files, create an initial baseline commit, and enable worktrees. After authorization, perform the setup, re-run readiness inspection, then dispatch project-scoped worktree tasks. Never install software, initialize Git, configure identity, or commit without that authorization.
 
 If the user declines Git setup, keep the plan's `top_level_tasks=true` invariant but record actual delegation as `subagent` when available, otherwise `sequential`, with fallback reason `user-declined-git-bootstrap`. The refusal is approval for this ordinary fallback only; it does not authorize other model-family fallbacks, destructive actions, publication, or live mutation. Do not retry invalid worktree parameters or claim top-level tasks were created.
+
+Never use “empty project”, “non-Git”, “only one task is ready”, “core and GUI have dependencies”, or “no Git authorization yet” to begin current-thread implementation. The first three require coordinator-managed top-level owners; missing Git authorization requires the Git question first.
 
 Do not infer that Luna is unavailable from a subagent-only model list. When an older plan says false, create the execution revision above and set it true. Never choose subagents merely because the stale plan says false. “Do not create a Goal” controls only Goal creation and does not deny top-level tasks.
 

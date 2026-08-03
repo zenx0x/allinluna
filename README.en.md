@@ -53,7 +53,9 @@ All in Luna **does not default to completing everything sequentially inside the 
 2. creates multiple user-visible top-level Codex tasks for those lanes, visible in the Codex sidebar;
 3. keeps the root coordinator focused on dependencies, waiting, defect return, phase integration, and acceptance;
 4. lets every top-level owner create bounded internal subagents when useful; and
-5. uses sequential execution only when the work is small, tightly coupled, or cannot be separated safely by writable ownership.
+5. serializes one or more top-level owners when work is small, tightly coupled, or cannot be parallelized safely.
+
+“Sequential” here means dependencies between top-level owners, not product implementation by the root coordinator. Even when only one owner is currently ready, the coordinator creates that top-level task, waits, and dispatches the next owner afterward. A `balanced` plan always keeps desired concurrency at 3; current readiness or missing Git setup cannot rewrite it to 1.
 
 Desired concurrency by profile is: `balanced` 3, `premium` 4, `economy` 2, `speed` 6, `all-luna` 4, and `mad-luna` 8. Actual concurrency is limited by the host, dependencies, and ownership safety. All in Luna does not create a top-level task for every micro-fix merely to reach a number.
 

@@ -21,6 +21,13 @@
     "must_not": ["invent repository evidence", "claim tests already exist"]
   },
   {
+    "id": "plan-greenfield-coordinator-topology",
+    "skill": "allinluna-plan",
+    "prompt": "Use All in Luna to plan and build a new application in this empty non-Git directory with balanced resources.",
+    "must": ["top_level_tasks true", "balanced desired concurrency 3", "T0 Git bootstrap", "root coordinator", "top-level implementation owners"],
+    "must_not": ["concurrency 1", "current-thread implementation", "treat non-Git as sequential topology", "wait for repeated top-level authorization"]
+  },
+  {
     "id": "plan-parallel-ownership",
     "skill": "allinluna-plan",
     "prompt": "Find the safe parallel lanes in this migration.",
@@ -68,6 +75,13 @@
     "prompt": "Run this non-Git project with All in Luna.",
     "must": ["inspect Git readiness", "request Git installation and repository bootstrap authorization", "continue with worktree top-level tasks after approval", "fall back to ordinary execution after refusal"],
     "must_not": ["install Git without approval", "set top_level_tasks false", "silently claim worktree creation", "silently fall back before refusal"]
+  },
+  {
+    "id": "run-sequential-dependencies-still-use-top-level-owners",
+    "skill": "allinluna-run",
+    "prompt": "The GUI depends on the core service, so execute this All in Luna plan.",
+    "must": ["remain root coordinator", "dispatch the first ready top-level owner", "wait for dependency", "dispatch the next top-level owner"],
+    "must_not": ["implement product files in the coordinator", "call the plan single-threaded", "collapse desired concurrency", "replace owners with the current task"]
   },
   {
     "id": "run-tier-honesty",

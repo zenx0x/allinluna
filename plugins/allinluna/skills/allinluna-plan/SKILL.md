@@ -62,6 +62,10 @@ Track Goal and task authorization independently. “Do not create a Goal” sets
 
 Parallelize only work that is independent in both dependencies and writable file ownership. A task with shared files must depend on the owning implementation or be assigned to the integration lane.
 
+Keep the selected profile's desired concurrency in the plan: premium 4, balanced 3, economy 2, speed 6, all-luna 4, and mad-luna 8. Never lower it because the directory is empty, non-Git, currently has only one dependency-ready task, or the host cap is unknown. Those constraints reduce effective runtime concurrency only. `all-luna + speed` uses desired 6.
+
+For a greenfield or non-Git root, add an initial coordinator-owned `T0-git-bootstrap` dependency that checks Git readiness and requests the combined Git installation/repository initialization/baseline commit authorization. Subsequent implementation owners remain top-level tasks. If Git preparation is declined at runtime, use the documented ordinary fallback without rewriting the plan topology.
+
 Avoid a separate task for every registry update, micro-fix, plan restatement, promotion, or repeated audit. Prefer:
 
 ```text
@@ -136,5 +140,7 @@ See [references/plan-format.md](references/plan-format.md) for field semantics.
 - Do not call a smoke test, scaffold, first slice, or partial lane complete.
 - Do not fabricate model availability, token use, elapsed cost, or expected dollars.
 - Do not require multi-agent work when the host lacks it; record the fallback topology.
+- Do not make the root coordinator the implementation owner after plan validation; it must initialize state, perform authorized Git bootstrap, dispatch dependency-ready top-level owners, monitor them, integrate, and accept.
+- Do not call a non-Git directory, empty greenfield, shared-file dependency, or a single ready task a reason for `concurrency: 1` or current-thread implementation.
 - Do not authorize destructive or live external actions through the plan itself.
 - Do not use economy mode to reduce requirements.

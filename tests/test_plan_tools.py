@@ -77,12 +77,32 @@ class PlanValidationTests(unittest.TestCase):
         plan["resource_policy"]["concurrency"]["desired"] = 4
         self.assertFalse(validate(plan)["valid"])
 
+    def test_profile_concurrency_cannot_collapse_to_one(self) -> None:
+        plan = deepcopy(self.example)
+        plan["resource_policy"]["concurrency"]["desired"] = 1
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(
+            any("dependencies and Git readiness cap runtime concurrency" in error for error in result["errors"])
+        )
+
+        plan["resource_policy"].update(
+            {
+                "profile": "all-luna",
+                "hard_model_lock": "luna",
+                "modifiers": [],
+            }
+        )
+        plan["resource_policy"]["concurrency"]["desired"] = 4
+        self.assertTrue(validate(plan)["valid"])
+
     def test_luna_profile_requires_hard_lock(self) -> None:
         plan = deepcopy(self.example)
         plan["resource_policy"]["profile"] = "mad-luna"
         result = validate(plan)
         self.assertFalse(result["valid"])
         plan["resource_policy"]["hard_model_lock"] = "luna"
+        plan["resource_policy"]["concurrency"]["desired"] = 8
         self.assertTrue(validate(plan)["valid"])
 
 

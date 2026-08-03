@@ -224,9 +224,39 @@ class RunLifecycleTests(unittest.TestCase):
                 str(RUN / "assets" / "runtime-catalog.example.json"),
             )
             state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
-            self.assertEqual(state["capabilities"]["requested_delegation"], "top-level-task")
+            self.assertEqual(state["capabilities"]["requested_delegation"], "auto")
+            self.assertEqual(state["capabilities"]["actual_delegation"], "top-level-task")
             self.assertEqual(state["capabilities"]["host_concurrency"], 4)
             self.assertFalse(state["goal_authorized"])
+
+    def test_auto_runtime_falls_back_without_reconfirmation_when_top_level_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog = json.loads(
+                (RUN / "assets" / "runtime-catalog.example.json").read_text(encoding="utf-8")
+            )
+            catalog["surfaces"]["top-level-task"]["available"] = False
+            catalog_path = temp / "runtime-catalog.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            run = self.init(
+                temp / "state",
+                "balanced",
+                EXAMPLE,
+                "--catalog",
+                str(catalog_path),
+            )
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["capabilities"]["requested_delegation"], "auto")
+            self.assertEqual(state["capabilities"]["actual_delegation"], "subagent")
+            self.assertEqual(
+                state["capabilities"]["fallback_reason"],
+                "top-level-tool-unavailable",
+            )
+            event_payload = json.loads((run / "events.jsonl").read_text(encoding="utf-8"))
+            self.assertEqual(
+                event_payload["evidence"]["delegation_fallback_reason"],
+                "top-level-tool-unavailable",
+            )
 
     def test_plan_with_false_top_level_authorization_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

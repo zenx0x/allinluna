@@ -35,11 +35,12 @@
     "goal_authorized": { "type": "boolean" },
     "capabilities": {
       "type": "object",
-      "required": ["requested_delegation", "actual_delegation", "host_concurrency"],
+      "required": ["requested_delegation", "actual_delegation", "host_concurrency", "fallback_reason"],
       "properties": {
         "requested_delegation": { "enum": ["auto", "top-level-task", "subagent", "sequential"] },
         "actual_delegation": { "enum": ["unavailable", "top-level-task", "subagent", "sequential"] },
-        "host_concurrency": { "type": ["integer", "string"] }
+        "host_concurrency": { "type": ["integer", "string"] },
+        "fallback_reason": { "type": ["string", "null"] }
       }
     },
     "resource_policy": { "type": "object" },

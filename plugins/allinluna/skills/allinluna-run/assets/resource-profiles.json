@@ -7,7 +7,7 @@
       "hard_model_lock": null,
       "unavailable_action": "ask",
       "fallback_models": [],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 4, "strategy": "bounded-independent" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {
@@ -26,7 +26,7 @@
       "hard_model_lock": null,
       "unavailable_action": "ask",
       "fallback_models": [],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 3, "strategy": "bounded-independent" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {
@@ -46,7 +46,7 @@
       "preferred_model_family": "luna",
       "unavailable_action": "ask",
       "fallback_models": [],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 2, "strategy": "low-concurrency" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {
@@ -65,7 +65,7 @@
       "hard_model_lock": null,
       "unavailable_action": "fallback-list",
       "fallback_models": ["tier:standard", "tier:fast"],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 6, "strategy": "maximum-safe" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {
@@ -84,7 +84,7 @@
       "hard_model_lock": { "family": "luna", "match": "case-insensitive-substring" },
       "unavailable_action": "pause",
       "fallback_models": [],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 4, "strategy": "bounded-independent" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {
@@ -103,7 +103,7 @@
       "hard_model_lock": { "family": "luna", "match": "case-insensitive-substring" },
       "unavailable_action": "pause",
       "fallback_models": [],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 8, "strategy": "maximum-safe" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {
@@ -122,7 +122,7 @@
       "hard_model_lock": null,
       "unavailable_action": "ask",
       "fallback_models": [],
-      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": true, "owner_subagents": "allowed-bounded" },
+      "delegation": { "root_preferred": "top-level-task", "root_unauthorized_action": "ask", "root_fallback_order": ["subagent", "sequential"], "root_fallback_requires_user_approval": false, "owner_subagents": "allowed-bounded" },
       "concurrency": { "desired": 1, "strategy": "user-defined" },
       "budget": { "metric": "none", "soft_limit": null, "hard_limit": null, "on_soft_limit": "reassess", "on_hard_limit": "pause" },
       "roles": {}

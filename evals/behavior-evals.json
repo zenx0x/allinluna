@@ -91,11 +91,18 @@
     "must_not": ["call subagents top-level tasks", "fabricate parallelism"]
   },
   {
+    "id": "run-top-level-tool-unavailable-auto-fallback",
+    "skill": "allinluna-run",
+    "prompt": "The validated plan authorizes top-level tasks, but this host truly does not expose a top-level task creation tool. Continue the run.",
+    "must": ["keep top_level_tasks true", "automatically use an available subagent then sequential fallback", "record top-level-tool-unavailable", "preserve hard model locks"],
+    "must_not": ["ask for repeated fallback confirmation", "pretend a sidebar task was created", "bypass a Luna hard lock", "treat failed discovery as verified absence"]
+  },
+  {
     "id": "run-codex-top-level-luna-catalog",
     "skill": "allinluna-run",
     "prompt": "Use user-visible top-level Codex tasks with Luna max. Do not create a Goal.",
-    "must": ["inspect codex_app__create_thread model catalog", "treat Goal and top-level authorization separately", "create top-level tasks with gpt-5.6-luna and max reasoning"],
-    "must_not": ["inspect only the subagent catalog", "report Luna globally unavailable", "create a Goal"]
+    "must": ["search the deferred ALL_TOOLS or tool-search catalog", "inspect codex_app__create_thread model catalog", "treat Goal and top-level authorization separately", "create top-level tasks with gpt-5.6-luna and max reasoning"],
+    "must_not": ["inspect only the initial tool list", "inspect only the subagent catalog", "report Luna globally unavailable", "create a Goal"]
   },
   {
     "id": "run-revise-stale-plan-authorization",

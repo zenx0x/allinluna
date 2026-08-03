@@ -41,7 +41,11 @@ Model, reasoning effort, delegation tier, concurrency, and budget are separate c
 
 By default, the root coordinator dispatches independent substantive owner lanes as user-visible top-level Codex tasks. Each top-level owner may create bounded internal subagents under its own ownership and model policy. Root-level subagents never silently replace planned top-level owners.
 
+Only after the host tool catalog has been fully checked and the top-level task creation tool is genuinely absent does All in Luna automatically fall back to a root subagent and then sequential execution; it does not ask the user to reconfirm. The plan keeps `top_level_tasks=true`, while run state records the actual tier and `top-level-tool-unavailable`. If the fallback surface cannot satisfy a hard lock such as Luna-only, that lane pauses instead of pretending compliance or switching models.
+
 On Codex App, All in Luna reads the user-visible top-level task catalog separately from the subagent catalog. A Luna model exposed by `create_thread` is therefore available for top-level execution even if subagents expose only Sol/Terra. Goal permission and top-level-task permission are independent.
+
+Codex App commonly exposes `create_thread` as a deferred tool, so absence from the short initial tool list does not mean it is unavailable. All in Luna must search the host's full/deferred tool catalog (for example `functions.exec`'s `ALL_TOOLS` or a tool-search facility) and create top-level tasks when found. Reporting the tool unavailable without this discovery step is an execution defect.
 
 If a user later asks to execute an older plan-only file, All in Luna creates a separate validated execute-ready revision. Current explicit task authorization is recorded in that revision; the historical plan is not mutated, and a stale `top_level_tasks=false` never causes a silent subagent fallback.
 
@@ -113,7 +117,7 @@ and continue until the plan's completion standard is met.
 - Full requested scope remains the completion standard; a first vertical slice is only a progress checkpoint.
 - Goal creation is opt-in, never inferred.
 - Every All in Luna plan authorizes user-visible top-level tasks; denying Goal creation never changes that field.
-- When worktrees are unavailable or Git preparation is declined, only actual delegation falls back; the plan field never returns to `false`.
+- When the top-level tool is genuinely absent, worktrees are unavailable, or Git preparation is declined, only actual delegation falls back; the plan field never returns to `false`, and verified tool absence does not require another confirmation.
 - Each top-level owner may use bounded internal subagents; the root coordinator does not substitute subagents for owner lanes.
 - Project instructions and dirty worktrees are inspected and preserved.
 - Independent writers receive explicit ownership; defects return to the owning task.

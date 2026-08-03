@@ -34,7 +34,7 @@ class ResourceProfileTests(unittest.TestCase):
             with self.subTest(profile=name):
                 delegation = profile["delegation"]
                 self.assertEqual(delegation["root_preferred"], "top-level-task")
-                self.assertTrue(delegation["root_fallback_requires_user_approval"])
+                self.assertFalse(delegation["root_fallback_requires_user_approval"])
                 self.assertEqual(delegation["owner_subagents"], "allowed-bounded")
 
     def test_mad_luna_is_hard_locked_and_max_reasoning(self) -> None:

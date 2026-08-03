@@ -41,7 +41,11 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 
 默认情况下，根协调任务会把独立且有实质交付的负责人线路派发为用户可见的顶层 Codex 任务。每个顶层负责人可以在自己的所有权和模型策略内使用有界 subagents；根协调任务不会静默地用 subagent 替代原定顶层负责人。
 
+只有在完整检查宿主工具目录后确认“创建顶层任务”的工具确实没有暴露时，All in Luna 才会自动依次回退到根级 subagent、当前任务顺序执行；此时不再要求用户重复确认。计划仍保持 `top_level_tasks=true`，运行状态会记录真实执行层级和 `top-level-tool-unavailable`。如果回退层级无法满足 Luna-only 等硬模型锁，则暂停该线路，而不是冒充满足或更换模型。
+
 在 Codex App 中，All in Luna 会分别读取用户可见顶层任务与 subagent 的模型目录。因此，即使 subagent 只暴露 Sol/Terra，只要 `create_thread` 暴露 Luna，Luna 仍可用于顶层任务。Goal 权限与顶层任务权限彼此独立。
+
+Codex App 的 `create_thread` 通常属于延迟加载工具，未出现在最初的简短工具列表中不代表不可用。All in Luna 必须先搜索宿主的完整/延迟工具目录（例如 `functions.exec` 的 `ALL_TOOLS` 或工具搜索接口），找到后直接创建顶层任务。没有完成这一步就报告“顶层任务工具不可用”，属于执行错误。
 
 如果用户之后要求执行一份较早生成的 plan-only 文件，All in Luna 会创建独立且经过验证的 execute-ready 修订版。当前明确授予的顶层任务权限会写入新修订版；历史计划不会被修改，旧的 `top_level_tasks=false` 也不会再触发静默 subagent 回退。
 
@@ -109,7 +113,7 @@ codex plugin marketplace add zenx0x/allinluna
 - 用户要求的完整范围始终是完成标准；第一个纵向切片只是进度检查点。
 - Goal 必须由用户明确选择，不能因任务规模较大而自动创建。
 - 所有 All in Luna 计划一律授权用户可见顶层任务；禁止 Goal 不会改变这一字段。
-- 实际无法使用 worktree 或用户拒绝 Git 准备时，只降级运行层级，不把计划字段改回 `false`。
+- 顶层任务工具确实未暴露、实际无法使用 worktree 或用户拒绝 Git 准备时，只降级运行层级，不把计划字段改回 `false`；工具缺失回退无需再次确认。
 - 每个顶层负责人可以使用有界 subagents；根协调任务不得用 subagent 替代负责人线路。
 - 项目指令和脏工作区会被检查并保留。
 - 独立写入者获得明确的文件所有权；发现缺陷后返回原实施任务修复。

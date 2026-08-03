@@ -49,7 +49,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--allow-delegation-fallback",
         action="store_true",
-        help="Allow an explicitly user-approved fallback from the profile's top-level-task default.",
+        help=(
+            "Compatibility override for custom profiles that still require explicit fallback "
+            "approval. Built-in profiles automatically fall back when the host truly lacks "
+            "top-level task capability."
+        ),
     )
     parser.add_argument(
         "--runtime-tier",
@@ -79,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         profiles = read_json(args.profiles)
         catalog = read_json(args.catalog) if args.catalog else None
         runtime_tier = args.runtime_tier
+        delegation_fallback_reason = None
         if runtime_tier == "auto" and catalog is not None:
             profile = profiles.get("profiles", {}).get(profile_name, {})
             delegation_policy = profile.get("delegation", {})
@@ -91,7 +96,10 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 if catalog_surface(catalog, "top-level-task")["available"]:
                     runtime_tier = "top-level-task"
-                elif not args.allow_delegation_fallback:
+                elif (
+                    delegation_policy.get("root_fallback_requires_user_approval", False)
+                    and not args.allow_delegation_fallback
+                ):
                     raise ValueError(
                         "top-level-task is unavailable; delegation fallback requires explicit "
                         "user approval via --allow-delegation-fallback"
@@ -105,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                         "sequential",
                     )
+                    delegation_fallback_reason = "top-level-tool-unavailable"
         resolution = resolve(
             profiles,
             profile_name,
@@ -138,8 +147,13 @@ def main(argv: list[str] | None = None) -> int:
             goal_authorized=args.goal_authorized,
             runtime_tier=runtime_tier,
         )
+        state["capabilities"]["requested_delegation"] = args.runtime_tier
+        state["capabilities"]["actual_delegation"] = (
+            runtime_tier if runtime_tier != "auto" else "unavailable"
+        )
         if catalog is not None:
             state["capabilities"]["host_concurrency"] = resolution["concurrency"]["host_cap"]
+        state["capabilities"]["fallback_reason"] = delegation_fallback_reason
         atomic_write_json(run_dir / "plan.json", plan)
         atomic_write_json(run_dir / "run-state.json", state)
         append_event(
@@ -155,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
                     "profile": profile_name,
                     "runtime_tier": runtime_tier,
                     "runtime_tier_requested": args.runtime_tier,
+                    "delegation_fallback_reason": delegation_fallback_reason,
                     "catalog": str(args.catalog.resolve()) if args.catalog else None,
                     "resource_warnings": resolution["warnings"],
                 },
@@ -168,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             "ready_tasks": [task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"],
             "profile": profile_name,
             "runtime_tier": runtime_tier,
+            "delegation_fallback_reason": delegation_fallback_reason,
             "warnings": resolution["warnings"],
         }
     except (OSError, json.JSONDecodeError, ValueError) as exc:

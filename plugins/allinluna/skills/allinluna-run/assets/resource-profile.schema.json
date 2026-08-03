@@ -47,7 +47,7 @@
               "items": { "enum": ["subagent", "sequential"] },
               "uniqueItems": true
             },
-            "root_fallback_requires_user_approval": { "const": true },
+            "root_fallback_requires_user_approval": { "const": false },
             "owner_subagents": { "const": "allowed-bounded" }
           }
         },

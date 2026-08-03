@@ -56,11 +56,15 @@ Record requested and actual tier. Never represent subagents as top-level tasks o
 
 On Codex App hosts, discover top-level capability before inspecting subagents:
 
-1. locate `codex_app__create_thread` and `codex_app__list_projects` in the callable tool catalog;
-2. read the model and reasoning combinations declared by `codex_app__create_thread` itself;
-3. treat that list as the `top-level-task` model catalog, even when the subagent catalog exposes different models;
-4. create a delegation-scoped runtime catalog like `assets/runtime-catalog.example.json` outside the target repository;
-5. resolve the requested profile against the intended delegation surface.
+1. do not rely on the initially rendered tool list: when `functions.exec` is present, search its deferred `ALL_TOOLS` catalog for `codex_app__create_thread` and `codex_app__list_projects`; when a tool-search capability is present, search for `create_thread`, `list_projects`, and `list_threads` there;
+2. load/call the discovered tools and treat a successful schema discovery as capability availability; the tool does not need to have been printed in the original prompt;
+3. read the model and reasoning combinations declared by `codex_app__create_thread` itself;
+4. treat that list as the `top-level-task` model catalog, even when the subagent catalog exposes different models;
+5. call `codex_app__list_projects` before creating project-scoped worktree tasks;
+6. create a delegation-scoped runtime catalog like `assets/runtime-catalog.example.json` outside the target repository;
+7. resolve the requested profile against the intended delegation surface.
+
+In the official Codex desktop app, `codex_app__create_thread` is a deferred app tool and should normally be discoverable even when omitted from the short initial tool list. Saying “top-level tasks are unavailable” without performing the deferred search above is a workflow defect. If discovery returns its declaration, use it; do not offer or select fallback merely because direct invocation was not initially visible.
 
 Require Git-backed isolation for parallel top-level implementation owners. Run `scripts/inspect_git_readiness.py PROJECT_ROOT --pretty` first. If Git is missing, ask once for permission to install Git with the host's supported package manager. If the directory is not a repository or has no commit, ask in the same request for permission to initialize it, preserve the existing files, create an initial baseline commit, and enable worktrees. After authorization, perform the setup, re-run readiness inspection, then dispatch project-scoped worktree tasks. Never install software, initialize Git, configure identity, or commit without that authorization.
 
@@ -88,7 +92,7 @@ python scripts/init_run.py PLAN.json --profile balanced --catalog RUNTIME_CATALO
 
 Pass `--runtime-tier top-level-task` when the user authorized user-visible tasks. If the user requested a specific model such as Luna, pass the exact supported model and reasoning to `codex_app__create_thread`; do not ask the user to select it manually when the tool can set it.
 
-If the preferred top-level surface is unavailable, pause and ask before passing `--allow-delegation-fallback`. Availability failure alone is not permission for the root coordinator to replace top-level owners with subagents. This does not restrict bounded subagents created inside an already assigned top-level owner.
+Before declaring the preferred top-level surface unavailable, exhaust the host's callable-tool discovery and distinguish an absent tool from a failed invocation or invalid worktree argument. When the tool is genuinely not exposed, automatically fall back to an available root `subagent`, then to `sequential`; do not ask the user to repeat authorization. Keep the plan's `top_level_tasks=true`, record actual delegation and `fallback_reason=top-level-tool-unavailable`, and never claim that the fallback created sidebar-visible tasks. If the fallback surface cannot satisfy a hard model lock such as Luna-only, pause that lane instead of bypassing the lock. `--allow-delegation-fallback` remains only as a compatibility override for custom profiles that explicitly retain approval-required fallback.
 
 Pass `--goal-authorized` only when the user explicitly requested a Goal. Goal authorization in the plan and command must both be true.
 

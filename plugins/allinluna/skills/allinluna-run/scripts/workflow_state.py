@@ -206,6 +206,7 @@ def build_initial_state(
             "requested_delegation": runtime_tier,
             "actual_delegation": "unavailable",
             "host_concurrency": "unavailable",
+            "fallback_reason": None,
         },
         "resource_policy": deepcopy(policy),
         "usage": {

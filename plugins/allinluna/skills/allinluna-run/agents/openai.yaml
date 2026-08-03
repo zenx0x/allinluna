@@ -1,4 +1,4 @@
 interface:
-  display_name: "All in Luna — Run"
-  short_description: "Run through top-level Codex task owners"
-  default_prompt: "Use $allinluna-run to execute completely by dispatching independent owner lanes as user-visible top-level Codex tasks; each owner may use bounded internal subagents, but the root must not replace owner tasks with subagents and must not create a Goal."
+  display_name: "All in Luna — 执行"
+  short_description: "通过多个侧边栏顶层任务并行实施、集成并验收完整计划"
+  default_prompt: "使用 $allinluna-run 完整执行计划，默认将独立主体线路派发为多个侧边栏可见的顶层 Codex 任务，允许各负责人使用有界 subagents，根协调不得用 subagent 替代顶层负责人，且不创建 Goal。"

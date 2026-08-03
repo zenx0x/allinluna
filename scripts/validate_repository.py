@@ -50,7 +50,7 @@ def validate() -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     required = [
         ROOT / "README.md",
-        ROOT / "README.zh-CN.md",
+        ROOT / "README.en.md",
         ROOT / "LICENSE",
         ROOT / "CONTRIBUTING.md",
         ROOT / "CONTRIBUTING.zh-CN.md",
@@ -64,7 +64,7 @@ def validate() -> tuple[list[str], list[str]]:
             errors.append(f"missing required file: {path.relative_to(ROOT)}")
 
     language_pairs = [
-        (ROOT / "README.md", ROOT / "README.zh-CN.md"),
+        (ROOT / "README.en.md", ROOT / "README.md"),
         (ROOT / "CONTRIBUTING.md", ROOT / "CONTRIBUTING.zh-CN.md"),
         (ROOT / "SECURITY.md", ROOT / "SECURITY.zh-CN.md"),
     ]
@@ -74,8 +74,8 @@ def validate() -> tuple[list[str], list[str]]:
                 errors.append(f"{english.name} does not link to {chinese.name}")
             if english.name not in chinese.read_text(encoding="utf-8"):
                 errors.append(f"{chinese.name} does not link to {english.name}")
-    readme_en = (ROOT / "README.md").read_text(encoding="utf-8")
-    readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    readme_en = (ROOT / "README.en.md").read_text(encoding="utf-8")
+    readme_zh = (ROOT / "README.md").read_text(encoding="utf-8")
     if readme_en.count("\n## ") != readme_zh.count("\n## "):
         errors.append("English and Chinese README section counts differ")
     for mode in ("premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"):

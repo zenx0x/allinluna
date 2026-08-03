@@ -1,4 +1,4 @@
 interface:
-  display_name: "All in Luna — Plan"
-  short_description: "Plan complete top-level owner workflows"
-  default_prompt: "Use $allinluna-plan to produce a complete plan whose independent owner lanes are user-visible top-level Codex tasks; allow each owner bounded internal subagents and do not create a Goal."
+  display_name: "All in Luna — 规划"
+  short_description: "规划完整开发流程，并默认拆分为侧边栏可见的顶层任务"
+  default_prompt: "使用 $allinluna-plan 生成完整计划，将独立主体线路规划为侧边栏可见的顶层 Codex 任务，允许各负责人使用有界 subagents，且不创建 Goal。"

@@ -17,6 +17,9 @@
 
 - Requested model: `{{requested_model}}`
 - Requested reasoning: `{{requested_reasoning}}`
+- Validation level: `{{validation_level}}`
+- Run stop boundary: `{{stop_boundary}}`
+- Delegation: top-level owner; bounded owner subagents are allowed inside this lane
 - Fallback/unavailable policy: `{{fallback_policy}}`
 - Actual model and reasoning must be reported from host evidence or as `unavailable`.
 

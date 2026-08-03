@@ -22,6 +22,9 @@ def render_markdown(state: dict) -> str:
         f"- Requested delegation: `{state['capabilities']['requested_delegation']}`",
         f"- Actual delegation: `{state['capabilities']['actual_delegation']}`",
         f"- Host concurrency: `{state['capabilities']['host_concurrency']}`",
+        f"- Desired concurrency: `{state['resource_policy']['concurrency']['desired']}`",
+        f"- Plan revision: `{state.get('coordination', {}).get('plan_revision', 0)}`",
+        f"- Stop boundary: `{state.get('coordination', {}).get('stop_boundary')}`",
         f"- Budget: `{state['resource_policy'].get('budget', {}).get('metric', 'none')}`",
         "- Usage: "
         + ", ".join(f"{name}={value}" for name, value in state["usage"].items()),
@@ -54,6 +57,15 @@ def render_markdown(state: dict) -> str:
     if blockers:
         lines.extend(["", "## Blockers", ""])
         lines.extend(f"- `{task_id}`: {blocker}" for task_id, blocker in blockers)
+    open_defects = [
+        defect for defect in state.get("defects", {}).values() if defect.get("status") != "resolved"
+    ]
+    if open_defects:
+        lines.extend(["", "## Open defects", ""])
+        lines.extend(
+            f"- `{item['id']}` → `{item['owner_task']}`: {item['summary']}"
+            for item in open_defects
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -78,6 +90,13 @@ def main(argv: list[str] | None = None) -> int:
                     "task_counts": dict(counts),
                     "ready_tasks": [
                         task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"
+                    ],
+                    "desired_concurrency": state["resource_policy"]["concurrency"]["desired"],
+                    "plan_revision": state.get("coordination", {}).get("plan_revision", 0),
+                    "open_defects": [
+                        defect_id
+                        for defect_id, defect in state.get("defects", {}).items()
+                        if defect.get("status") != "resolved"
                     ],
                 },
                 ensure_ascii=False,

@@ -107,6 +107,24 @@ class ResourceProfileTests(unittest.TestCase):
             )
         )
 
+    def test_ultra_reasoning_and_score_based_selection(self) -> None:
+        catalog = json.loads(json.dumps(self.catalog))
+        sol = catalog["surfaces"]["top-level-task"]["models"][1]
+        self.assertIn("ultra", sol["reasoning"])
+        result = resolve(
+            self.profiles,
+            "premium",
+            role_overrides={
+                "authority": {"model_request": "family:sol", "reasoning": "ultra"}
+            },
+            catalog=catalog,
+            delegation="top-level-task",
+        )
+        self.assertTrue(result["valid"], result)
+        authority = result["resolved_roles"]["authority"]
+        self.assertEqual(authority["actual_model"], "gpt-5.6-sol")
+        self.assertEqual(authority["actual_reasoning"], "ultra")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,7 @@ The root coordinator owns:
 - one phase integration and one milestone acceptance;
 - persistent run state and final handoff.
 
-The coordinator should not absorb the主体 implementation of a large independent lane merely to save a dispatch. It may implement tightly coupled work directly when that is the smallest correct topology.
+The coordinator never absorbs substantive product implementation merely to save a dispatch. Tight coupling produces dependency-ordered top-level owners; it does not authorize the root to become an owner. Root implementation occurs only as an honestly recorded runtime fallback after delegation capability or Git bootstrap is genuinely unavailable.
 
 ## Continuous execution
 
@@ -24,6 +24,10 @@ monitor → collect evidence → return defects → re-verify → integrate → 
 ```
 
 Do not stop because a task was created, a progress report arrived, one commit landed, or one integration passed while downstream planned work remains.
+
+`coordinator_tick.py` is the deterministic next-action source. Every successful dispatch is
+recorded immediately; every wait result is reconciled; every completion or defect is followed by
+another tick until completion, an authorized stop boundary, or a true global blocker.
 
 If one lane blocks, continue unrelated ready lanes. Pause the whole run only for an architecture-changing user choice, missing irreplaceable authority/credential, destructive action, live external mutation, or a dependency that blocks every remaining lane.
 

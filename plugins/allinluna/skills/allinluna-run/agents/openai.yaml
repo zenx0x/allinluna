@@ -1,4 +1,4 @@
 interface:
   display_name: "All in Luna — 执行"
-  short_description: "通过多个侧边栏顶层任务并行实施、集成并验收完整计划"
-  default_prompt: "使用 $allinluna-run 完整执行计划；确保 top_level_tasks=true 并派发侧边栏可见的顶层 Codex 任务，非 Git 项目先请求 Git 准备授权，负责人可使用有界 subagents，且不创建 Goal。"
+  short_description: "通过多个侧边栏可见的顶层 Codex 任务实施、集成并验收完整计划"
+  default_prompt: "使用 $allinluna-run 完整执行计划；根任务只做总协调，通过 coordinator tick 持续派发侧边栏可见的顶层 Codex 任务、等待、返修、集成和独立验收直到停止边界；确保 top_level_tasks=true，负责人可使用有界 subagents，不创建 Goal。"

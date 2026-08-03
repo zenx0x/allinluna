@@ -151,6 +151,12 @@ def main(argv: list[str] | None = None) -> int:
         state["capabilities"]["actual_delegation"] = (
             runtime_tier if runtime_tier != "auto" else "unavailable"
         )
+        for task in state["tasks"].values():
+            role = task["requested"]["role"]
+            resolved = resolution["resolved_roles"].get(role, {})
+            task["assignment"]["resolved_model"] = resolved.get("actual_model")
+            task["assignment"]["resolved_reasoning"] = resolved.get("actual_reasoning")
+            task["assignment"]["resource_resolution"] = resolved.get("resolution")
         if catalog is not None:
             state["capabilities"]["host_concurrency"] = resolution["concurrency"]["host_cap"]
         state["capabilities"]["fallback_reason"] = delegation_fallback_reason

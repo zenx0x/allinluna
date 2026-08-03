@@ -50,11 +50,16 @@ For a new idea, do not invent repository facts. Record `repository.mode = greenf
 
 ## 3. Choose scale and execution topology
 
-Use the smallest topology that can complete the full scope:
+Use the smallest owner graph that can complete the full scope while preserving the mandatory
+coordinator topology:
 
-- **Small:** current task, ordered steps, focused checks.
-- **Medium:** current coordinator plus a few independent subagents when available.
-- **Large:** independent owner lanes, one phase integration, and one independent acceptance. All in Luna plans always authorize user-facing top-level Codex tasks; root-level subagents or sequential execution are runtime fallbacks only and never change the plan authorization.
+- **Small:** root coordinator plus one top-level implementation owner, one integration owner,
+  and one independent acceptance owner; keep their briefs compact and checks proportional.
+- **Medium:** root coordinator plus a few independent top-level owners, one integration, and
+  one independent acceptance.
+- **Large:** parallel top-level owner lanes, one phase integration, and one independent
+  acceptance. Owner tasks may use bounded subagents. Root-level subagents or sequential
+  execution are runtime fallbacks only and never change plan authorization.
 
 Every All in Luna plan must set `top_level_tasks=true`. Never emit `false`, including for plan-only, non-Git, greenfield, small, tightly coupled, or single-lane work. Design independent substantive owner lanes as user-visible top-level Codex tasks and allow each owner bounded internal subagents. A tightly coupled project may produce only one top-level owner, but the authorization remains true.
 
@@ -66,7 +71,11 @@ Parallelize only work that is independent in both dependencies and writable file
 
 Use the selected profile's default desired concurrency when the user does not specify one: premium 4, balanced 3, economy 2, speed 6, all-luna 4, and mad-luna 8. These values are defaults, not fixed ceilings. If the user requests a positive concurrency value, record it directly in `resource_policy.concurrency.desired`, including values below or above the profile default. Never rewrite the desired value merely because the directory is empty, non-Git, currently has only one dependency-ready task, or the host cap is unknown; those constraints reduce effective runtime concurrency only. `all-luna + speed` defaults to 6 but also accepts an explicit user override.
 
-For a greenfield or non-Git root, add an initial coordinator-owned `T0-git-bootstrap` dependency that checks Git readiness and requests the combined Git installation/repository initialization/baseline commit authorization. Subsequent implementation owners remain top-level tasks. If Git preparation is declined at runtime, use the documented ordinary fallback without rewriting the plan topology.
+For a greenfield or non-Git root, record Git bootstrap as a pre-dispatch coordinator action,
+not as product implementation. It checks readiness and requests the combined Git installation,
+repository initialization, baseline commit, and worktree authorization. Subsequent implementation
+owners remain top-level tasks. If Git preparation is declined at runtime, use the documented
+ordinary fallback without rewriting the plan topology.
 
 Avoid a separate task for every registry update, micro-fix, plan restatement, promotion, or repeated audit. Prefer:
 
@@ -106,10 +115,16 @@ Each task must include:
 - role and resource class;
 - complete deliverables, not a sample or MVP substitute;
 - focused verification;
+- validation level: owner `focused`, integration `cross-lane`, acceptance `milestone`, or explicitly justified `full`;
 - external side effects and required authorization;
 - whether independent acceptance is required.
 
 Include the first verifiable vertical slice when useful, but label it a progress checkpoint, not scope reduction, architecture freeze, or completion.
+
+Every executable plan includes at least one phase integration task and a later independent,
+read-only acceptance task. Every implementation task must feed an integration dependency, and
+acceptance must depend on integration. Record an explicit `stop_boundary` so a coordinator knows
+what must be complete and which downstream action must not start.
 
 For large work, separate scientific/product authority decisions from mechanical engineering. Use the strongest available reasoning for irreversible semantic decisions and cost-efficient models for bounded, easily tested work.
 

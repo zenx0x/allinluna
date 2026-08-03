@@ -36,6 +36,7 @@ REQUIRED_TOP = {
     "mode",
     "objective",
     "completion_standard",
+    "stop_boundary",
     "repository",
     "authorizations",
     "orchestration",
@@ -67,6 +68,7 @@ REQUIRED_TASK = {
     "resource_class",
     "deliverables",
     "verification",
+    "validation_level",
     "external_side_effects",
     "acceptance_required",
 }
@@ -144,6 +146,9 @@ def validate(data: Any) -> dict[str, Any]:
     completion = data.get("completion_standard")
     if not isinstance(completion, list) or not completion or not all(map(nonempty_string, completion)):
         errors.append("completion_standard must contain at least one non-empty string")
+    stop_boundary = data.get("stop_boundary")
+    if stop_boundary is not None and not nonempty_string(stop_boundary):
+        errors.append("stop_boundary must be null or a non-empty string")
 
     repository = data.get("repository")
     if not isinstance(repository, dict):
@@ -277,6 +282,10 @@ def validate(data: Any) -> dict[str, Any]:
             value = task.get(field)
             if not isinstance(value, list) or not value or not all(map(nonempty_string, value)):
                 errors.append(f"{prefix}.{field} must contain non-empty strings")
+        if task.get("validation_level") not in {"focused", "cross-lane", "milestone", "full"}:
+            errors.append(f"{prefix}.validation_level is invalid")
+        if task.get("resource_class") not in {"integration", "acceptance"} and task.get("validation_level") == "full":
+            errors.append(f"{prefix} cannot run full validation outside integration/acceptance")
         if not isinstance(task.get("external_side_effects"), list):
             errors.append(f"{prefix}.external_side_effects must be an array")
         if not isinstance(task.get("acceptance_required"), bool):
@@ -336,8 +345,38 @@ def validate(data: Any) -> dict[str, Any]:
             if task_id not in tasks:
                 errors.append(f"milestone {milestone_id} unlocks missing task {task_id}")
 
-    if not any(task.get("resource_class") == "acceptance" for task in tasks.values()):
-        warnings.append("no independent acceptance task is present")
+    integration_ids = [
+        task_id for task_id, task in tasks.items() if task.get("resource_class") == "integration"
+    ]
+    acceptance_ids = [
+        task_id for task_id, task in tasks.items() if task.get("resource_class") == "acceptance"
+    ]
+    if not integration_ids:
+        errors.append("every executable All in Luna plan requires a phase integration task")
+    if not acceptance_ids:
+        errors.append("every executable All in Luna plan requires independent acceptance")
+    implementation_ids = [
+        task_id
+        for task_id, task in tasks.items()
+        if task.get("resource_class") not in {"integration", "acceptance"}
+    ]
+    for implementation_id in implementation_ids:
+        if not any(
+            implementation_id in closure.get(integration_id, set())
+            for integration_id in integration_ids
+        ):
+            errors.append(
+                f"implementation task {implementation_id} must feed a phase integration task"
+            )
+    for acceptance_id in acceptance_ids:
+        if not any(
+            integration_id in closure.get(acceptance_id, set())
+            for integration_id in integration_ids
+        ):
+            errors.append(f"acceptance task {acceptance_id} must depend on phase integration")
+        acceptance = tasks[acceptance_id]
+        if acceptance.get("ownership", {}).get("paths"):
+            errors.append(f"acceptance task {acceptance_id} must be read-only")
 
     return {
         "valid": not errors,

@@ -48,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
         if "modifiers" not in revised.get("resource_policy", {}):
             revised["resource_policy"]["modifiers"] = []
             changed.append("resource_policy.modifiers")
+        if "stop_boundary" not in revised:
+            revised["stop_boundary"] = None
+            changed.append("stop_boundary")
 
         required_orchestration = {
             "root_role": "coordinator",
@@ -58,6 +61,90 @@ def main(argv: list[str] | None = None) -> int:
         if revised.get("orchestration") != required_orchestration:
             revised["orchestration"] = required_orchestration
             changed.append("orchestration")
+        for task in revised.get("tasks", []):
+            if "validation_level" not in task:
+                task["validation_level"] = {
+                    "integration": "cross-lane",
+                    "acceptance": "milestone",
+                }.get(task.get("resource_class"), "focused")
+                changed.append(f"tasks.{task.get('id')}.validation_level")
+
+        tasks = revised.get("tasks", [])
+        integration_tasks = [
+            task for task in tasks if task.get("resource_class") == "integration"
+        ]
+        acceptance_tasks = [
+            task for task in tasks if task.get("resource_class") == "acceptance"
+        ]
+        if not integration_tasks:
+            existing_ids = {task.get("id") for task in tasks}
+            integration_id = "AIL-INTEGRATION"
+            counter = 2
+            while integration_id in existing_ids:
+                integration_id = f"AIL-INTEGRATION-{counter}"
+                counter += 1
+            implementation_ids = [
+                task["id"]
+                for task in tasks
+                if task.get("resource_class") not in {"integration", "acceptance"}
+            ]
+            integration = {
+                "id": integration_id,
+                "title": "All in Luna phase integration",
+                "phase": "integration",
+                "description": "Integrate all implementation owners and run cross-lane verification.",
+                "dependencies": implementation_ids,
+                "ownership": {
+                    "paths": [],
+                    "non_file_scope": "Shared-file integration and cross-lane verification",
+                    "exclusive": False,
+                },
+                "role": "integration-owner",
+                "resource_class": "integration",
+                "deliverables": ["One integrated candidate and cross-lane evidence"],
+                "verification": ["Verify owner evidence and run cross-lane checks"],
+                "validation_level": "cross-lane",
+                "external_side_effects": [],
+                "acceptance_required": True,
+            }
+            tasks.append(integration)
+            integration_tasks = [integration]
+            changed.append("tasks.AIL-INTEGRATION")
+        integration_ids = [task["id"] for task in integration_tasks]
+        if not acceptance_tasks:
+            existing_ids = {task.get("id") for task in tasks}
+            acceptance_id = "AIL-ACCEPTANCE"
+            counter = 2
+            while acceptance_id in existing_ids:
+                acceptance_id = f"AIL-ACCEPTANCE-{counter}"
+                counter += 1
+            acceptance = {
+                "id": acceptance_id,
+                "title": "All in Luna independent acceptance",
+                "phase": "acceptance",
+                "description": "Independently verify the integrated completion standard without implementation writes.",
+                "dependencies": integration_ids,
+                "ownership": {
+                    "paths": [],
+                    "non_file_scope": "Read-only independent milestone acceptance",
+                    "exclusive": False,
+                },
+                "role": "acceptance-owner",
+                "resource_class": "acceptance",
+                "deliverables": ["Evidence-backed PASS, FAIL, or BLOCKED result"],
+                "verification": ["Exercise the completion standard and failure/recovery paths"],
+                "validation_level": "milestone",
+                "external_side_effects": [],
+                "acceptance_required": False,
+            }
+            tasks.append(acceptance)
+            acceptance_tasks = [acceptance]
+            changed.append(f"tasks.{acceptance_id}")
+        for acceptance in acceptance_tasks:
+            for integration_id in integration_ids:
+                if integration_id not in acceptance["dependencies"]:
+                    acceptance["dependencies"].append(integration_id)
+                    changed.append(f"tasks.{acceptance['id']}.dependencies")
 
         if args.authorize_implementation_writes:
             revised["authorizations"]["implementation_writes"] = True

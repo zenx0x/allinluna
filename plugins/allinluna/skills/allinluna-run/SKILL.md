@@ -46,7 +46,7 @@ Determine which execution tier the host actually exposes:
 
 1. **User-owned top-level tasks:** every All in Luna plan authorizes this tier; use it whenever the host exposes the capability.
 2. **Subagents:** use for bounded independent work when available.
-3. **Sequential:** use the current task when neither delegation tier exists or when work is tightly coupled.
+3. **Sequential:** use the current task only after verified absence of both delegation tiers or explicit user-declined Git bootstrap. Tight coupling changes dependency order, not the mandatory coordinator/owner separation.
 
 The root coordinator's default delegation for every built-in resource profile is `top-level-task`, and every All in Luna plan records that authorization as true. For independent substantive owner lanes, create user-visible top-level Codex tasks rather than root-level subagents. Do not ask the user to repeat the authorization and do not use a root-level subagent as a substitute for a planned top-level owner.
 
@@ -118,6 +118,19 @@ Do not delete, reset, clean, force-push, rewrite history, mutate credentials, or
 
 ## 5. Execute continuously
 
+Use the deterministic coordinator control plane on every cycle:
+
+```bash
+python scripts/coordinator_tick.py RUN_DIR --pretty
+```
+
+For each `dispatch-top-level-task` action, read its generated brief, call the declared
+`codex_app__list_projects`/`codex_app__create_thread` tools, then immediately persist the
+thread, host, worktree, branch, base, resolved model, and reasoning with `update_run.py`.
+For `wait-for-top-level-tasks`, call the host wait tool, normalize the result, reconcile it
+with `reconcile_threads.py`, collect final evidence, and tick again. Do not end the turn while
+the plan remains executable merely because one tick dispatched work or returned no final result.
+
 For every ready task:
 
 1. dispatch according to dependencies, ownership, capability tier, and the requested concurrency target subject to actual runtime constraints;
@@ -132,11 +145,15 @@ The first vertical slice must run through every layer required by that task (for
 
 Use focused tests within owner lanes. Reserve broader suites for phase integration and critical milestone acceptance unless the plan explicitly requires otherwise.
 
+When the user adds scope during an active run, use `revise_active_plan.py` to append new stable
+task IDs, dependencies, milestones, completion clauses, or a stop boundary. It preserves prior
+plans and patches under `revisions/`; do not restart or silently rewrite completed history.
+
 ## 6. Resource-mode behavior
 
 - `premium`: assign frontier reasoning to architecture, authority, and acceptance; use independent review for high-risk decisions.
 - `balanced`: mix strong planning with efficient bounded implementation.
-- `economy`: prefer Luna/fast workers, concurrency 1-2, decompose before escalation, and ask before crossing the escalation policy.
+- `economy`: use score-based Luna/fast selection, low default concurrency, and automatic same-policy fallback without shrinking scope.
 - `speed`: maximize safe independent lanes while preventing shared-file writers.
 - `all-luna`: hard-lock all roles to the Luna family with high reasoning.
 - `mad-luna`: hard-lock all roles to Luna, request maximum supported reasoning and maximum safe concurrency, and add an independent Luna verifier to high-risk milestones.
@@ -157,6 +174,11 @@ At each planned phase boundary:
 5. send defects back to the owning lane and re-run only affected acceptance plus required regression checks;
 6. establish the accepted common baseline, then immediately release newly unblocked work.
 
+Record acceptance failures with `manage_defect.py`. This reopens the original owner, blocks the
+reporting acceptance task when appropriate, records repair commits, and prevents run completion
+until every defect is resolved. Verify writable task evidence with `verify_task_evidence.py`;
+acceptance remains read-only and must use a task/thread independent from implementation.
+
 Do not multiply governance into implementation review, integration review, acceptance, promotion, registry revision, and repeated re-review unless the plan or release risk truly requires those distinct actions. Read [references/integration-and-acceptance.md](references/integration-and-acceptance.md).
 
 ## 8. Recover without redispatching completed work
@@ -174,7 +196,14 @@ Use:
 ```bash
 python scripts/validate_run.py RUN_DIR --pretty
 python scripts/render_status.py RUN_DIR
+python scripts/control_run.py RUN_DIR --action set-concurrency --concurrency N --reason "..."
+python scripts/refresh_task_resources.py RUN_DIR --catalog RUNTIME_CATALOG.json \
+  --profile balanced --role engineer=gpt-5.6-luna:high --reason "user changed resources"
 ```
+
+`refresh_task_resources.py` changes only undispatched or retryable owners. It never rewrites
+the actual model evidence of a running or completed task. Use it when the user changes profile,
+per-role model/reasoning, delegation, or concurrency, and when the live catalog changes.
 
 Read [references/recovery.md](references/recovery.md) for transition rules.
 

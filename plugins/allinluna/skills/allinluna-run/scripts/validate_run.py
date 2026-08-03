@@ -42,6 +42,9 @@ def validate(target: Path) -> dict[str, Any]:
         "usage",
         "repository",
         "authorizations",
+        "orchestration",
+        "coordination",
+        "defects",
         "completion_standard",
         "tasks",
         "milestones",
@@ -65,6 +68,11 @@ def validate(target: Path) -> dict[str, Any]:
     host_concurrency = state.get("capabilities", {}).get("host_concurrency")
     if isinstance(host_concurrency, int) and host_concurrency < 1:
         errors.append("host_concurrency must be positive")
+    orchestration = state.get("orchestration", {})
+    if orchestration.get("root_role") != "coordinator":
+        errors.append("run root role must remain coordinator")
+    if orchestration.get("root_product_implementation") != "forbidden":
+        errors.append("root product implementation must remain forbidden")
 
     plan_path = run_dir / "plan.json"
     if not plan_path.exists():
@@ -133,6 +141,25 @@ def validate(target: Path) -> dict[str, Any]:
             "top_level_tasks"
         ):
             errors.append(f"{prefix} uses top-level-task delegation without authorization")
+        if task.get("resource_class") == "acceptance":
+            if task.get("ownership", {}).get("paths"):
+                errors.append(f"{prefix} acceptance must be read-only")
+            if evidence.get("changed_files") or evidence.get("final_commit"):
+                errors.append(f"{prefix} acceptance recorded implementation mutation")
+
+    implementation_threads = {
+        task.get("assignment", {}).get("thread_id")
+        for task in tasks.values()
+        if task.get("resource_class") != "acceptance"
+        and task.get("assignment", {}).get("thread_id")
+    }
+    for task_id, task in tasks.items():
+        if task.get("resource_class") == "acceptance" and task.get("status") == "completed":
+            thread_id = task.get("assignment", {}).get("thread_id")
+            if not thread_id:
+                warnings.append(f"task {task_id} acceptance independence is not runtime-verifiable")
+            elif thread_id in implementation_threads:
+                errors.append(f"task {task_id} acceptance reused an implementation thread")
 
     budget = state.get("resource_policy", {}).get("budget", {})
     metric = budget.get("metric")
@@ -165,6 +192,13 @@ def validate(target: Path) -> dict[str, Any]:
         ]
         if incomplete:
             errors.append("completed run has incomplete tasks: " + ", ".join(incomplete))
+        open_defects = [
+            defect_id
+            for defect_id, defect in state.get("defects", {}).items()
+            if defect.get("status") != "resolved"
+        ]
+        if open_defects:
+            errors.append("completed run has unresolved defects: " + ", ".join(open_defects))
 
     events_path = run_dir / "events.jsonl"
     event_count = 0

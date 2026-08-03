@@ -39,6 +39,8 @@ Resource modes change allocation and timing—not scope or completion criteria. 
 
 Model, reasoning effort, delegation tier, concurrency, and budget are separate controls. Logical model tiers are resolved against the host's current catalog; the run state records the requested and actual values independently.
 
+Resolution supports `ultra` reasoning and can rank catalog candidates using profile-weighted quality, speed, and economy metadata. Fallback lists are actually tried in order; missing scores preserve stable catalog order instead of inventing cost or performance telemetry.
+
 By default, the root coordinator dispatches independent substantive owner lanes as user-visible top-level Codex tasks. Each top-level owner may create bounded internal subagents under its own ownership and model policy. Root-level subagents never silently replace planned top-level owners.
 
 Only after the host tool catalog has been fully checked and the top-level task creation tool is genuinely absent does All in Luna automatically fall back to a root subagent and then sequential execution; it does not ask the user to reconfirm. The plan keeps `top_level_tasks=true`, while run state records the actual tier and `top-level-tool-unavailable`. If the fallback surface cannot satisfy a hard lock such as Luna-only, that lane pauses instead of pretending compliance or switching models.
@@ -60,6 +62,8 @@ All in Luna **does not default to completing everything sequentially inside the 
 5. serializes one or more top-level owners when work is small, tightly coupled, or cannot be parallelized safely.
 
 The root coordinator is the mandatory default execution role and does not require a separate user toggle. New plans contain a structured orchestration contract, and execute-ready revision automatically upgrades older plans. The coordinator does not perform substantive product implementation unless the host genuinely lacks top-level task capability and a runtime fallback is recorded honestly.
+
+Run now uses a deterministic coordinator tick to produce next actions and complete owner briefs: dispatch ready top-level tasks, record thread/host/worktree/model evidence, wait, collect results, release dependencies, and tick again. Active plans can append tasks and stop boundaries. Acceptance defects return structurally to the original owner and unresolved defects prevent completion. Git evidence tooling verifies real commits, parents, trees, changed paths, and ownership.
 
 “Sequential” here means dependencies between top-level owners, not product implementation by the root coordinator. Even when only one owner is currently ready, the coordinator creates that top-level task, waits, and dispatches the next owner afterward. A `balanced` plan always keeps desired concurrency at 3; current readiness or missing Git setup cannot rewrite it to 1.
 
@@ -163,9 +167,25 @@ python plugins/allinluna/skills/allinluna-run/scripts/prepare_execution_plan.py 
   --authorize-implementation-writes --authorize-top-level-tasks --deny-goal
 python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
   --profile balanced --catalog runtime-catalog.json
+python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py RUN_DIRECTORY --pretty
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY
 python plugins/allinluna/skills/allinluna-run/scripts/validate_run.py RUN_DIRECTORY --pretty
+
+# Incremental active-plan revision, owner repair, and human controls
+python plugins/allinluna/skills/allinluna-run/scripts/revise_active_plan.py `
+  RUN_DIRECTORY --patch revision.json --reason "user added scope"
+python plugins/allinluna/skills/allinluna-run/scripts/manage_defect.py `
+  RUN_DIRECTORY --action create --defect-id D1 --owner-task T1 `
+  --summary "..." --reproduction "..." --reason "independent acceptance failed"
+python plugins/allinluna/skills/allinluna-run/scripts/control_run.py `
+  RUN_DIRECTORY --action set-concurrency --concurrency 12 --reason "user changed concurrency"
+python plugins/allinluna/skills/allinluna-run/scripts/refresh_task_resources.py `
+  RUN_DIRECTORY --catalog runtime-catalog.json `
+  --role engineer=gpt-5.6-luna:high --reason "user changed model and reasoning"
 ```
+
+Resource changes apply only to undispatched or retryable owners. They never rewrite actual
+runtime evidence for running or completed tasks.
 
 Schemas and editable examples live beside each skill under `assets/`. Trigger and behavioral evaluation cases live under `evals/` and run in CI with the lifecycle tests.
 

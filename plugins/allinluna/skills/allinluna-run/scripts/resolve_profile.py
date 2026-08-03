@@ -12,7 +12,7 @@ from typing import Any
 
 
 DEFAULT_PROFILES = Path(__file__).resolve().parent.parent / "assets" / "resource-profiles.json"
-REASONING_ORDER = ["low", "medium", "high", "xhigh", "max"]
+REASONING_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"]
 DELEGATION_ORDER = ["top-level-task", "subagent", "sequential"]
 
 
@@ -54,6 +54,21 @@ def model_candidates(request: str, models: list[dict[str, Any]]) -> list[dict[st
             or family in [str(x).casefold() for x in model.get("families", [])]
         ]
     return [model for model in models if str(model.get("id", "")) == request]
+
+
+def rank_candidates(
+    candidates: list[dict[str, Any]], weights: dict[str, float]
+) -> list[dict[str, Any]]:
+    """Rank only from catalog evidence; stable catalog order breaks unknown-score ties."""
+    def score(item: tuple[int, dict[str, Any]]) -> tuple[float, int]:
+        index, model = item
+        total = sum(
+            float(weights.get(axis, 0)) * float(model.get(f"{axis}_score", 0))
+            for axis in ("quality", "speed", "economy")
+        )
+        return total, -index
+
+    return [model for _, model in sorted(enumerate(candidates), key=score, reverse=True)]
 
 
 def catalog_surface(catalog: dict[str, Any], delegation: str) -> dict[str, Any]:
@@ -187,16 +202,30 @@ def resolve(
             "resolution": "runtime-required",
         }
         if catalog is not None:
-            candidates = model_candidates(requested_model, catalog_models)
+            request_chain = [requested_model]
+            if policy.get("unavailable_action") == "fallback-list":
+                request_chain.extend(
+                    item for item in policy.get("fallback_models", []) if item not in request_chain
+                )
             lock = policy.get("hard_model_lock")
-            if isinstance(lock, dict) and lock.get("family"):
-                family = str(lock["family"]).casefold()
-                candidates = [
-                    model
-                    for model in candidates
-                    if family in str(model.get("id", "")).casefold()
-                    or family in [str(x).casefold() for x in model.get("families", [])]
-                ]
+            candidates: list[dict[str, Any]] = []
+            selected_request = requested_model
+            for candidate_request in request_chain:
+                possible = model_candidates(candidate_request, catalog_models)
+                if isinstance(lock, dict) and lock.get("family"):
+                    family = str(lock["family"]).casefold()
+                    possible = [
+                        model
+                        for model in possible
+                        if family in str(model.get("id", "")).casefold()
+                        or family in [str(x).casefold() for x in model.get("families", [])]
+                    ]
+                if possible:
+                    candidates = rank_candidates(
+                        possible, policy.get("selection_weights", {})
+                    )
+                    selected_request = candidate_request
+                    break
             if candidates:
                 chosen = candidates[0]
                 actual_reasoning, reasoning_resolution = resolve_reasoning(
@@ -206,12 +235,20 @@ def resolve(
                     {
                         "actual_model": chosen.get("id", "unavailable"),
                         "actual_reasoning": actual_reasoning,
-                        "resolution": "exact" if reasoning_resolution == "exact" else "fallback",
+                        "resolution": (
+                            "exact"
+                            if reasoning_resolution == "exact" and selected_request == requested_model
+                            else "fallback"
+                        ),
                     }
                 )
                 if reasoning_resolution == "fallback":
                     warnings.append(
                         f"{role}: reasoning {requested_reasoning} resolved to {actual_reasoning}"
+                    )
+                if selected_request != requested_model:
+                    warnings.append(
+                        f"{role}: model request {requested_model} resolved through {selected_request}"
                     )
             else:
                 result["resolution"] = "unavailable"
@@ -225,7 +262,7 @@ def resolve(
                     f"{role}: no runtime model satisfies {requested_model} "
                     f"on {selected_delegation}{suffix}"
                 )
-                if policy.get("unavailable_action") == "pause":
+                if policy.get("unavailable_action") in {"pause", "ask", "fallback-list"}:
                     errors.append(message)
                 else:
                     warnings.append(message)

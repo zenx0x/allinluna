@@ -19,6 +19,8 @@
     "repository",
     "authorizations",
     "orchestration",
+    "coordination",
+    "defects",
     "completion_standard",
     "tasks",
     "milestones",
@@ -67,6 +69,16 @@
         "owner_subagents": { "const": "allowed-bounded" }
       }
     },
+    "coordination": {
+      "type": "object",
+      "required": ["plan_revision", "last_tick_at", "stop_boundary"],
+      "properties": {
+        "plan_revision": { "type": "integer", "minimum": 0 },
+        "last_tick_at": { "type": ["string", "null"] },
+        "stop_boundary": { "type": ["string", "null"] }
+      }
+    },
+    "defects": { "type": "object" },
     "completion_standard": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "tasks": {
       "type": "object",
@@ -83,13 +95,18 @@
       "required": [
         "id",
         "title",
+        "description",
         "phase",
+        "role",
         "resource_class",
         "status",
         "dependencies",
         "ownership",
         "external_side_effects",
         "acceptance_required",
+        "deliverables",
+        "verification",
+        "validation_level",
         "requested",
         "actual",
         "assignment",
@@ -100,13 +117,18 @@
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
+        "description": { "type": "string" },
         "phase": { "type": "string" },
+        "role": { "type": "string" },
         "resource_class": { "type": "string" },
         "status": { "enum": ["pending", "ready", "running", "blocked", "failed", "completed", "skipped", "cancelled"] },
         "dependencies": { "type": "array", "items": { "type": "string" } },
         "ownership": { "type": "object" },
         "external_side_effects": { "type": "array" },
         "acceptance_required": { "type": "boolean" },
+        "deliverables": { "type": "array", "items": { "type": "string" } },
+        "verification": { "type": "array", "items": { "type": "string" } },
+        "validation_level": { "enum": ["focused", "cross-lane", "milestone", "full"] },
         "requested": { "$ref": "#/$defs/assignmentRequest" },
         "actual": { "$ref": "#/$defs/assignmentActual" },
         "assignment": { "type": "object" },

@@ -11,6 +11,11 @@ The authoritative defaults live in `assets/resource-profiles.json`. Profiles are
 5. Record requested and actual values per task.
 6. Enforce hard locks before dispatch and during validation.
 
+When the runtime catalog supplies quality, speed, and economy scores, resolution ranks matching
+models with the selected profile's weights. Missing scores do not invent telemetry: stable catalog
+order remains the tie-breaker. `ultra` reasoning is supported when the selected model declaration
+exposes it. A `fallback-list` is executed in order rather than stored as inert metadata.
+
 Use `scripts/resolve_profile.py` to produce a deterministic merged policy. Supply `--delegation top-level-task|subagent|sequential` with a delegation-scoped catalog. It deliberately leaves unresolved logical tiers visible when no runtime catalog is supplied.
 
 On Codex App, build the top-level catalog from the `codex_app__create_thread` tool declaration, not from subagent model overrides. The two surfaces may expose different model families and reasoning levels.

@@ -4,7 +4,7 @@
 
 One integration owner should:
 
-1. verify every expected owner commit and changed-path boundary;
+1. run `verify_task_evidence.py` for every expected owner commit and changed-path boundary;
 2. combine shared contracts deliberately;
 3. regenerate checked-in clients or artifacts when required;
 4. run focused cross-lane product-chain tests;
@@ -25,6 +25,11 @@ Acceptance evaluates the actual completion standard and user journeys against th
 - absence of unauthorized external mutation.
 
 Acceptance is read-only by default. A failure names the owner and exact reproduction. After repair, re-run the failed checks plus the smallest required regression set.
+
+Record a failure with `manage_defect.py --action create`. This reopens the original owner
+instead of allowing integration or acceptance to silently repair owner-owned science or behavior.
+After the owner supplies a repair commit, record it with `manage_defect.py --action resolve`,
+re-integrate once, and re-run the failed acceptance evidence.
 
 ## Avoid governance inflation
 

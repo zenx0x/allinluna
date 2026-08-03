@@ -97,15 +97,25 @@ class RunLifecycleTests(unittest.TestCase):
                 "--final-commit",
                 "b" * 40,
             )
-            self.update(run, "--task", "T3-accept", "--status", "running", "--reason", "start")
+            self.update(run, "--task", "T3-integrate", "--status", "running", "--reason", "start")
             self.update(
                 run,
                 "--task",
-                "T3-accept",
+                "T3-integrate",
                 "--status",
                 "completed",
-                "--reason",
-                "accepted",
+                "--reason", "integrated",
+                "--check", "cross-lane checks passed",
+                "--final-commit", "c" * 40,
+            )
+            self.update(run, "--task", "T4-accept", "--status", "running", "--reason", "start")
+            self.update(
+                run,
+                "--task",
+                "T4-accept",
+                "--status",
+                "completed",
+                "--reason", "accepted",
                 "--check",
                 "independent journeys passed",
             )
@@ -229,6 +239,227 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertEqual(state["capabilities"]["host_concurrency"], 4)
             self.assertFalse(state["goal_authorized"])
 
+    def test_coordinator_tick_emits_top_level_dispatch_and_brief(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state",
+                "balanced",
+                EXAMPLE,
+                "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            result = command(
+                str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["dispatch_count"], 1)
+            action = payload["actions"][0]
+            self.assertEqual(action["tool"], "codex_app__create_thread")
+            self.assertEqual(action["model"], "gpt-5.6-luna")
+            brief = Path(action["brief_path"])
+            self.assertTrue(brief.exists())
+            self.assertIn("root task remains coordinator", brief.read_text(encoding="utf-8"))
+
+    def test_active_plan_revision_appends_scope_and_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(temp / "state")
+            patch = {
+                "add_tasks": [
+                    {
+                        "id": "T2b-docs",
+                        "title": "User documentation",
+                        "phase": "implementation",
+                        "description": "Document the completed user journey and recovery controls.",
+                        "dependencies": ["T2-ui"],
+                        "ownership": {
+                            "paths": ["docs/"],
+                            "non_file_scope": None,
+                            "exclusive": True,
+                        },
+                        "role": "docs-owner",
+                        "resource_class": "implementation-clear",
+                        "deliverables": ["Complete user documentation"],
+                        "verification": ["Run focused documentation checks"],
+                        "validation_level": "focused",
+                        "external_side_effects": [],
+                        "acceptance_required": True,
+                    }
+                ],
+                "add_dependencies": {"T3-integrate": ["T2b-docs"]},
+                "append_completion_standard": ["User documentation is complete."],
+            }
+            patch_path = temp / "revision.json"
+            patch_path.write_text(json.dumps(patch), encoding="utf-8")
+            result = command(
+                str(SCRIPTS / "revise_active_plan.py"),
+                str(run),
+                "--patch",
+                str(patch_path),
+                "--reason",
+                "user added documentation scope",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["coordination"]["plan_revision"], 1)
+            self.assertIn("T2b-docs", state["tasks"])
+            self.assertIsNotNone(
+                state["tasks"]["T2b-docs"]["assignment"]["resolved_model"]
+            )
+            self.assertTrue((run / "revisions" / "0001-patch.json").exists())
+
+    def test_coordinator_tick_does_not_dispatch_paused_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary) / "state")
+            command(
+                str(SCRIPTS / "control_run.py"), str(run), "--action", "pause",
+                "--reason", "human pause",
+            )
+            result = command(
+                str(SCRIPTS / "coordinator_tick.py"), str(run), "--no-record"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["dispatch_count"], 0)
+            self.assertEqual(payload["actions"][0]["kind"], "human-control-required")
+
+    def test_defect_returns_completed_work_to_original_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(temp / "state")
+            self.update(run, "--task", "T1-domain-api", "--status", "running", "--reason", "start")
+            self.update(
+                run,
+                "--task", "T1-domain-api", "--status", "completed", "--reason", "done",
+                "--check", "focused checks", "--final-commit", "a" * 40,
+            )
+            result = command(
+                str(SCRIPTS / "manage_defect.py"), str(run), "--action", "create",
+                "--defect-id", "D1", "--owner-task", "T1-domain-api",
+                "--reporter-task", "T4-accept", "--summary", "isolation leak",
+                "--reproduction", "switch projects and inspect result", "--reason", "acceptance failure",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "ready")
+            self.assertEqual(state["defects"]["D1"]["owner_task"], "T1-domain-api")
+            self.assertIsNone(state["tasks"]["T1-domain-api"]["evidence"]["final_commit"])
+            self.assertEqual(
+                state["defects"]["D1"]["prior_owner_evidence"]["final_commit"],
+                "a" * 40,
+            )
+
+    def test_completed_thread_waits_for_evidence_without_blocking_task(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(temp / "state")
+            self.update(
+                run, "--task", "T1-domain-api", "--status", "running",
+                "--reason", "owner dispatched", "--thread-id", "thread-1",
+            )
+            snapshot = temp / "snapshot.json"
+            snapshot.write_text(
+                json.dumps([
+                    {
+                        "task_id": "T1-domain-api",
+                        "status": "completed",
+                        "cursor": "cursor-1",
+                    }
+                ]),
+                encoding="utf-8",
+            )
+            result = command(
+                str(SCRIPTS / "reconcile_threads.py"), str(run),
+                "--snapshot", str(snapshot),
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["evidence_required"], ["T1-domain-api"])
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "running")
+
+    def test_human_control_changes_concurrency_without_replanning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary) / "state")
+            result = command(
+                str(SCRIPTS / "control_run.py"), str(run), "--action", "set-concurrency",
+                "--concurrency", "12", "--reason", "user requested more parallelism",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["resource_policy"]["concurrency"]["desired"], 12)
+
+    def test_live_resource_refresh_updates_only_undispatched_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            self.update(
+                run, "--task", "T1-domain-api", "--status", "running",
+                "--reason", "already dispatched", "--actual-model", "gpt-5.6-luna",
+                "--actual-reasoning", "high", "--actual-delegation", "top-level-task",
+            )
+            result = command(
+                str(SCRIPTS / "refresh_task_resources.py"), str(run),
+                "--catalog", str(RUN / "assets" / "runtime-catalog.example.json"),
+                "--role", "engineer=gpt-5.6-sol:ultra",
+                "--reason", "user upgraded future engineering owners",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["tasks"]["T1-domain-api"]["assignment"]["resolved_model"],
+                "gpt-5.6-luna",
+            )
+            self.assertEqual(
+                state["tasks"]["T2-ui"]["assignment"]["resolved_model"],
+                "gpt-5.6-sol",
+            )
+            self.assertEqual(
+                state["tasks"]["T2-ui"]["assignment"]["resolved_reasoning"],
+                "ultra",
+            )
+
+    def test_git_evidence_verifier_checks_commit_and_owned_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            repository = temp / "repo"
+            repository.mkdir()
+            subprocess.run(["git", "init"], cwd=repository, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
+            source = repository / "src" / "domain"
+            source.mkdir(parents=True)
+            file_path = source / "state.py"
+            file_path.write_text("VALUE = 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-m", "base"], cwd=repository, check=True, capture_output=True)
+            file_path.write_text("VALUE = 2\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-m", "change"], cwd=repository, check=True, capture_output=True)
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            run = self.init(temp / "state")
+            self.update(
+                run, "--task", "T1-domain-api", "--reason", "record evidence",
+                "--worktree", str(repository), "--final-commit", commit,
+                "--changed-file", "src/domain/state.py",
+            )
+            result = command(
+                str(SCRIPTS / "verify_task_evidence.py"), str(run),
+                "--task", "T1-domain-api", "--pretty",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["valid"])
+            self.assertEqual(payload["commit"], commit)
+
     def test_auto_runtime_falls_back_without_reconfirmation_when_top_level_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             temp = Path(temporary)
@@ -319,6 +550,9 @@ class RunLifecycleTests(unittest.TestCase):
             plan["authorizations"].pop("top_level_tasks_basis")
             plan["resource_policy"].pop("modifiers")
             plan.pop("orchestration")
+            plan.pop("stop_boundary")
+            for task in plan["tasks"]:
+                task.pop("validation_level")
             source.write_text(json.dumps(plan), encoding="utf-8")
             result = command(
                 str(SCRIPTS / "prepare_execution_plan.py"),
@@ -341,6 +575,34 @@ class RunLifecycleTests(unittest.TestCase):
                 prepared["orchestration"]["root_product_implementation"],
                 "forbidden",
             )
+            self.assertIn("stop_boundary", prepared)
+            self.assertTrue(all("validation_level" in task for task in prepared["tasks"]))
+
+    def test_execution_revision_injects_integration_and_acceptance_for_legacy_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            source = temp / "legacy.json"
+            revised = temp / "ready.json"
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["tasks"] = [
+                task for task in plan["tasks"]
+                if task["resource_class"] not in {"integration", "acceptance"}
+            ]
+            plan["milestones"] = []
+            source.write_text(json.dumps(plan), encoding="utf-8")
+            result = command(
+                str(SCRIPTS / "prepare_execution_plan.py"), str(source),
+                "--output", str(revised), "--authorize-implementation-writes",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            prepared = json.loads(revised.read_text(encoding="utf-8"))
+            integration = next(
+                task for task in prepared["tasks"] if task["resource_class"] == "integration"
+            )
+            acceptance = next(
+                task for task in prepared["tasks"] if task["resource_class"] == "acceptance"
+            )
+            self.assertIn(integration["id"], acceptance["dependencies"])
 
     def test_execution_revision_refuses_source_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

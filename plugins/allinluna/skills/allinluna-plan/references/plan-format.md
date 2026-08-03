@@ -14,6 +14,8 @@ The canonical artifact is JSON conforming to `assets/development-plan.schema.jso
 - `authorizations`: explicit action permissions.
 - `orchestration`: mandatory root coordinator, forbidden root product implementation, top-level owners, and bounded owner subagents.
 - `resource_policy`: profile, locks, fallback, concurrency, and budget.
+- `stop_boundary`: the exact completion edge and downstream work that must not start.
+- task `validation_level`: focused owner checks, cross-lane integration, milestone acceptance, or explicitly required full validation.
 - `tasks`: dependency graph and ownership.
 - `milestones`: phase-level integration and acceptance.
 - `assumptions`: progress-enabling assumptions.

@@ -39,6 +39,8 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 
 模型、推理强度、委派层级、并发和预算是五个相互独立的控制维度。逻辑模型层级会在运行时根据宿主平台当前提供的模型进行解析；运行状态会分别记录请求值和实际值。
 
+模型解析支持到 `ultra`，并可依据运行目录提供的质量、速度和经济性元数据按 profile 加权选择。Fallback list 会真正逐项执行；缺少评分时保留目录顺序，不伪造成本或性能数据。
+
 默认情况下，根协调任务会把独立且有实质交付的负责人线路派发为用户可见的顶层 Codex 任务。每个顶层负责人可以在自己的所有权和模型策略内使用有界 subagents；根协调任务不会静默地用 subagent 替代原定顶层负责人。
 
 只有在完整检查宿主工具目录后确认“创建顶层任务”的工具确实没有暴露时，All in Luna 才会自动依次回退到根级 subagent、当前任务顺序执行；此时不再要求用户重复确认。计划仍保持 `top_level_tasks=true`，运行状态会记录真实执行层级和 `top-level-tool-unavailable`。如果回退层级无法满足 Luna-only 等硬模型锁，则暂停该线路，而不是冒充满足或更换模型。
@@ -60,6 +62,8 @@ All in Luna **默认不是在当前任务里单线程顺序完成所有工作**�
 5. 在任务很小、强耦合或共享边界无法并行时，仍由协调器顺序派发一个或多个顶层负责人。
 
 总协调器是默认且强制的执行角色，不需要用户额外“启用”。新计划会写入结构化 orchestration contract；旧计划转为 execute-ready 时会自动补齐。总协调器不得直接承担主体产品实现，除非宿主确实缺少顶层任务能力并触发了被如实记录的运行时回退。
+
+Run 现在通过确定性的 coordinator tick 生成下一步动作和完整负责人 brief：派发 ready 顶层任务、记录 thread/host/worktree/model、等待任务、收集证据、释放依赖并继续下一轮。活动计划可以增量追加任务和停止边界；验收缺陷会结构化退回原 owner，未解决缺陷会阻止完成。Git 证据工具可核对真实 commit、parent、tree、changed paths 与所有权范围。
 
 这里的“顺序”只表示顶层负责人之间存在依赖，不表示根协调任务亲自写实现。即使只有一个任务当前可执行，根协调也必须先创建该顶层任务，等待完成后再派发下一个负责人。`balanced` 的计划目标并发始终是 3，不能因为当前只有一个 ready task 或目录尚未初始化 Git 而写成 1。
 
@@ -159,9 +163,24 @@ python plugins/allinluna/skills/allinluna-run/scripts/prepare_execution_plan.py 
   --authorize-implementation-writes --authorize-top-level-tasks --deny-goal
 python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
   --profile balanced --catalog runtime-catalog.json
+python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py RUN_DIRECTORY --pretty
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY
 python plugins/allinluna/skills/allinluna-run/scripts/validate_run.py RUN_DIRECTORY --pretty
+
+# 活动计划增量修订、缺陷返修与人类控制
+python plugins/allinluna/skills/allinluna-run/scripts/revise_active_plan.py `
+  RUN_DIRECTORY --patch revision.json --reason "用户追加范围"
+python plugins/allinluna/skills/allinluna-run/scripts/manage_defect.py `
+  RUN_DIRECTORY --action create --defect-id D1 --owner-task T1 `
+  --summary "..." --reproduction "..." --reason "独立验收失败"
+python plugins/allinluna/skills/allinluna-run/scripts/control_run.py `
+  RUN_DIRECTORY --action set-concurrency --concurrency 12 --reason "用户调整并发"
+python plugins/allinluna/skills/allinluna-run/scripts/refresh_task_resources.py `
+  RUN_DIRECTORY --catalog runtime-catalog.json `
+  --role engineer=gpt-5.6-luna:high --reason "用户调整模型与推理强度"
 ```
+
+资源调整只作用于尚未派发或需要重试的负责人；运行中和已完成任务的实际模型证据不会被改写。
 
 Schema 和可编辑示例位于各 Skill 的 `assets/` 目录中。触发评测和行为评测位于 `evals/`，并与完整生命周期测试一起在 CI 中运行。
 

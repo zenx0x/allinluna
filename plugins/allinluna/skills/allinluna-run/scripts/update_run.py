@@ -46,6 +46,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resolution", choices=["exact", "fallback", "unresolved", "unavailable"])
     parser.add_argument("--thread-id")
     parser.add_argument("--host-id")
+    parser.add_argument("--cursor")
+    parser.add_argument("--last-activity-at")
     parser.add_argument("--worktree")
     parser.add_argument("--branch")
     parser.add_argument("--base-commit")
@@ -73,6 +75,8 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
     assignment_fields = {
         "thread_id": args.thread_id,
         "host_id": args.host_id,
+        "cursor": args.cursor,
+        "last_activity_at": args.last_activity_at,
         "worktree": args.worktree,
         "branch": args.branch,
         "base_commit": args.base_commit,
@@ -136,6 +140,10 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
             git_authorized = bool(state.get("authorizations", {}).get("git_operations"))
             if owns_files and git_authorized and task["resource_class"] != "acceptance" and not task["evidence"]["final_commit"]:
                 raise ValueError("completing a writable Git task requires --final-commit")
+        if args.status == "running" and previous in {"ready", "blocked", "failed"}:
+            task["assignment"]["attempt"] = int(task["assignment"].get("attempt", 0)) + 1
+            task["assignment"]["last_activity_at"] = now_iso()
+            changed_fields.extend(["assignment.attempt", "assignment.last_activity_at"])
         task["status"] = args.status
         task["updated_at"] = now_iso()
         events.append(
@@ -209,6 +217,13 @@ def update_run_status(state: dict[str, Any], args: argparse.Namespace) -> dict[s
             raise ValueError("cannot complete run; incomplete tasks: " + ", ".join(incomplete))
         if unapproved:
             raise ValueError("cannot complete run; unapproved skipped tasks: " + ", ".join(unapproved))
+        open_defects = [
+            defect_id
+            for defect_id, defect in state.get("defects", {}).items()
+            if defect.get("status") != "resolved"
+        ]
+        if open_defects:
+            raise ValueError("cannot complete run; unresolved defects: " + ", ".join(open_defects))
     state["status"] = args.run_status
     return event(
         actor=args.actor,

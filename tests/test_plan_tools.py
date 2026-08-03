@@ -28,7 +28,7 @@ class PlanValidationTests(unittest.TestCase):
 
     def test_detects_cycle(self) -> None:
         plan = deepcopy(self.example)
-        plan["tasks"][0]["dependencies"] = ["T3-accept"]
+        plan["tasks"][0]["dependencies"] = ["T4-accept"]
         result = validate(plan)
         self.assertFalse(result["valid"])
         self.assertTrue(any("cycle" in error for error in result["errors"]))
@@ -79,6 +79,8 @@ class PlanValidationTests(unittest.TestCase):
                 "profile": "all-luna",
                 "modifiers": ["speed"],
                 "hard_model_lock": "luna",
+                "unavailable_action": "pause",
+                "fallback_models": [],
             }
         )
         plan["resource_policy"]["concurrency"]["desired"] = 6
@@ -104,6 +106,8 @@ class PlanValidationTests(unittest.TestCase):
         result = validate(plan)
         self.assertFalse(result["valid"])
         plan["resource_policy"]["hard_model_lock"] = "luna"
+        plan["resource_policy"]["unavailable_action"] = "pause"
+        plan["resource_policy"]["fallback_models"] = []
         plan["resource_policy"]["concurrency"]["desired"] = 8
         self.assertTrue(validate(plan)["valid"])
 

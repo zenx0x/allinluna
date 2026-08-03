@@ -9,6 +9,7 @@
     "Failure, permission, empty, and recovery states are tested.",
     "Integration and independent acceptance pass on the recorded baseline."
   ],
+  "stop_boundary": "Stop after independent acceptance and an accepted common baseline; do not publish or deploy.",
   "repository": {
     "mode": "existing",
     "roots": [
@@ -43,8 +44,8 @@
     "profile": "balanced",
     "modifiers": [],
     "hard_model_lock": null,
-    "unavailable_action": "ask",
-    "fallback_models": [],
+    "unavailable_action": "fallback-list",
+    "fallback_models": ["tier:standard", "tier:frontier", "tier:fast"],
     "concurrency": {
       "desired": 3,
       "host_cap_behavior": "cap-at-runtime"
@@ -72,6 +73,7 @@
       "resource_class": "implementation-complex",
       "deliverables": ["Domain-to-generated-client implementation", "Focused API tests"],
       "verification": ["Run the focused service/API/client test command recorded from the repository"],
+      "validation_level": "focused",
       "external_side_effects": [],
       "acceptance_required": true
     },
@@ -90,15 +92,35 @@
       "resource_class": "implementation-clear",
       "deliverables": ["Complete user journey", "Focused component and interaction tests"],
       "verification": ["Run focused UI tests and production typecheck/build"],
+      "validation_level": "focused",
       "external_side_effects": [],
       "acceptance_required": true
     },
     {
-      "id": "T3-accept",
+      "id": "T3-integrate",
+      "title": "Phase integration",
+      "phase": "integration",
+      "description": "Integrate owner commits, resolve shared mechanical boundaries, regenerate artifacts, and run focused cross-lane checks.",
+      "dependencies": ["T2-ui"],
+      "ownership": {
+        "paths": ["src/", "frontend/", "generated/"],
+        "non_file_scope": "Mechanical integration only; semantic defects return to owners",
+        "exclusive": true
+      },
+      "role": "integration-owner",
+      "resource_class": "integration",
+      "deliverables": ["One auditable integration commit", "Cross-lane product-chain evidence"],
+      "verification": ["Verify owner commits and run focused cross-lane tests"],
+      "validation_level": "cross-lane",
+      "external_side_effects": [],
+      "acceptance_required": true
+    },
+    {
+      "id": "T4-accept",
       "title": "Independent milestone acceptance",
       "phase": "acceptance",
       "description": "Exercise the integrated real-data journey, isolation, failure, permission, and recovery behavior without modifying implementation.",
-      "dependencies": ["T2-ui"],
+      "dependencies": ["T3-integrate"],
       "ownership": {
         "paths": [],
         "non_file_scope": "Read-only acceptance of the integrated baseline",
@@ -108,6 +130,7 @@
       "resource_class": "acceptance",
       "deliverables": ["Evidence-backed PASS, FAIL, or BLOCKED result"],
       "verification": ["Exercise required user journeys and inspect protected-path invariance"],
+      "validation_level": "milestone",
       "external_side_effects": [],
       "acceptance_required": false
     }
@@ -116,7 +139,7 @@
     {
       "id": "M1",
       "title": "Feature milestone",
-      "task_ids": ["T1-domain-api", "T2-ui", "T3-accept"],
+      "task_ids": ["T1-domain-api", "T2-ui", "T3-integrate", "T4-accept"],
       "integration_evidence": ["Recorded integration commit and cross-layer tests"],
       "acceptance_evidence": ["Independent real-data journey PASS"],
       "unlocks": []

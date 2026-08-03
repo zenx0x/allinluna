@@ -17,7 +17,7 @@
   "$defs": {
     "profile": {
       "type": "object",
-      "required": ["description", "hard_model_lock", "unavailable_action", "fallback_models", "delegation", "concurrency", "budget", "roles"],
+      "required": ["description", "hard_model_lock", "unavailable_action", "fallback_models", "selection_weights", "delegation", "concurrency", "budget", "roles"],
       "properties": {
         "description": { "type": "string" },
         "hard_model_lock": {
@@ -36,6 +36,15 @@
         "preferred_model_family": { "type": "string" },
         "unavailable_action": { "enum": ["pause", "ask", "fallback-list"] },
         "fallback_models": { "type": "array", "items": { "type": "string" } },
+        "selection_weights": {
+          "type": "object",
+          "required": ["quality", "speed", "economy"],
+          "properties": {
+            "quality": { "type": "number", "minimum": 0 },
+            "speed": { "type": "number", "minimum": 0 },
+            "economy": { "type": "number", "minimum": 0 }
+          }
+        },
         "delegation": {
           "type": "object",
           "required": ["root_preferred", "root_unauthorized_action", "root_fallback_order", "root_fallback_requires_user_approval", "owner_subagents"],

@@ -133,6 +133,34 @@
     "must_not": ["acceptor silently repairs", "duplicate governance layers"]
   },
   {
+    "id": "run-deterministic-coordinator-loop",
+    "skill": "allinluna-run",
+    "prompt": "Execute this validated plan continuously through its stop boundary.",
+    "must": ["run coordinator_tick", "dispatch every ready conflict-free top-level owner", "record thread and worktree evidence", "wait and reconcile", "tick again until completion or a true global blocker"],
+    "must_not": ["stop after dispatch", "implement in the root coordinator", "wait for the user to say continue between stages"]
+  },
+  {
+    "id": "run-active-plan-revision",
+    "skill": "allinluna-run",
+    "prompt": "While the run is active, add this new independent implementation lane and make integration depend on it.",
+    "must": ["append a stable task id", "preserve prior plan and patch history", "reconcile new dependencies", "continue unaffected running lanes"],
+    "must_not": ["restart the run", "rewrite completed task history", "replan the whole project"]
+  },
+  {
+    "id": "run-adaptive-resource-resolution",
+    "skill": "allinluna-run",
+    "prompt": "Use the fastest cost-efficient models for bounded work and Sol ultra for authority work.",
+    "must": ["support ultra reasoning", "rank from explicit quality speed economy catalog evidence", "execute configured fallback lists", "record requested resolved and actual settings separately"],
+    "must_not": ["choose the first candidate blindly", "invent cost scores", "pause for non-hard-lock fallback"]
+  },
+  {
+    "id": "run-defect-owner-roundtrip",
+    "skill": "allinluna-run",
+    "prompt": "Independent acceptance found a reproducible defect in the backend owner lane.",
+    "must": ["create a structured defect", "return the original owner to ready", "record repair commit", "re-run affected acceptance", "block completion until resolved"],
+    "must_not": ["let acceptance repair the implementation", "mark the run complete with an open defect"]
+  },
+  {
     "id": "run-recovery",
     "skill": "allinluna-run",
     "prompt": "Recover after context compaction.",

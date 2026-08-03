@@ -1,5 +1,7 @@
 # All in Luna
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Adaptive orchestration. Your models, your budget, your way.**
 
 All in Luna is an open-source Codex plugin for planning and completing software projects with explicit control over models, reasoning effort, delegation, concurrency, and resource limits. It works with an existing repository or a greenfield idea, from a small plan-only request to a persistent multi-agent program.

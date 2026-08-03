@@ -1,5 +1,7 @@
 # Contributing
 
+[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING.zh-CN.md)
+
 Contributions should improve a real user journey, deterministic state behavior, platform compatibility, or evaluation coverage.
 
 1. Create a focused branch.

@@ -50,9 +50,12 @@ def validate() -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     required = [
         ROOT / "README.md",
+        ROOT / "README.zh-CN.md",
         ROOT / "LICENSE",
         ROOT / "CONTRIBUTING.md",
+        ROOT / "CONTRIBUTING.zh-CN.md",
         ROOT / "SECURITY.md",
+        ROOT / "SECURITY.zh-CN.md",
         ROOT / ".agents" / "plugins" / "marketplace.json",
         PLUGIN / ".codex-plugin" / "plugin.json",
     ]
@@ -60,9 +63,30 @@ def validate() -> tuple[list[str], list[str]]:
         if not path.is_file():
             errors.append(f"missing required file: {path.relative_to(ROOT)}")
 
+    language_pairs = [
+        (ROOT / "README.md", ROOT / "README.zh-CN.md"),
+        (ROOT / "CONTRIBUTING.md", ROOT / "CONTRIBUTING.zh-CN.md"),
+        (ROOT / "SECURITY.md", ROOT / "SECURITY.zh-CN.md"),
+    ]
+    for english, chinese in language_pairs:
+        if english.is_file() and chinese.is_file():
+            if chinese.name not in english.read_text(encoding="utf-8"):
+                errors.append(f"{english.name} does not link to {chinese.name}")
+            if english.name not in chinese.read_text(encoding="utf-8"):
+                errors.append(f"{chinese.name} does not link to {english.name}")
+    readme_en = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    if readme_en.count("\n## ") != readme_zh.count("\n## "):
+        errors.append("English and Chinese README section counts differ")
+    for mode in ("premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"):
+        if f"`{mode}`" not in readme_en or f"`{mode}`" not in readme_zh:
+            errors.append(f"resource mode {mode} is missing from a README language")
+
     try:
-        marketplace = json.loads(required[4].read_text(encoding="utf-8"))
-        plugin = json.loads(required[5].read_text(encoding="utf-8"))
+        marketplace_path = ROOT / ".agents" / "plugins" / "marketplace.json"
+        plugin_path = PLUGIN / ".codex-plugin" / "plugin.json"
+        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+        plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
         if marketplace.get("name") != "allinluna":
             errors.append("marketplace name must be allinluna")
         entries = marketplace.get("plugins", [])

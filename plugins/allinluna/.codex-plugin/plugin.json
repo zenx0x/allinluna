@@ -1,6 +1,6 @@
 {
   "name": "allinluna",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Plan and run complete, resource-aware agent development workflows.",
   "author": {
     "name": "zenx0x",
@@ -33,7 +33,10 @@
     "defaultPrompt": [
       "Plan this project with All in Luna.",
       "Execute this plan with isolated parallel tasks and an explicit resource mode.",
-      "Resume the saved All in Luna workflow."
+      "Resume the saved All in Luna workflow.",
+      "使用 All in Luna 为这个项目生成完整计划。",
+      "使用明确的资源模式和隔离任务完整执行这个计划。",
+      "恢复已经保存的 All in Luna 开发流程。"
     ]
   }
 }

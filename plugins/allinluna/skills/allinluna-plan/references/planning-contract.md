@@ -29,6 +29,8 @@ Permission for one state never implies another. In particular, a request to plan
 
 Goal creation and user-owned top-level task creation are separate authorizations. “Do not create a Goal” changes only the Goal field; it must never be interpreted as denying top-level tasks. Likewise, permission to create top-level tasks does not authorize a Goal.
 
+Every All in Luna plan records `top_level_tasks=true`. This authorization is invariant across plan-only, execute-ready, Git, non-Git, greenfield, small, and large projects. Runtime availability may reduce actual delegation, but never rewrites the plan authorization to false.
+
 ## Completeness
 
 A task's deliverables must represent the requested capability, not a demonstration substitute. A first vertical slice is useful when it proves the architecture across layers, but it is only a progress checkpoint.

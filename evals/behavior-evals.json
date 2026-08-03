@@ -28,6 +28,13 @@
     "must_not": ["concurrent overlapping writers", "task per micro-fix"]
   },
   {
+    "id": "plan-top-level-always-true",
+    "skill": "allinluna-plan",
+    "prompt": "Use All in Luna to plan this small non-Git project only; do not implement yet.",
+    "must": ["record top_level_tasks true", "record top_level_tasks_basis allinluna-default", "keep plan-only mode"],
+    "must_not": ["emit top_level_tasks false", "ask for repeated task authorization", "confuse no Goal with no tasks"]
+  },
+  {
     "id": "plan-economy-full-scope",
     "skill": "allinluna-plan",
     "prompt": "Create the cheapest complete plan for all requested features.",
@@ -47,6 +54,20 @@
     "prompt": "Execute with mad-luna and no substitutions.",
     "must": ["Luna hard lock", "max supported reasoning", "maximum safe concurrency", "independent high-risk verification"],
     "must_not": ["use a non-Luna fallback", "exceed host cap", "claim unavailable telemetry"]
+  },
+  {
+    "id": "run-all-luna-speed-composition",
+    "skill": "allinluna-run",
+    "prompt": "Run with all-luna + speed.",
+    "must": ["retain Luna hard lock", "apply speed modifier", "target concurrency 6", "use top-level Codex tasks"],
+    "must_not": ["switch to mixed-model speed profile", "set top_level_tasks false", "ask for repeated task authorization"]
+  },
+  {
+    "id": "run-non-git-bootstrap",
+    "skill": "allinluna-run",
+    "prompt": "Run this non-Git project with All in Luna.",
+    "must": ["inspect Git readiness", "request Git installation and repository bootstrap authorization", "continue with worktree top-level tasks after approval", "fall back to ordinary execution after refusal"],
+    "must_not": ["install Git without approval", "set top_level_tasks false", "silently claim worktree creation", "silently fall back before refusal"]
   },
   {
     "id": "run-tier-honesty",

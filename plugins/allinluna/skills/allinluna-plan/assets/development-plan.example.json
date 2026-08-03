@@ -27,13 +27,15 @@
     "implementation_writes": true,
     "git_operations": true,
     "goal_creation": false,
-    "top_level_tasks": false,
+    "top_level_tasks": true,
+    "top_level_tasks_basis": "allinluna-default",
     "destructive_operations": false,
     "live_external_mutation": false,
     "publication": false
   },
   "resource_policy": {
     "profile": "balanced",
+    "modifiers": [],
     "hard_model_lock": null,
     "unavailable_action": "ask",
     "fallback_models": [],

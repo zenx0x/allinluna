@@ -14,6 +14,9 @@ PLAN = ROOT / "plugins" / "allinluna" / "skills" / "allinluna-plan"
 RUN = ROOT / "plugins" / "allinluna" / "skills" / "allinluna-run"
 SCRIPTS = RUN / "scripts"
 EXAMPLE = PLAN / "assets" / "development-plan.example.json"
+sys.path.insert(0, str(SCRIPTS))
+
+from inspect_git_readiness import inspect as inspect_git_readiness  # noqa: E402
 
 
 def command(*args: str) -> subprocess.CompletedProcess[str]:
@@ -27,6 +30,20 @@ def command(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 class RunLifecycleTests(unittest.TestCase):
+    def test_git_readiness_requests_bootstrap_for_non_git_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            missing_git = inspect_git_readiness(root, git_executable="")
+            self.assertFalse(missing_git["worktree_ready"])
+            self.assertEqual(
+                missing_git["required_authorization"],
+                ["install-git", "initialize-repository", "create-baseline-commit"],
+            )
+
+            available_git = inspect_git_readiness(root)
+            self.assertFalse(available_git["worktree_ready"])
+            self.assertIn("initialize-repository", available_git["required_authorization"])
+
     def init(self, root: Path, profile: str = "balanced", plan: Path = EXAMPLE, *extra: str) -> Path:
         result = command(
             str(SCRIPTS / "init_run.py"),
@@ -146,6 +163,37 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(payload["delegation"]["selected"], "top-level-task")
         self.assertEqual(payload["resolved_roles"]["engineer"]["actual_model"], "gpt-5.6-luna")
 
+    def test_plan_selects_all_luna_speed_without_profile_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["resource_policy"].update(
+                {
+                    "profile": "all-luna",
+                    "modifiers": ["speed"],
+                    "hard_model_lock": "luna",
+                }
+            )
+            plan["resource_policy"]["concurrency"]["desired"] = 6
+            plan_path = Path(temporary) / "all-luna-speed.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            result = command(
+                str(SCRIPTS / "resolve_profile.py"),
+                "--plan",
+                str(plan_path),
+                "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+                "--delegation",
+                "top-level-task",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["profile"], "all-luna")
+            self.assertEqual(payload["concurrency"]["desired"], 6)
+            self.assertEqual(
+                payload["resolved_roles"]["engineer"]["actual_model"],
+                "gpt-5.6-luna",
+            )
+
     def test_subagent_catalog_does_not_misreport_global_luna_absence(self) -> None:
         catalog = RUN / "assets" / "runtime-catalog.example.json"
         result = command(
@@ -180,20 +228,25 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertEqual(state["capabilities"]["host_concurrency"], 4)
             self.assertFalse(state["goal_authorized"])
 
-    def test_auto_runtime_refuses_root_subagent_fallback_without_top_level_authorization(self) -> None:
+    def test_plan_with_false_top_level_authorization_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["authorizations"]["top_level_tasks"] = False
+            plan_path = temp / "invalid-plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
             result = command(
                 str(SCRIPTS / "init_run.py"),
-                str(EXAMPLE),
+                str(plan_path),
                 "--profile",
                 "all-luna",
                 "--catalog",
                 str(RUN / "assets" / "runtime-catalog.example.json"),
                 "--state-root",
-                str(Path(temporary)),
+                str(temp),
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("instead of falling back to subagents", result.stdout)
+            self.assertIn("top_level_tasks=true", result.stdout)
 
     def test_execution_revision_preserves_source_and_separates_authorizations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -224,6 +277,35 @@ class RunLifecycleTests(unittest.TestCase):
                 source_plan["authorizations"]["git_operations"],
             )
 
+    def test_execution_revision_defaults_legacy_plan_to_top_level_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            source = temp / "legacy-plan.json"
+            revised = temp / "legacy-plan.execute-ready.json"
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["mode"] = "plan-only"
+            plan["authorizations"]["implementation_writes"] = False
+            plan["authorizations"]["top_level_tasks"] = False
+            plan["authorizations"].pop("top_level_tasks_basis")
+            plan["resource_policy"].pop("modifiers")
+            source.write_text(json.dumps(plan), encoding="utf-8")
+            result = command(
+                str(SCRIPTS / "prepare_execution_plan.py"),
+                str(source),
+                "--output",
+                str(revised),
+                "--authorize-implementation-writes",
+                "--deny-goal",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            prepared = json.loads(revised.read_text(encoding="utf-8"))
+            self.assertTrue(prepared["authorizations"]["top_level_tasks"])
+            self.assertEqual(
+                prepared["authorizations"]["top_level_tasks_basis"],
+                "allinluna-default",
+            )
+            self.assertEqual(prepared["resource_policy"]["modifiers"], [])
+
     def test_execution_revision_refuses_source_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "plan.json"
@@ -238,7 +320,7 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must not overwrite", result.stdout)
 
-    def test_top_level_task_requires_explicit_authorization(self) -> None:
+    def test_top_level_task_assignment_is_authorized_by_every_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             run = self.init(Path(temporary))
             result = self.update(
@@ -248,13 +330,11 @@ class RunLifecycleTests(unittest.TestCase):
                 "--status",
                 "running",
                 "--reason",
-                "unauthorized tier",
+                "top-level owner dispatched",
                 "--actual-delegation",
                 "top-level-task",
-                expected=1,
             )
-            self.assertFalse(result["ok"])
-            self.assertIn("authorization", result["errors"][0])
+            self.assertTrue(result["ok"])
 
     def test_hard_budget_pauses_new_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

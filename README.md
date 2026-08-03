@@ -57,7 +57,11 @@ All in Luna **默认不是在当前任务里单线程顺序完成所有工作**�
 
 资源模式给出的期望并发为：`balanced` 3 个、`premium` 4 个、`economy` 2 个、`speed` 6 个、`all-luna` 4 个、`mad-luna` 8 个。实际同时运行数受宿主平台并发上限、任务依赖和文件所有权约束。All in Luna 不会为了凑数量而把每个小修复都创建成顶层任务。
 
-插件自带的默认中文 Prompt 已明确授权创建这些顶层任务，因此普通用户不需要手写 `top_level_tasks=true`。如果用户绕过插件入口、自己编写含义不明确的 Prompt，All in Luna 会询问一次，而不会静默退回根级 subagent 或伪装成并行执行。
+所有 All in Luna 计划都必须记录 `top_level_tasks=true` 和 `top_level_tasks_basis=allinluna-default`，不存在生成 `false` 的模式。即使项目很小、非 Git、plan-only 或最终只有一条紧耦合线路，该授权仍保持为 `true`；实际可并行任务数再由依赖关系和宿主能力决定。
+
+非 Git 项目会先进入 Git 准备流程：All in Luna 检查 Git 是否安装、目录是否已经初始化、是否存在可供 worktree 使用的基线提交，然后一次性请求安装 Git、初始化仓库和创建基线提交的授权。用户接受后由 All in Luna 完成准备并继续多开隔离的顶层任务；用户拒绝后改用普通 subagents 或当前任务顺序执行，同时保持计划中的 `top_level_tasks=true`，并如实记录实际回退原因。
+
+资源策略可以组合。例如 `all-luna + speed` 表示所有委派角色仍硬锁 `gpt-5.6-luna`，同时采用 `speed` 的目标并发 6；它不是把基础 profile 改成允许混合模型的 `speed`。
 
 第一次使用可以直接输入：
 
@@ -102,8 +106,8 @@ codex plugin marketplace add zenx0x/allinluna
 
 - 用户要求的完整范围始终是完成标准；第一个纵向切片只是进度检查点。
 - Goal 必须由用户明确选择，不能因任务规模较大而自动创建。
-- 用户可见顶层任务是另一项独立授权；禁止 Goal 不等于禁止创建顶层任务。
-- Skill 自带 Prompt 会明确授权顶层负责人，因此这是普通用户默认的首次使用路径。
+- 所有 All in Luna 计划一律授权用户可见顶层任务；禁止 Goal 不会改变这一字段。
+- 实际无法使用 worktree 或用户拒绝 Git 准备时，只降级运行层级，不把计划字段改回 `false`。
 - 每个顶层负责人可以使用有界 subagents；根协调任务不得用 subagent 替代负责人线路。
 - 项目指令和脏工作区会被检查并保留。
 - 独立写入者获得明确的文件所有权；发现缺陷后返回原实施任务修复。

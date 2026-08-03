@@ -54,11 +54,11 @@ Use the smallest topology that can complete the full scope:
 
 - **Small:** current task, ordered steps, focused checks.
 - **Medium:** current coordinator plus a few independent subagents when available.
-- **Large:** independent owner lanes, one phase integration, and one independent acceptance. User-facing top-level Codex tasks require explicit user authorization; otherwise use subagents or sequential execution.
+- **Large:** independent owner lanes, one phase integration, and one independent acceptance. All in Luna plans always authorize user-facing top-level Codex tasks; root-level subagents or sequential execution are runtime fallbacks only and never change the plan authorization.
 
-All in Luna's packaged default prompt explicitly authorizes user-visible top-level tasks, so plans created from that entry should set `top_level_tasks=true` and design independent substantive owner lanes as top-level Codex tasks. Each owner brief may authorize bounded internal subagents. For hand-written prompts without top-level authorization, ask once rather than defaulting root ownership to subagents.
+Every All in Luna plan must set `top_level_tasks=true`. Never emit `false`, including for plan-only, non-Git, greenfield, small, tightly coupled, or single-lane work. Design independent substantive owner lanes as user-visible top-level Codex tasks and allow each owner bounded internal subagents. A tightly coupled project may produce only one top-level owner, but the authorization remains true.
 
-Track Goal and task authorization independently. “Do not create a Goal” sets only `goal_creation=false`; it must not be copied into `top_level_tasks=false`. Set `top_level_tasks` from the user's separate task/thread instruction. If user-visible top-level tasks materially determine whether a hard-locked model can run and authorization is missing, ask one focused question instead of later misreporting that model as unavailable.
+Track Goal and task authorization independently. “Do not create a Goal” sets only `goal_creation=false`; it must not be copied into `top_level_tasks=false`. All in Luna always records top-level task authorization as true.
 
 Parallelize only work that is independent in both dependencies and writable file ownership. A task with shared files must depend on the owning implementation or be assigned to the integration lane.
 
@@ -71,6 +71,8 @@ parallel implementation -> one phase integration -> one milestone acceptance
 ## 4. Select a resource mode
 
 Use `balanced` when the user has no preference. Available profiles are `premium`, `balanced`, `economy`, `speed`, `all-luna`, `mad-luna`, and `custom`.
+
+Allow a model policy and an execution strategy to compose. Interpret `all-luna + speed` as base profile `all-luna`, modifier `speed`, Luna hard lock retained for every delegated role, and desired concurrency 6 with maximum-safe independent scheduling. Record `resource_policy.modifiers: ["speed"]`; never replace the Luna hard lock with the mixed-model `speed` profile.
 
 Keep these controls independent:
 
@@ -119,6 +121,7 @@ The final planning response must state:
 - repository/greenfield evidence;
 - task dependency order and safe parallel lanes;
 - selected resource mode plus overrides;
+- invariant top-level task authorization (`top_level_tasks=true`, `top_level_tasks_basis=allinluna-default`);
 - Goal authorization (`false` unless explicit);
 - external actions needing later confirmation;
 - exact plan artifact path and validation result;

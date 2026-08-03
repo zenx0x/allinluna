@@ -87,6 +87,26 @@ class ResourceProfileTests(unittest.TestCase):
         self.assertEqual(result["policy"]["budget"]["metric"], "credits")
         self.assertEqual(result["policy"]["budget"]["hard_limit"], 20)
 
+    def test_all_luna_speed_composes_lock_and_concurrency(self) -> None:
+        policy = {
+            "profile": "all-luna",
+            "modifiers": ["speed"],
+            "hard_model_lock": "luna",
+            "concurrency": {"desired": 6},
+            "role_overrides": {},
+        }
+        result = resolve(self.profiles, "all-luna", plan_policy=policy)
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["policy"]["hard_model_lock"]["family"], "luna")
+        self.assertEqual(result["policy"]["modifiers"], ["speed"])
+        self.assertEqual(result["concurrency"]["desired"], 6)
+        self.assertTrue(
+            all(
+                role["model_request"] == "family:luna"
+                for role in result["policy"]["roles"].values()
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

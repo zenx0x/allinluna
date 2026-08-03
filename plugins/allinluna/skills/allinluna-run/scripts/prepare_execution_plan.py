@@ -22,7 +22,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("plan", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--authorize-implementation-writes", action="store_true")
-    parser.add_argument("--authorize-top-level-tasks", action="store_true")
+    parser.add_argument(
+        "--authorize-top-level-tasks",
+        action="store_true",
+        help="Compatibility flag; every All in Luna execution already authorizes top-level tasks.",
+    )
     parser.add_argument("--authorize-git-operations", action="store_true")
     parser.add_argument("--deny-goal", action="store_true")
     parser.add_argument("--pretty", action="store_true")
@@ -41,14 +45,21 @@ def main(argv: list[str] | None = None) -> int:
         revised = deepcopy(plan)
         changed: list[str] = []
 
+        if "modifiers" not in revised.get("resource_policy", {}):
+            revised["resource_policy"]["modifiers"] = []
+            changed.append("resource_policy.modifiers")
+
         if args.authorize_implementation_writes:
             revised["authorizations"]["implementation_writes"] = True
             if revised["mode"] == "plan-only":
                 revised["mode"] = "execute-ready"
             changed.extend(["mode", "authorizations.implementation_writes"])
-        if args.authorize_top_level_tasks:
+        if revised["authorizations"]["top_level_tasks"] is not True:
             revised["authorizations"]["top_level_tasks"] = True
             changed.append("authorizations.top_level_tasks")
+        if revised["authorizations"].get("top_level_tasks_basis") != "allinluna-default":
+            revised["authorizations"]["top_level_tasks_basis"] = "allinluna-default"
+            changed.append("authorizations.top_level_tasks_basis")
         if args.authorize_git_operations:
             revised["authorizations"]["git_operations"] = True
             changed.append("authorizations.git_operations")

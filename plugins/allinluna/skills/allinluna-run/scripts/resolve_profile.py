@@ -118,6 +118,11 @@ def resolve(
     policy = deepcopy(profile_table[profile_name])
     if plan_policy:
         same_profile = plan_policy.get("profile") == profile_name
+        modifiers = plan_policy.get("modifiers", [])
+        if "speed" in modifiers:
+            speed = profile_table.get("speed", {})
+            policy["concurrency"] = deepcopy(speed.get("concurrency", policy.get("concurrency", {})))
+            policy["modifiers"] = ["speed"]
         plan_override = {
             key: value
             for key, value in plan_policy.items()
@@ -251,7 +256,7 @@ def resolve(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", default="balanced")
+    parser.add_argument("--profile")
     parser.add_argument("--profiles", type=Path, default=DEFAULT_PROFILES)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--catalog", type=Path)
@@ -271,11 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         profiles = read_json(args.profiles)
         plan_policy = read_json(args.plan).get("resource_policy") if args.plan else None
+        profile_name = args.profile or (plan_policy or {}).get("profile") or "balanced"
         catalog = read_json(args.catalog) if args.catalog else None
         role_overrides = dict(parse_role_override(item) for item in args.role)
         result = resolve(
             profiles,
-            args.profile,
+            profile_name,
             plan_policy=plan_policy,
             role_overrides=role_overrides,
             catalog=catalog,

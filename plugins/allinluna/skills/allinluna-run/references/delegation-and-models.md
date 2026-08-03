@@ -2,13 +2,13 @@
 
 ## Capability tiers
 
-- `top-level-task`: a user-visible task/thread with its own lifecycle. Create only when the user explicitly requested it.
+- `top-level-task`: a user-visible task/thread with its own lifecycle. Every All in Luna plan authorizes this tier.
 - `subagent`: a bounded child inside the current task tree.
 - `sequential`: current-agent execution.
 
 Use the highest tier that is both available and authorized—not the highest tier imagined by the plan. Record capability discovery in run state.
 
-All built-in profiles make `top-level-task` the root coordinator's preferred delegation. Root-level subagent and sequential execution are opt-in fallbacks, not automatic substitutes for owner lanes. The packaged skill prompt explicitly requests user-visible top-level tasks; a manually written ambiguous prompt requires one authorization question before dispatch.
+All built-in profiles make `top-level-task` the root coordinator's preferred delegation, and every All in Luna plan records `top_level_tasks=true`. Root-level subagent and sequential execution are runtime fallbacks, not substitutes for owner lanes and not reasons to rewrite plan authorization.
 
 Top-level owners may use bounded internal subagents without returning ownership to the root coordinator. Their task brief must explicitly allow this and preserve the owner's exclusive paths, base commit, model policy, reasoning ceiling, budget, tests, and reporting contract. Internal subagents cannot independently satisfy the owner task; the owner must integrate and verify their work. Hard family locks apply recursively.
 
@@ -16,13 +16,15 @@ Top-level owners may use bounded internal subagents without returning ownership 
 
 On Codex App, inspect `codex_app__create_thread` before concluding that a model is unavailable. Its tool declaration is the authoritative catalog for user-visible top-level tasks and may include models (for example `gpt-5.6-luna`) that are absent from the subagent tool declaration. Use `codex_app__list_projects` before creating a project-scoped task, then call `codex_app__create_thread` with the exact `model` and supported `thinking` requested by the profile.
 
-Keep catalogs scoped by delegation surface. A model unavailable to subagents but available to top-level tasks is `available_on_top_level`, not globally unavailable. If the plan lacks top-level-task authorization, ask for that authorization; do not silently downgrade and do not call the model missing.
+Parallel top-level implementation uses Git worktree isolation. For a non-Git project, request one explicit authorization covering any required Git installation, `git init`, preservation of existing files, local identity setup if needed, and an initial baseline commit. After setup, verify readiness and create worktree tasks. If the user refuses, use ordinary subagents or sequential execution and record `user-declined-git-bootstrap`; keep the plan authorization true.
 
-Goal authorization is independent. The phrase “do not create a Goal” changes only `goal_creation`; it does not set `top_level_tasks=false` unless the user separately denied task/thread creation.
+Keep catalogs scoped by delegation surface. A model unavailable to subagents but available to top-level tasks is `available_on_top_level`, not globally unavailable. If an older plan lacks top-level-task authorization, create an execution revision with it set true; do not silently downgrade and do not call the model missing.
+
+Goal authorization is independent. The phrase “do not create a Goal” changes only `goal_creation`; every All in Luna plan still records `top_level_tasks=true`.
 
 ## Stale plan authorization
 
-The current explicit user message can supersede an older plan's authorization booleans. Preserve the old plan as history and create a new validated execution revision with `prepare_execution_plan.py`; never edit the source snapshot in place. If the user currently authorizes top-level tasks, record that in the revision and use the top-level catalog. Do not silently fall back to subagents because the old snapshot predates that authorization.
+Preserve an older plan as history and create a new validated execution revision with `prepare_execution_plan.py`; never edit the source snapshot in place. The revision always records `top_level_tasks=true` and uses the top-level catalog. Do not silently fall back to subagents because the old snapshot predates this invariant.
 
 ## Task brief
 

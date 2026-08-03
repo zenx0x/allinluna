@@ -56,6 +56,27 @@ class PlanValidationTests(unittest.TestCase):
         plan["authorizations"]["top_level_tasks"] = True
         self.assertTrue(validate(plan)["valid"])
 
+    def test_top_level_tasks_are_always_true(self) -> None:
+        plan = deepcopy(self.example)
+        plan["authorizations"]["top_level_tasks"] = False
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("top_level_tasks=true" in error for error in result["errors"]))
+
+    def test_all_luna_speed_requires_composed_policy(self) -> None:
+        plan = deepcopy(self.example)
+        plan["resource_policy"].update(
+            {
+                "profile": "all-luna",
+                "modifiers": ["speed"],
+                "hard_model_lock": "luna",
+            }
+        )
+        plan["resource_policy"]["concurrency"]["desired"] = 6
+        self.assertTrue(validate(plan)["valid"])
+        plan["resource_policy"]["concurrency"]["desired"] = 4
+        self.assertFalse(validate(plan)["valid"])
+
     def test_luna_profile_requires_hard_lock(self) -> None:
         plan = deepcopy(self.example)
         plan["resource_policy"]["profile"] = "mad-luna"

@@ -40,6 +40,8 @@ Assign logical tiers such as `frontier`, `standard`, `fast`, or a user-requested
 - `mad-luna`: hard Luna family lock, maximum supported reasoning, maximum safe concurrency, and independent Luna verification for high-risk milestones.
 - `custom`: every important field must be explicit; missing fields inherit from balanced only when the user permits inheritance.
 
+Profiles and execution modifiers can compose. `all-luna + speed` means Luna-only roles from `all-luna` plus the `speed` concurrency strategy (desired 6, host-capped); it does not permit mixed-model fallback. Store the composition as `profile: "all-luna"` and `modifiers: ["speed"]`.
+
 ## Hard locks and fallbacks
 
 A hard model lock means every actual assignment must match the lock. Legal policies are:

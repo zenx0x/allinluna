@@ -1,6 +1,6 @@
 ---
 name: allinluna-run
-description: Execute and resume a complete development plan with explicit model, reasoning, delegation, concurrency, Git ownership, verification, recovery, integration, and acceptance controls. Use when the user asks to implement or continue a plan, run parallel agents or top-level tasks, use a resource mode such as economy or mad-luna, persist a long-running workflow, or recover an interrupted multi-lane development effort. Never creates a Goal or user-owned Codex task unless the user explicitly authorized it.
+description: Execute and resume a complete development plan with explicit model, reasoning, delegation, concurrency, Git ownership, verification, recovery, integration, and acceptance controls. Use when the user asks to implement or continue a plan, run parallel agents or top-level tasks, use a resource mode such as economy or mad-luna, persist a long-running workflow, or recover an interrupted multi-lane development effort. Every All in Luna plan authorizes top-level tasks; Goal creation remains separately opt-in.
 ---
 
 # All in Luna - Run
@@ -18,7 +18,7 @@ Tell the user this skill is controlling execution and name the selected resource
 
 If no executable plan exists, use `$allinluna-plan` first. Do not repeatedly replan a plan whose assumptions still hold.
 
-When the user explicitly asks to execute a previously `plan-only` plan, do not run that stale snapshot and do not mutate it in place. Create a validated execution revision with `scripts/prepare_execution_plan.py`. The current user message may grant newer authorization than the old plan: record only the capabilities explicitly granted now. In particular, an explicit request for user-visible top-level tasks sets `top_level_tasks=true`, while “do not create a Goal” independently keeps `goal_creation=false`.
+When the user asks All in Luna to execute a previously `plan-only` plan, do not run that stale snapshot and do not mutate it in place. Create a validated execution revision with `scripts/prepare_execution_plan.py`. The revision always sets `top_level_tasks=true`. “Do not create a Goal” independently keeps `goal_creation=false`.
 
 ```bash
 python scripts/prepare_execution_plan.py PLAN.json \
@@ -42,11 +42,11 @@ Read [references/orchestration-contract.md](references/orchestration-contract.md
 
 Determine which execution tier the host actually exposes:
 
-1. **User-owned top-level tasks:** use only when the user explicitly requested task/thread creation and the host exposes the capability.
+1. **User-owned top-level tasks:** every All in Luna plan authorizes this tier; use it whenever the host exposes the capability.
 2. **Subagents:** use for bounded independent work when available.
 3. **Sequential:** use the current task when neither delegation tier exists or when work is tightly coupled.
 
-The root coordinator's default delegation for every built-in resource profile is `top-level-task`. For independent substantive owner lanes, create user-visible top-level Codex tasks rather than root-level subagents. The skill's default prompt explicitly grants this permission. When a hand-written prompt does not explicitly authorize task/thread creation, ask once before dispatch. Do not use a root-level subagent as a substitute for a planned top-level owner.
+The root coordinator's default delegation for every built-in resource profile is `top-level-task`, and every All in Luna plan records that authorization as true. For independent substantive owner lanes, create user-visible top-level Codex tasks rather than root-level subagents. Do not ask the user to repeat the authorization and do not use a root-level subagent as a substitute for a planned top-level owner.
 
 Each created top-level owner may create its own bounded subagents when that helps complete its assigned scope. Authorize this in the self-contained owner brief. Owner subagents must remain inside the owner's paths, base, model lock, budget, and completion contract; they do not become additional top-level lanes and their output is not completion until the owner integrates and verifies it. In `all-luna` and `mad-luna`, owner subagents must inherit or explicitly use Luna and may not silently switch families.
 
@@ -60,7 +60,11 @@ On Codex App hosts, discover top-level capability before inspecting subagents:
 4. create a delegation-scoped runtime catalog like `assets/runtime-catalog.example.json` outside the target repository;
 5. resolve the requested profile against the intended delegation surface.
 
-Do not infer that Luna is unavailable from a subagent-only model list. If Luna exists for top-level tasks but top-level creation is not authorized, report that exact authorization gap and ask once; do not report a model-availability failure. When the current user message explicitly authorizes top-level tasks but an older plan says false, create the execution revision above. Never choose subagents merely because the stale plan says false. “Do not create a Goal” controls only Goal creation and does not deny top-level tasks.
+Require Git-backed isolation for parallel top-level implementation owners. Run `scripts/inspect_git_readiness.py PROJECT_ROOT --pretty` first. If Git is missing, ask once for permission to install Git with the host's supported package manager. If the directory is not a repository or has no commit, ask in the same request for permission to initialize it, preserve the existing files, create an initial baseline commit, and enable worktrees. After authorization, perform the setup, re-run readiness inspection, then dispatch project-scoped worktree tasks. Never install software, initialize Git, configure identity, or commit without that authorization.
+
+If the user declines Git setup, keep the plan's `top_level_tasks=true` invariant but record actual delegation as `subagent` when available, otherwise `sequential`, with fallback reason `user-declined-git-bootstrap`. The refusal is approval for this ordinary fallback only; it does not authorize other model-family fallbacks, destructive actions, publication, or live mutation. Do not retry invalid worktree parameters or claim top-level tasks were created.
+
+Do not infer that Luna is unavailable from a subagent-only model list. When an older plan says false, create the execution revision above and set it true. Never choose subagents merely because the stale plan says false. “Do not create a Goal” controls only Goal creation and does not deny top-level tasks.
 
 Resolve models against the current host catalog. Keep requested and actual model/reasoning fields separate. If a requested model or reasoning level is unavailable:
 
@@ -130,6 +134,8 @@ Use focused tests within owner lanes. Reserve broader suites for phase integrati
 - `mad-luna`: hard-lock all roles to Luna, request maximum supported reasoning and maximum safe concurrency, and add an independent Luna verifier to high-risk milestones.
 - `custom`: follow exact role assignments and limits.
 
+For `all-luna + speed`, retain the `all-luna` hard model lock and roles, apply the `speed` modifier, and target concurrency 6 subject to host and dependency caps. Do not resolve it as the mixed-model `speed` profile.
+
 `mad-luna` is not permission to exceed host capacity, user budget, repository safety, or external-action boundaries. No mode may lower the completion standard.
 
 ## 7. Integrate once, accept independently
@@ -179,7 +185,7 @@ Mark the run complete only after `validate_run.py` accepts it. The final respons
 
 ## Non-negotiable behavior
 
-- Goal creation and top-level task creation remain separate explicit opt-ins; denying one never denies the other.
+- Goal creation remains opt-in; top-level task authorization is always true in All in Luna plans and is never derived from Goal state.
 - A model lock is a hard constraint, not a preference.
 - Requested settings never substitute for actual runtime evidence.
 - Cost and token values remain `unavailable` when the platform does not expose them.

@@ -41,10 +41,12 @@ REQUIRED_AUTH = {
     "git_operations",
     "goal_creation",
     "top_level_tasks",
+    "top_level_tasks_basis",
     "destructive_operations",
     "live_external_mutation",
     "publication",
 }
+BOOLEAN_AUTH = REQUIRED_AUTH - {"top_level_tasks_basis"}
 REQUIRED_TASK = {
     "id",
     "title",
@@ -155,9 +157,15 @@ def validate(data: Any) -> dict[str, Any]:
         missing_auth = sorted(REQUIRED_AUTH - auth.keys())
         if missing_auth:
             errors.append(f"missing authorizations: {', '.join(missing_auth)}")
-        for field in REQUIRED_AUTH & auth.keys():
+        for field in BOOLEAN_AUTH & auth.keys():
             if not isinstance(auth[field], bool):
                 errors.append(f"authorizations.{field} must be boolean")
+        if auth.get("top_level_tasks") is not True:
+            errors.append("All in Luna plans require authorizations.top_level_tasks=true")
+        if auth.get("top_level_tasks_basis") != "allinluna-default":
+            errors.append(
+                "authorizations.top_level_tasks_basis must be allinluna-default"
+            )
     if auth.get("goal_creation") and data.get("mode") != "goal-ready":
         errors.append("goal_creation can be true only for goal-ready mode")
     if data.get("mode") == "goal-ready" and not auth.get("goal_creation"):
@@ -172,6 +180,11 @@ def validate(data: Any) -> dict[str, Any]:
     profile = policy.get("profile")
     if profile not in PROFILES:
         errors.append(f"resource_policy.profile must be one of {', '.join(sorted(PROFILES))}")
+    modifiers = policy.get("modifiers")
+    if not isinstance(modifiers, list) or len(modifiers) != len(set(modifiers)):
+        errors.append("resource_policy.modifiers must be a unique array")
+    elif any(modifier not in {"speed"} for modifier in modifiers):
+        errors.append("resource_policy.modifiers supports only speed")
     concurrency = policy.get("concurrency")
     if not isinstance(concurrency, dict) or not isinstance(concurrency.get("desired"), int) or concurrency.get("desired", 0) < 1:
         errors.append("resource_policy.concurrency.desired must be a positive integer")
@@ -180,6 +193,10 @@ def validate(data: Any) -> dict[str, Any]:
     hard_lock = policy.get("hard_model_lock")
     if profile in {"all-luna", "mad-luna"} and (not isinstance(hard_lock, str) or "luna" not in hard_lock.lower()):
         errors.append(f"{profile} requires a Luna hard_model_lock")
+    if "speed" in (modifiers or []) and (
+        not isinstance(concurrency, dict) or concurrency.get("desired") != 6
+    ):
+        errors.append("speed modifier requires resource_policy.concurrency.desired=6")
     if hard_lock and policy.get("fallback_models"):
         outside = [item for item in policy["fallback_models"] if hard_lock.lower() not in item.lower()]
         if outside:

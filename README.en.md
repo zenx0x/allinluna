@@ -57,7 +57,11 @@ All in Luna **does not default to completing everything sequentially inside the 
 
 Desired concurrency by profile is: `balanced` 3, `premium` 4, `economy` 2, `speed` 6, `all-luna` 4, and `mad-luna` 8. Actual concurrency is limited by the host, dependencies, and ownership safety. All in Luna does not create a top-level task for every micro-fix merely to reach a number.
 
-The packaged Chinese default prompts explicitly authorize these top-level tasks, so ordinary users do not need to write `top_level_tasks=true`. If a user bypasses the packaged entry with an ambiguous hand-written prompt, All in Luna asks once instead of silently falling back to root-level subagents or pretending sequential work is parallel.
+Every All in Luna plan must record `top_level_tasks=true` and `top_level_tasks_basis=allinluna-default`; there is no mode that emits `false`. The authorization remains true for small, non-Git, plan-only, or tightly coupled projects even when dependency analysis ultimately yields only one owner.
+
+Non-Git projects enter a Git-readiness flow first. All in Luna checks whether Git is installed, whether the directory is initialized, and whether a baseline commit exists for worktrees, then requests one authorization to install Git, initialize the repository, and create that baseline. If accepted, All in Luna prepares Git and continues with isolated top-level tasks. If declined, it uses ordinary subagents or sequential execution while preserving `top_level_tasks=true` in the plan and recording the actual fallback reason.
+
+Resource policies compose. For example, `all-luna + speed` keeps every delegated role hard-locked to `gpt-5.6-luna` while applying `speed`'s desired concurrency of 6; it does not switch the base profile to mixed-model `speed`.
 
 First-time users can simply enter:
 
@@ -106,8 +110,8 @@ and continue until the plan's completion standard is met.
 
 - Full requested scope remains the completion standard; a first vertical slice is only a progress checkpoint.
 - Goal creation is opt-in, never inferred.
-- User-visible top-level task creation is a separate opt-in and is never disabled merely because Goal creation was denied.
-- Packaged prompts explicitly authorize top-level owners, making them the normal first-use path.
+- Every All in Luna plan authorizes user-visible top-level tasks; denying Goal creation never changes that field.
+- When worktrees are unavailable or Git preparation is declined, only actual delegation falls back; the plan field never returns to `false`.
 - Each top-level owner may use bounded internal subagents; the root coordinator does not substitute subagents for owner lanes.
 - Project instructions and dirty worktrees are inspected and preserved.
 - Independent writers receive explicit ownership; defects return to the owning task.

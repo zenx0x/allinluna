@@ -1,6 +1,6 @@
 {
   "name": "allinluna",
-  "version": "0.1.1+codex.20260803105007",
+  "version": "0.1.1+codex.20260803110444",
   "description": "\u89c4\u5212\u5e76\u6267\u884c\u5b8c\u6574\u3001\u8d44\u6e90\u53ef\u63a7\u7684\u591a\u4efb\u52a1\u5f00\u53d1\u5de5\u4f5c\u6d41\u3002",
   "author": {
     "name": "zenx0x",
@@ -31,11 +31,11 @@
     ],
     "websiteURL": "https://github.com/zenx0x/allinluna",
     "defaultPrompt": [
-      "\u4f7f\u7528 All in Luna \u89c4\u5212\u9879\u76ee\uff1a\u9ed8\u8ba4\u5c06\u72ec\u7acb\u4e3b\u4f53\u7ebf\u8def\u521b\u5efa\u4e3a\u591a\u4e2a\u4fa7\u8fb9\u680f\u53ef\u89c1\u7684\u9876\u5c42 Codex \u4efb\u52a1\uff1b\u6bcf\u4e2a\u8d1f\u8d23\u4eba\u53ef\u4ee5\u4f7f\u7528\u6709\u754c subagents\uff0c\u4e0d\u521b\u5efa Goal\u3002",
-      "\u4f7f\u7528 All in Luna \u5b8c\u6574\u6267\u884c\u8ba1\u5212\uff1a\u5e76\u884c\u6d3e\u53d1\u9876\u5c42 Codex \u4efb\u52a1\uff0c\u8d1f\u8d23\u4eba\u53ef\u4f7f\u7528\u6709\u754c subagents\uff0c\u6839\u534f\u8c03\u4e0d\u5f97\u7528 subagent \u66ff\u4ee3\u9876\u5c42\u8d1f\u8d23\u4eba\u3002",
+      "\u4f7f\u7528 All in Luna \u89c4\u5212\u9879\u76ee\uff1a\u6240\u6709\u8ba1\u5212\u5fc5\u987b\u5199\u5165 top_level_tasks=true\uff0c\u5c06\u72ec\u7acb\u4e3b\u4f53\u7ebf\u8def\u521b\u5efa\u4e3a\u591a\u4e2a\u4fa7\u8fb9\u680f\u53ef\u89c1\u7684\u9876\u5c42 Codex \u4efb\u52a1\uff1b\u6bcf\u4e2a\u8d1f\u8d23\u4eba\u53ef\u4ee5\u4f7f\u7528\u6709\u754c subagents\u3002",
+      "\u4f7f\u7528 All in Luna \u5b8c\u6574\u6267\u884c\u8ba1\u5212\uff1a\u786e\u4fdd top_level_tasks=true \u5e76\u6d3e\u53d1\u9876\u5c42 Codex \u4efb\u52a1\uff1b\u975e Git \u9879\u76ee\u5148\u8bf7\u6c42 Git \u51c6\u5907\u6388\u6743\uff0c\u8d1f\u8d23\u4eba\u53ef\u4f7f\u7528\u6709\u754c subagents\u3002",
       "\u4f7f\u7528 All in Luna \u6062\u590d\u5df2\u4fdd\u5b58\u7684\u5de5\u4f5c\u6d41\uff0c\u901a\u8fc7\u591a\u4e2a\u9876\u5c42\u8d1f\u8d23\u4eba\u53ca\u5176\u6709\u754c subagents \u6301\u7eed\u63a8\u8fdb\u5230\u96c6\u6210\u548c\u9a8c\u6536\u5b8c\u6210\u3002",
-      "Plan this project with independent owner lanes as user-visible top-level Codex tasks; each owner may use bounded internal subagents and no Goal is created.",
-      "Execute this plan through top-level Codex task owners; owners may use bounded internal subagents, but the root must not replace owner tasks with subagents.",
+      "Plan this project with top_level_tasks=true and independent owner lanes as user-visible top-level Codex tasks; each owner may use bounded internal subagents.",
+      "Execute this plan with top_level_tasks=true through worktree owners; request Git bootstrap authorization first for a non-Git project.",
       "Resume the saved All in Luna workflow through top-level owners and their bounded internal subagents."
     ]
   }

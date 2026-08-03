@@ -64,6 +64,7 @@
         "git_operations",
         "goal_creation",
         "top_level_tasks",
+        "top_level_tasks_basis",
         "destructive_operations",
         "live_external_mutation",
         "publication"
@@ -72,7 +73,10 @@
         "implementation_writes": { "type": "boolean" },
         "git_operations": { "type": "boolean" },
         "goal_creation": { "type": "boolean" },
-        "top_level_tasks": { "type": "boolean" },
+        "top_level_tasks": { "const": true },
+        "top_level_tasks_basis": {
+          "const": "allinluna-default"
+        },
         "destructive_operations": { "type": "boolean" },
         "live_external_mutation": { "type": "boolean" },
         "publication": { "type": "boolean" }
@@ -97,6 +101,7 @@
       "additionalProperties": false,
       "required": [
         "profile",
+        "modifiers",
         "hard_model_lock",
         "unavailable_action",
         "fallback_models",
@@ -107,6 +112,11 @@
       "properties": {
         "profile": {
           "enum": ["premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"]
+        },
+        "modifiers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["speed"] }
         },
         "hard_model_lock": { "type": ["string", "null"] },
         "unavailable_action": { "enum": ["pause", "ask", "fallback-list"] },

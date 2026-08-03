@@ -29,6 +29,8 @@ On Codex App, build the top-level catalog from the `codex_app__create_thread` to
 
 Effective concurrency is always capped by the host, dependencies, writable ownership, and budget.
 
+Use `modifiers: ["speed"]` to compose the speed scheduling strategy with another base profile. In particular, `all-luna + speed` keeps every Luna role and hard lock while raising desired concurrency to 6; it never imports the mixed-model role assignments from `speed`.
+
 Every built-in profile defaults substantive root-level owner lanes to user-visible top-level Codex tasks. Each profile keeps root-level `subagent` then `sequential` as a possible fallback order, but fallback requires explicit user approval. Missing top-level capability never silently changes topology. Once assigned, a top-level owner may use bounded internal subagents under the same ownership and model policy.
 
 ## Mad Luna

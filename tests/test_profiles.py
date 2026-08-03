@@ -44,11 +44,16 @@ class ResourceProfileTests(unittest.TestCase):
         self.assertEqual(result["concurrency"]["desired"], 8)
         self.assertEqual(result["concurrency"]["effective"], 4)
         self.assertTrue(
-            all(role["actual_model"] == "example-luna-model" for role in result["resolved_roles"].values())
+            all(role["actual_model"] == "gpt-5.6-luna" for role in result["resolved_roles"].values())
         )
 
     def test_missing_locked_family_fails_when_catalog_is_known(self) -> None:
-        catalog = {"max_concurrency": 2, "models": [self.catalog["models"][0]]}
+        catalog = {
+            "max_concurrency": 2,
+            "models": [
+                self.catalog["surfaces"]["top-level-task"]["models"][1]
+            ],
+        }
         result = resolve(self.profiles, "mad-luna", catalog=catalog)
         self.assertFalse(result["valid"])
         self.assertTrue(any("no runtime model" in error for error in result["errors"]))

@@ -39,6 +39,8 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 
 模型、推理强度、委派层级、并发和预算是五个相互独立的控制维度。逻辑模型层级会在运行时根据宿主平台当前提供的模型进行解析；运行状态会分别记录请求值和实际值。
 
+在 Codex App 中，All in Luna 会分别读取用户可见顶层任务与 subagent 的模型目录。因此，即使 subagent 只暴露 Sol/Terra，只要 `create_thread` 暴露 Luna，Luna 仍可用于顶层任务。Goal 权限与顶层任务权限彼此独立。
+
 ## 安装
 
 将本仓库添加为 Codex Marketplace：
@@ -64,7 +66,7 @@ codex plugin marketplace add zenx0x/allinluna
 ```text
 使用 $allinluna-run 的 mad-luna 模式。将所有委派角色硬锁定为 Luna，
 请求宿主支持的最高推理强度和最大安全并发，持久化运行状态，
-绝不静默替换为其他模型。
+创建用户可见的独立顶层 Codex 任务，不创建 Goal，绝不静默替换为其他模型。
 ```
 
 ```text
@@ -76,6 +78,7 @@ codex plugin marketplace add zenx0x/allinluna
 
 - 用户要求的完整范围始终是完成标准；第一个纵向切片只是进度检查点。
 - Goal 必须由用户明确选择，不能因任务规模较大而自动创建。
+- 用户可见顶层任务是另一项独立授权；禁止 Goal 不等于禁止创建顶层任务。
 - 项目指令和脏工作区会被检查并保留。
 - 独立写入者获得明确的文件所有权；发现缺陷后返回原实施任务修复。
 - 请求的模型/推理设置和实际运行设置分开记录。
@@ -107,10 +110,12 @@ python plugins/allinluna/skills/allinluna-plan/scripts/validate_plan.py plan.jso
 
 # 根据宿主模型目录解析 mad-luna
 python plugins/allinluna/skills/allinluna-run/scripts/resolve_profile.py `
-  --profile mad-luna --catalog runtime-catalog.json --pretty
+  --profile mad-luna --catalog runtime-catalog.json `
+  --delegation top-level-task --pretty
 
 # 初始化、查看和验证可恢复运行状态
-python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json --profile balanced
+python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
+  --profile balanced --catalog runtime-catalog.json
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY
 python plugins/allinluna/skills/allinluna-run/scripts/validate_run.py RUN_DIRECTORY --pretty
 ```

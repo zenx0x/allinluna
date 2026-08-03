@@ -8,6 +8,14 @@
 
 Use the highest tier that is both available and authorized—not the highest tier imagined by the plan. Record capability discovery in run state.
 
+## Codex App discovery order
+
+On Codex App, inspect `codex_app__create_thread` before concluding that a model is unavailable. Its tool declaration is the authoritative catalog for user-visible top-level tasks and may include models (for example `gpt-5.6-luna`) that are absent from the subagent tool declaration. Use `codex_app__list_projects` before creating a project-scoped task, then call `codex_app__create_thread` with the exact `model` and supported `thinking` requested by the profile.
+
+Keep catalogs scoped by delegation surface. A model unavailable to subagents but available to top-level tasks is `available_on_top_level`, not globally unavailable. If the plan lacks top-level-task authorization, ask for that authorization; do not silently downgrade and do not call the model missing.
+
+Goal authorization is independent. The phrase “do not create a Goal” changes only `goal_creation`; it does not set `top_level_tasks=false` unless the user separately denied task/thread creation.
+
 ## Task brief
 
 Every delegated task must include:

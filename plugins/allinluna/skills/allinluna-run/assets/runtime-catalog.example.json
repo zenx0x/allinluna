@@ -1,17 +1,47 @@
 {
+  "schema_version": "2.0",
   "max_concurrency": 4,
-  "models": [
-    {
-      "id": "example-frontier-model",
-      "families": ["example"],
-      "tiers": ["frontier"],
-      "reasoning": ["low", "medium", "high", "xhigh", "max"]
+  "surfaces": {
+    "top-level-task": {
+      "available": true,
+      "max_concurrency": 4,
+      "models": [
+        {
+          "id": "gpt-5.6-luna",
+          "families": ["luna"],
+          "tiers": ["fast", "standard"],
+          "reasoning": ["low", "medium", "high", "xhigh", "max"]
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "families": ["sol"],
+          "tiers": ["frontier"],
+          "reasoning": ["low", "medium", "high", "xhigh", "max", "ultra"]
+        }
+      ]
     },
-    {
-      "id": "example-luna-model",
-      "families": ["luna"],
-      "tiers": ["fast", "standard"],
-      "reasoning": ["low", "medium", "high", "max"]
+    "subagent": {
+      "available": true,
+      "max_concurrency": 3,
+      "models": [
+        {
+          "id": "gpt-5.6-sol",
+          "families": ["sol"],
+          "tiers": ["frontier"],
+          "reasoning": ["low", "medium", "high", "xhigh", "max", "ultra"]
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "families": ["terra"],
+          "tiers": ["standard"],
+          "reasoning": ["low", "medium", "high", "xhigh", "max", "ultra"]
+        }
+      ]
+    },
+    "sequential": {
+      "available": true,
+      "max_concurrency": 1,
+      "models": []
     }
-  ]
+  }
 }

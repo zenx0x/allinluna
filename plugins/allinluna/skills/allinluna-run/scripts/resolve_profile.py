@@ -13,6 +13,7 @@ from typing import Any
 
 DEFAULT_PROFILES = Path(__file__).resolve().parent.parent / "assets" / "resource-profiles.json"
 REASONING_ORDER = ["low", "medium", "high", "xhigh", "max"]
+DELEGATION_ORDER = ["top-level-task", "subagent", "sequential"]
 
 
 def read_json(path: Path) -> Any:
@@ -55,6 +56,39 @@ def model_candidates(request: str, models: list[dict[str, Any]]) -> list[dict[st
     return [model for model in models if str(model.get("id", "")) == request]
 
 
+def catalog_surface(catalog: dict[str, Any], delegation: str) -> dict[str, Any]:
+    """Return one delegation-scoped catalog while preserving legacy flat catalogs."""
+    surfaces = catalog.get("surfaces")
+    if isinstance(surfaces, dict):
+        surface = surfaces.get(delegation, {})
+        if not isinstance(surface, dict) or surface.get("available") is False:
+            return {"available": False, "models": [], "max_concurrency": 0}
+        return {
+            "available": bool(surface.get("available", True)),
+            "models": surface.get("models", []),
+            "max_concurrency": surface.get(
+                "max_concurrency", catalog.get("max_concurrency")
+            ),
+        }
+    return {
+        "available": True,
+        "models": catalog.get("models", []),
+        "max_concurrency": catalog.get("max_concurrency"),
+    }
+
+
+def matching_surfaces(request: str, catalog: dict[str, Any]) -> list[str]:
+    surfaces = catalog.get("surfaces")
+    if not isinstance(surfaces, dict):
+        return []
+    matches: list[str] = []
+    for name in DELEGATION_ORDER:
+        surface = catalog_surface(catalog, name)
+        if surface["available"] and model_candidates(request, surface["models"]):
+            matches.append(name)
+    return matches
+
+
 def resolve_reasoning(requested: str, supported: list[str]) -> tuple[str, str]:
     if requested in supported:
         return requested, "exact"
@@ -73,6 +107,7 @@ def resolve(
     plan_policy: dict[str, Any] | None = None,
     role_overrides: dict[str, dict[str, str]] | None = None,
     catalog: dict[str, Any] | None = None,
+    delegation: str = "auto",
     concurrency_override: int | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
@@ -115,7 +150,26 @@ def resolve(
     if profile_name == "custom" and not policy.get("roles"):
         errors.append("custom profile requires at least one role override")
 
-    catalog_models = catalog.get("models", []) if isinstance(catalog, dict) else []
+    selected_delegation = delegation
+    if catalog is not None and delegation == "auto":
+        surfaces = catalog.get("surfaces")
+        if isinstance(surfaces, dict):
+            selected_delegation = next(
+                (
+                    name
+                    for name in DELEGATION_ORDER
+                    if catalog_surface(catalog, name)["available"]
+                ),
+                "sequential",
+            )
+        else:
+            selected_delegation = "sequential"
+    selected_catalog = (
+        catalog_surface(catalog, selected_delegation)
+        if isinstance(catalog, dict)
+        else {"available": False, "models": [], "max_concurrency": None}
+    )
+    catalog_models = selected_catalog["models"]
     resolved_roles: dict[str, Any] = {}
     for role, request in policy.get("roles", {}).items():
         requested_model = request.get("model_request", "unavailable")
@@ -156,7 +210,16 @@ def resolve(
                     )
             else:
                 result["resolution"] = "unavailable"
-                message = f"{role}: no runtime model satisfies {requested_model}"
+                elsewhere = matching_surfaces(requested_model, catalog)
+                suffix = (
+                    f"; matching model is exposed on {', '.join(elsewhere)}"
+                    if elsewhere and selected_delegation not in elsewhere
+                    else ""
+                )
+                message = (
+                    f"{role}: no runtime model satisfies {requested_model} "
+                    f"on {selected_delegation}{suffix}"
+                )
                 if policy.get("unavailable_action") == "pause":
                     errors.append(message)
                 else:
@@ -164,11 +227,16 @@ def resolve(
         resolved_roles[role] = result
 
     desired = policy.get("concurrency", {}).get("desired", 1)
-    host_cap = catalog.get("max_concurrency") if isinstance(catalog, dict) else None
+    host_cap = selected_catalog.get("max_concurrency") if isinstance(catalog, dict) else None
     effective = min(desired, host_cap) if isinstance(host_cap, int) and host_cap > 0 else "runtime-required"
     return {
         "valid": not errors,
         "profile": profile_name,
+        "delegation": {
+            "requested": delegation,
+            "selected": selected_delegation,
+            "available": selected_catalog.get("available", False),
+        },
         "policy": policy,
         "resolved_roles": resolved_roles,
         "concurrency": {
@@ -187,6 +255,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--profiles", type=Path, default=DEFAULT_PROFILES)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--catalog", type=Path)
+    parser.add_argument(
+        "--delegation",
+        choices=["auto", "top-level-task", "subagent", "sequential"],
+        default="auto",
+    )
     parser.add_argument("--role", action="append", default=[])
     parser.add_argument("--concurrency", type=int)
     parser.add_argument("--pretty", action="store_true")
@@ -206,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
             plan_policy=plan_policy,
             role_overrides=role_overrides,
             catalog=catalog,
+            delegation=args.delegation,
             concurrency_override=args.concurrency,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:

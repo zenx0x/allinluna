@@ -17,7 +17,7 @@ PLAN_SCRIPTS = SKILLS_DIR / "allinluna-plan" / "scripts"
 sys.path.insert(0, str(PLAN_SCRIPTS))
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from resolve_profile import DEFAULT_PROFILES, read_json, resolve  # noqa: E402
+from resolve_profile import DEFAULT_PROFILES, catalog_surface, read_json, resolve  # noqa: E402
 from validate_plan import validate as validate_plan  # noqa: E402
 from workflow_state import (  # noqa: E402
     append_event,
@@ -38,6 +38,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("plan", type=Path)
     parser.add_argument("--profile")
     parser.add_argument("--profiles", type=Path, default=DEFAULT_PROFILES)
+    parser.add_argument("--catalog", type=Path)
     parser.add_argument(
         "--state-root",
         type=Path,
@@ -71,7 +72,25 @@ def main(argv: list[str] | None = None) -> int:
 
         profile_name = args.profile or plan["resource_policy"]["profile"]
         profiles = read_json(args.profiles)
-        resolution = resolve(profiles, profile_name, plan_policy=plan["resource_policy"])
+        catalog = read_json(args.catalog) if args.catalog else None
+        runtime_tier = args.runtime_tier
+        if runtime_tier == "auto" and catalog is not None:
+            if (
+                plan["authorizations"]["top_level_tasks"]
+                and catalog_surface(catalog, "top-level-task")["available"]
+            ):
+                runtime_tier = "top-level-task"
+            elif catalog_surface(catalog, "subagent")["available"]:
+                runtime_tier = "subagent"
+            else:
+                runtime_tier = "sequential"
+        resolution = resolve(
+            profiles,
+            profile_name,
+            plan_policy=plan["resource_policy"],
+            catalog=catalog,
+            delegation=runtime_tier,
+        )
         if not resolution["valid"]:
             raise ValueError("invalid resource policy: " + "; ".join(resolution["errors"]))
         if profile_name == "custom":
@@ -96,8 +115,10 @@ def main(argv: list[str] | None = None) -> int:
             profile=profile_name,
             policy=resolution["policy"],
             goal_authorized=args.goal_authorized,
-            runtime_tier=args.runtime_tier,
+            runtime_tier=runtime_tier,
         )
+        if catalog is not None:
+            state["capabilities"]["host_concurrency"] = resolution["concurrency"]["host_cap"]
         atomic_write_json(run_dir / "plan.json", plan)
         atomic_write_json(run_dir / "run-state.json", state)
         append_event(
@@ -111,7 +132,9 @@ def main(argv: list[str] | None = None) -> int:
                 evidence={
                     "plan_hash": state["plan_hash"],
                     "profile": profile_name,
-                    "runtime_tier": args.runtime_tier,
+                    "runtime_tier": runtime_tier,
+                    "runtime_tier_requested": args.runtime_tier,
+                    "catalog": str(args.catalog.resolve()) if args.catalog else None,
                     "resource_warnings": resolution["warnings"],
                 },
             ),
@@ -123,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             "state": str(run_dir / "run-state.json"),
             "ready_tasks": [task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"],
             "profile": profile_name,
+            "runtime_tier": runtime_tier,
             "warnings": resolution["warnings"],
         }
     except (OSError, json.JSONDecodeError, ValueError) as exc:

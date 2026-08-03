@@ -56,6 +56,8 @@ Use the smallest topology that can complete the full scope:
 - **Medium:** current coordinator plus a few independent subagents when available.
 - **Large:** independent owner lanes, one phase integration, and one independent acceptance. User-facing top-level Codex tasks require explicit user authorization; otherwise use subagents or sequential execution.
 
+Track Goal and task authorization independently. “Do not create a Goal” sets only `goal_creation=false`; it must not be copied into `top_level_tasks=false`. Set `top_level_tasks` from the user's separate task/thread instruction. If user-visible top-level tasks materially determine whether a hard-locked model can run and authorization is missing, ask one focused question instead of later misreporting that model as unavailable.
+
 Parallelize only work that is independent in both dependencies and writable file ownership. A task with shared files must depend on the owning implementation or be assigned to the integration lane.
 
 Avoid a separate task for every registry update, micro-fix, plan restatement, promotion, or repeated audit. Prefer:

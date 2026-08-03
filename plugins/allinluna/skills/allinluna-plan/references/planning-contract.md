@@ -27,6 +27,8 @@ Record independent booleans for:
 
 Permission for one state never implies another. In particular, a request to plan does not authorize implementation, a request to implement does not authorize publication, and large scope does not authorize Goal creation.
 
+Goal creation and user-owned top-level task creation are separate authorizations. “Do not create a Goal” changes only the Goal field; it must never be interpreted as denying top-level tasks. Likewise, permission to create top-level tasks does not authorize a Goal.
+
 ## Completeness
 
 A task's deliverables must represent the requested capability, not a demonstration substitute. A first vertical slice is useful when it proves the architecture across layers, but it is only a progress checkpoint.

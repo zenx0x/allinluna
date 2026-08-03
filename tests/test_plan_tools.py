@@ -50,6 +50,12 @@ class PlanValidationTests(unittest.TestCase):
         plan["mode"] = "goal-ready"
         self.assertTrue(validate(plan)["valid"])
 
+    def test_goal_denial_does_not_deny_top_level_tasks(self) -> None:
+        plan = deepcopy(self.example)
+        plan["authorizations"]["goal_creation"] = False
+        plan["authorizations"]["top_level_tasks"] = True
+        self.assertTrue(validate(plan)["valid"])
+
     def test_luna_profile_requires_hard_lock(self) -> None:
         plan = deepcopy(self.example)
         plan["resource_policy"]["profile"] = "mad-luna"

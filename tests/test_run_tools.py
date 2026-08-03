@@ -130,6 +130,56 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertIn("hard model lock", result["errors"][0])
 
+    def test_scoped_catalog_resolves_luna_for_top_level_tasks(self) -> None:
+        catalog = RUN / "assets" / "runtime-catalog.example.json"
+        result = command(
+            str(SCRIPTS / "resolve_profile.py"),
+            "--profile",
+            "all-luna",
+            "--catalog",
+            str(catalog),
+            "--delegation",
+            "top-level-task",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["delegation"]["selected"], "top-level-task")
+        self.assertEqual(payload["resolved_roles"]["engineer"]["actual_model"], "gpt-5.6-luna")
+
+    def test_subagent_catalog_does_not_misreport_global_luna_absence(self) -> None:
+        catalog = RUN / "assets" / "runtime-catalog.example.json"
+        result = command(
+            str(SCRIPTS / "resolve_profile.py"),
+            "--profile",
+            "all-luna",
+            "--catalog",
+            str(catalog),
+            "--delegation",
+            "subagent",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertTrue(any("matching model is exposed on top-level-task" in item for item in payload["errors"]))
+
+    def test_auto_runtime_prefers_authorized_top_level_task_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["authorizations"]["top_level_tasks"] = True
+            plan_path = temp / "top-level-plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            run = self.init(
+                temp / "state",
+                "all-luna",
+                plan_path,
+                "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["capabilities"]["requested_delegation"], "top-level-task")
+            self.assertEqual(state["capabilities"]["host_concurrency"], 4)
+            self.assertFalse(state["goal_authorized"])
+
     def test_top_level_task_requires_explicit_authorization(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             run = self.init(Path(temporary))

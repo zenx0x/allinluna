@@ -39,6 +39,8 @@ Resource modes change allocation and timing—not scope or completion criteria. 
 
 Model, reasoning effort, delegation tier, concurrency, and budget are separate controls. Logical model tiers are resolved against the host's current catalog; the run state records the requested and actual values independently.
 
+On Codex App, All in Luna reads the user-visible top-level task catalog separately from the subagent catalog. A Luna model exposed by `create_thread` is therefore available for top-level execution even if subagents expose only Sol/Terra. Goal permission and top-level-task permission are independent.
+
 ## Install
 
 Add this repository as a Codex marketplace:
@@ -64,7 +66,8 @@ integration, and acceptance. Use economy mode and ask before escalation.
 ```text
 Use $allinluna-run in mad-luna mode. Hard-lock every delegated role to Luna,
 use maximum supported reasoning and maximum safe parallelism, persist run state,
-and never substitute another model silently.
+create user-visible top-level Codex tasks, do not create a Goal, and never
+substitute another model silently.
 ```
 
 ```text
@@ -77,6 +80,7 @@ and continue until the plan's completion standard is met.
 
 - Full requested scope remains the completion standard; a first vertical slice is only a progress checkpoint.
 - Goal creation is opt-in, never inferred.
+- User-visible top-level task creation is a separate opt-in and is never disabled merely because Goal creation was denied.
 - Project instructions and dirty worktrees are inspected and preserved.
 - Independent writers receive explicit ownership; defects return to the owning task.
 - Requested and actual model/reasoning settings are recorded separately.
@@ -108,10 +112,12 @@ python plugins/allinluna/skills/allinluna-plan/scripts/validate_plan.py plan.jso
 
 # Resolve mad-luna against a host model catalog
 python plugins/allinluna/skills/allinluna-run/scripts/resolve_profile.py `
-  --profile mad-luna --catalog runtime-catalog.json --pretty
+  --profile mad-luna --catalog runtime-catalog.json `
+  --delegation top-level-task --pretty
 
 # Initialize, inspect, and validate resumable state
-python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json --profile balanced
+python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
+  --profile balanced --catalog runtime-catalog.json
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY
 python plugins/allinluna/skills/allinluna-run/scripts/validate_run.py RUN_DIRECTORY --pretty
 ```

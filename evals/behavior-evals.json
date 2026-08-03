@@ -56,6 +56,13 @@
     "must_not": ["call subagents top-level tasks", "fabricate parallelism"]
   },
   {
+    "id": "run-codex-top-level-luna-catalog",
+    "skill": "allinluna-run",
+    "prompt": "Use user-visible top-level Codex tasks with Luna max. Do not create a Goal.",
+    "must": ["inspect codex_app__create_thread model catalog", "treat Goal and top-level authorization separately", "create top-level tasks with gpt-5.6-luna and max reasoning"],
+    "must_not": ["inspect only the subagent catalog", "report Luna globally unavailable", "create a Goal"]
+  },
+  {
     "id": "run-owner-repair",
     "skill": "allinluna-run",
     "prompt": "Coordinate implementation and independent acceptance.",

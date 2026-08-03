@@ -36,6 +36,16 @@ Determine which execution tier the host actually exposes:
 
 Record requested and actual tier. Never represent subagents as top-level tasks or sequential work as parallel execution.
 
+On Codex App hosts, discover top-level capability before inspecting subagents:
+
+1. locate `codex_app__create_thread` and `codex_app__list_projects` in the callable tool catalog;
+2. read the model and reasoning combinations declared by `codex_app__create_thread` itself;
+3. treat that list as the `top-level-task` model catalog, even when the subagent catalog exposes different models;
+4. create a delegation-scoped runtime catalog like `assets/runtime-catalog.example.json` outside the target repository;
+5. resolve the requested profile against the intended delegation surface.
+
+Do not infer that Luna is unavailable from a subagent-only model list. If Luna exists for top-level tasks but top-level creation is not authorized, report that exact authorization gap and ask once; do not report a model-availability failure. “Do not create a Goal” controls only Goal creation and does not deny top-level tasks.
+
 Resolve models against the current host catalog. Keep requested and actual model/reasoning fields separate. If a requested model or reasoning level is unavailable:
 
 - with a hard lock, pause that lane or use only an explicitly configured fallback;
@@ -49,8 +59,10 @@ Read [references/resource-profiles.md](references/resource-profiles.md) and [ref
 State defaults outside the repository under `~/.codex/allinluna/runs`:
 
 ```bash
-python scripts/init_run.py PLAN.json --profile balanced
+python scripts/init_run.py PLAN.json --profile balanced --catalog RUNTIME_CATALOG.json
 ```
+
+Pass `--runtime-tier top-level-task` when the user authorized user-visible tasks. If the user requested a specific model such as Luna, pass the exact supported model and reasoning to `codex_app__create_thread`; do not ask the user to select it manually when the tool can set it.
 
 Pass `--goal-authorized` only when the user explicitly requested a Goal. Goal authorization in the plan and command must both be true.
 
@@ -149,7 +161,7 @@ Mark the run complete only after `validate_run.py` accepts it. The final respons
 
 ## Non-negotiable behavior
 
-- Goal creation and top-level task creation remain explicit opt-ins.
+- Goal creation and top-level task creation remain separate explicit opt-ins; denying one never denies the other.
 - A model lock is a hard constraint, not a preference.
 - Requested settings never substitute for actual runtime evidence.
 - Cost and token values remain `unavailable` when the platform does not expose them.

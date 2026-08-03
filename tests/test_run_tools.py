@@ -180,6 +180,49 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertEqual(state["capabilities"]["host_concurrency"], 4)
             self.assertFalse(state["goal_authorized"])
 
+    def test_execution_revision_preserves_source_and_separates_authorizations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            source = temp / "plan.json"
+            revised = temp / "plan.execute-ready.json"
+            source.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+            before = source.read_bytes()
+            result = command(
+                str(SCRIPTS / "prepare_execution_plan.py"),
+                str(source),
+                "--output",
+                str(revised),
+                "--authorize-implementation-writes",
+                "--authorize-top-level-tasks",
+                "--deny-goal",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(source.read_bytes(), before)
+            plan = json.loads(revised.read_text(encoding="utf-8"))
+            self.assertEqual(plan["mode"], "execute-ready")
+            self.assertTrue(plan["authorizations"]["implementation_writes"])
+            self.assertTrue(plan["authorizations"]["top_level_tasks"])
+            self.assertFalse(plan["authorizations"]["goal_creation"])
+            source_plan = json.loads(source.read_text(encoding="utf-8"))
+            self.assertEqual(
+                plan["authorizations"]["git_operations"],
+                source_plan["authorizations"]["git_operations"],
+            )
+
+    def test_execution_revision_refuses_source_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "plan.json"
+            source.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+            result = command(
+                str(SCRIPTS / "prepare_execution_plan.py"),
+                str(source),
+                "--output",
+                str(source),
+                "--authorize-implementation-writes",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not overwrite", result.stdout)
+
     def test_top_level_task_requires_explicit_authorization(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             run = self.init(Path(temporary))

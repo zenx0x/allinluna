@@ -18,6 +18,18 @@ Tell the user this skill is controlling execution and name the selected resource
 
 If no executable plan exists, use `$allinluna-plan` first. Do not repeatedly replan a plan whose assumptions still hold.
 
+When the user explicitly asks to execute a previously `plan-only` plan, do not run that stale snapshot and do not mutate it in place. Create a validated execution revision with `scripts/prepare_execution_plan.py`. The current user message may grant newer authorization than the old plan: record only the capabilities explicitly granted now. In particular, an explicit request for user-visible top-level tasks sets `top_level_tasks=true`, while “do not create a Goal” independently keeps `goal_creation=false`.
+
+```bash
+python scripts/prepare_execution_plan.py PLAN.json \
+  --output PLAN.execute-ready.json \
+  --authorize-implementation-writes \
+  --authorize-top-level-tasks \
+  --deny-goal --pretty
+```
+
+Use `--authorize-git-operations` only when the user also authorized the required branch/worktree/commit operations. If a top-level-task execution requires Git worktrees but Git authorization is absent, ask for that specific authorization; do not fall back to subagents.
+
 Validate the plan:
 
 ```bash
@@ -44,7 +56,7 @@ On Codex App hosts, discover top-level capability before inspecting subagents:
 4. create a delegation-scoped runtime catalog like `assets/runtime-catalog.example.json` outside the target repository;
 5. resolve the requested profile against the intended delegation surface.
 
-Do not infer that Luna is unavailable from a subagent-only model list. If Luna exists for top-level tasks but top-level creation is not authorized, report that exact authorization gap and ask once; do not report a model-availability failure. “Do not create a Goal” controls only Goal creation and does not deny top-level tasks.
+Do not infer that Luna is unavailable from a subagent-only model list. If Luna exists for top-level tasks but top-level creation is not authorized, report that exact authorization gap and ask once; do not report a model-availability failure. When the current user message explicitly authorizes top-level tasks but an older plan says false, create the execution revision above. Never choose subagents merely because the stale plan says false. “Do not create a Goal” controls only Goal creation and does not deny top-level tasks.
 
 Resolve models against the current host catalog. Keep requested and actual model/reasoning fields separate. If a requested model or reasoning level is unavailable:
 

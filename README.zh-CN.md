@@ -41,6 +41,8 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 
 在 Codex App 中，All in Luna 会分别读取用户可见顶层任务与 subagent 的模型目录。因此，即使 subagent 只暴露 Sol/Terra，只要 `create_thread` 暴露 Luna，Luna 仍可用于顶层任务。Goal 权限与顶层任务权限彼此独立。
 
+如果用户之后要求执行一份较早生成的 plan-only 文件，All in Luna 会创建独立且经过验证的 execute-ready 修订版。当前明确授予的顶层任务权限会写入新修订版；历史计划不会被修改，旧的 `top_level_tasks=false` 也不会再触发静默 subagent 回退。
+
 ## 安装
 
 将本仓库添加为 Codex Marketplace：
@@ -114,6 +116,9 @@ python plugins/allinluna/skills/allinluna-run/scripts/resolve_profile.py `
   --delegation top-level-task --pretty
 
 # 初始化、查看和验证可恢复运行状态
+python plugins/allinluna/skills/allinluna-run/scripts/prepare_execution_plan.py `
+  plan.json --output plan.execute-ready.json `
+  --authorize-implementation-writes --authorize-top-level-tasks --deny-goal
 python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
   --profile balanced --catalog runtime-catalog.json
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY

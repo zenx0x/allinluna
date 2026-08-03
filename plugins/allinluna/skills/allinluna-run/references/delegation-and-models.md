@@ -16,6 +16,10 @@ Keep catalogs scoped by delegation surface. A model unavailable to subagents but
 
 Goal authorization is independent. The phrase “do not create a Goal” changes only `goal_creation`; it does not set `top_level_tasks=false` unless the user separately denied task/thread creation.
 
+## Stale plan authorization
+
+The current explicit user message can supersede an older plan's authorization booleans. Preserve the old plan as history and create a new validated execution revision with `prepare_execution_plan.py`; never edit the source snapshot in place. If the user currently authorizes top-level tasks, record that in the revision and use the top-level catalog. Do not silently fall back to subagents because the old snapshot predates that authorization.
+
 ## Task brief
 
 Every delegated task must include:

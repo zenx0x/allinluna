@@ -63,6 +63,13 @@
     "must_not": ["inspect only the subagent catalog", "report Luna globally unavailable", "create a Goal"]
   },
   {
+    "id": "run-revise-stale-plan-authorization",
+    "skill": "allinluna-run",
+    "prompt": "Execute this old plan-only file. I now authorize user-visible top-level tasks, but still forbid Goal creation.",
+    "must": ["create a separate execute-ready revision", "record top_level_tasks true", "keep goal_creation false", "preserve the source plan"],
+    "must_not": ["mutate the historical plan", "fall back to subagents", "treat no Goal as no top-level tasks"]
+  },
+  {
     "id": "run-owner-repair",
     "skill": "allinluna-run",
     "prompt": "Coordinate implementation and independent acceptance.",

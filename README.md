@@ -41,6 +41,8 @@ Model, reasoning effort, delegation tier, concurrency, and budget are separate c
 
 On Codex App, All in Luna reads the user-visible top-level task catalog separately from the subagent catalog. A Luna model exposed by `create_thread` is therefore available for top-level execution even if subagents expose only Sol/Terra. Goal permission and top-level-task permission are independent.
 
+If a user later asks to execute an older plan-only file, All in Luna creates a separate validated execute-ready revision. Current explicit task authorization is recorded in that revision; the historical plan is not mutated, and a stale `top_level_tasks=false` never causes a silent subagent fallback.
+
 ## Install
 
 Add this repository as a Codex marketplace:
@@ -116,6 +118,9 @@ python plugins/allinluna/skills/allinluna-run/scripts/resolve_profile.py `
   --delegation top-level-task --pretty
 
 # Initialize, inspect, and validate resumable state
+python plugins/allinluna/skills/allinluna-run/scripts/prepare_execution_plan.py `
+  plan.json --output plan.execute-ready.json `
+  --authorize-implementation-writes --authorize-top-level-tasks --deny-goal
 python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
   --profile balanced --catalog runtime-catalog.json
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY

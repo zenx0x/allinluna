@@ -67,7 +67,14 @@
     "skill": "allinluna-run",
     "prompt": "Execute this old plan-only file. I now authorize user-visible top-level tasks, but still forbid Goal creation.",
     "must": ["create a separate execute-ready revision", "record top_level_tasks true", "keep goal_creation false", "preserve the source plan"],
-    "must_not": ["mutate the historical plan", "fall back to subagents", "treat no Goal as no top-level tasks"]
+    "must_not": ["mutate the historical plan", "replace top-level owners with root-level subagents", "treat no Goal as no top-level tasks"]
+  },
+  {
+    "id": "run-two-level-topology",
+    "skill": "allinluna-run",
+    "prompt": "Run this normally with All in Luna.",
+    "must": ["dispatch substantive owner lanes as top-level Codex tasks", "allow bounded internal subagents inside each owner", "keep root and owner delegation distinct"],
+    "must_not": ["create a top-level task for every micro-fix", "replace owner lanes with root-level subagents", "count internal subagent output as owner completion"]
   },
   {
     "id": "run-owner-repair",

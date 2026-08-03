@@ -14,6 +14,10 @@ Do not collapse these into a single “quality” setting:
 
 Unknown telemetry is `unavailable`; do not estimate actual cost from model names alone.
 
+## Two-level delegation default
+
+At the root orchestration level, prefer user-visible top-level Codex tasks for independent substantive owner lanes. Do not create a top-level task for every micro-fix. Within an assigned top-level owner, allow bounded internal subagents for decomposable work under the same paths, model policy, and verification contract. Root-level subagents are a user-approved fallback, not a substitute for planned top-level owners.
+
 ## Resource classes
 
 - `authority`: irreversible scientific, security, migration, or canonical decisions.

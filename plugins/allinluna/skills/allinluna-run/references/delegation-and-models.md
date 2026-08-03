@@ -8,6 +8,10 @@
 
 Use the highest tier that is both available and authorized—not the highest tier imagined by the plan. Record capability discovery in run state.
 
+All built-in profiles make `top-level-task` the root coordinator's preferred delegation. Root-level subagent and sequential execution are opt-in fallbacks, not automatic substitutes for owner lanes. The packaged skill prompt explicitly requests user-visible top-level tasks; a manually written ambiguous prompt requires one authorization question before dispatch.
+
+Top-level owners may use bounded internal subagents without returning ownership to the root coordinator. Their task brief must explicitly allow this and preserve the owner's exclusive paths, base commit, model policy, reasoning ceiling, budget, tests, and reporting contract. Internal subagents cannot independently satisfy the owner task; the owner must integrate and verify their work. Hard family locks apply recursively.
+
 ## Codex App discovery order
 
 On Codex App, inspect `codex_app__create_thread` before concluding that a model is unavailable. Its tool declaration is the authoritative catalog for user-visible top-level tasks and may include models (for example `gpt-5.6-luna`) that are absent from the subagent tool declaration. Use `codex_app__list_projects` before creating a project-scoped task, then call `codex_app__create_thread` with the exact `model` and supported `thinking` requested by the profile.

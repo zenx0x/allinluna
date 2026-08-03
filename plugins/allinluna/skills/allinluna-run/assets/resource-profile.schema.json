@@ -17,7 +17,7 @@
   "$defs": {
     "profile": {
       "type": "object",
-      "required": ["description", "hard_model_lock", "unavailable_action", "fallback_models", "concurrency", "budget", "roles"],
+      "required": ["description", "hard_model_lock", "unavailable_action", "fallback_models", "delegation", "concurrency", "budget", "roles"],
       "properties": {
         "description": { "type": "string" },
         "hard_model_lock": {
@@ -36,6 +36,21 @@
         "preferred_model_family": { "type": "string" },
         "unavailable_action": { "enum": ["pause", "ask", "fallback-list"] },
         "fallback_models": { "type": "array", "items": { "type": "string" } },
+        "delegation": {
+          "type": "object",
+          "required": ["root_preferred", "root_unauthorized_action", "root_fallback_order", "root_fallback_requires_user_approval", "owner_subagents"],
+          "properties": {
+            "root_preferred": { "const": "top-level-task" },
+            "root_unauthorized_action": { "const": "ask" },
+            "root_fallback_order": {
+              "type": "array",
+              "items": { "enum": ["subagent", "sequential"] },
+              "uniqueItems": true
+            },
+            "root_fallback_requires_user_approval": { "const": true },
+            "owner_subagents": { "const": "allowed-bounded" }
+          }
+        },
         "concurrency": {
           "type": "object",
           "required": ["desired", "strategy"],

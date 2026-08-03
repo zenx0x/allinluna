@@ -39,6 +39,8 @@ Resource modes change allocation and timing—not scope or completion criteria. 
 
 Model, reasoning effort, delegation tier, concurrency, and budget are separate controls. Logical model tiers are resolved against the host's current catalog; the run state records the requested and actual values independently.
 
+By default, the root coordinator dispatches independent substantive owner lanes as user-visible top-level Codex tasks. Each top-level owner may create bounded internal subagents under its own ownership and model policy. Root-level subagents never silently replace planned top-level owners.
+
 On Codex App, All in Luna reads the user-visible top-level task catalog separately from the subagent catalog. A Luna model exposed by `create_thread` is therefore available for top-level execution even if subagents expose only Sol/Terra. Goal permission and top-level-task permission are independent.
 
 If a user later asks to execute an older plan-only file, All in Luna creates a separate validated execute-ready revision. Current explicit task authorization is recorded in that revision; the historical plan is not mutated, and a stale `top_level_tasks=false` never causes a silent subagent fallback.
@@ -57,12 +59,14 @@ Then install **All in Luna** from the Codex Plugins directory and start a new ta
 
 ```text
 Use $allinluna-plan to inspect this repository and produce a complete plan only.
-Use balanced mode. Do not create a Goal or begin implementation.
+Use balanced mode. Plan independent owner lanes as user-visible top-level Codex
+tasks; each owner may use bounded internal subagents. Do not create a Goal or begin implementation.
 ```
 
 ```text
 Use $allinluna-run to execute the approved plan through implementation,
-integration, and acceptance. Use economy mode and ask before escalation.
+integration, and acceptance through top-level Codex task owners. Each owner may
+use bounded internal subagents. Use economy mode and ask before escalation.
 ```
 
 ```text
@@ -83,6 +87,8 @@ and continue until the plan's completion standard is met.
 - Full requested scope remains the completion standard; a first vertical slice is only a progress checkpoint.
 - Goal creation is opt-in, never inferred.
 - User-visible top-level task creation is a separate opt-in and is never disabled merely because Goal creation was denied.
+- Packaged prompts explicitly authorize top-level owners, making them the normal first-use path.
+- Each top-level owner may use bounded internal subagents; the root coordinator does not substitute subagents for owner lanes.
 - Project instructions and dirty worktrees are inspected and preserved.
 - Independent writers receive explicit ownership; defects return to the owning task.
 - Requested and actual model/reasoning settings are recorded separately.

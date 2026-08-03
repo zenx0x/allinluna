@@ -1,6 +1,6 @@
 {
   "name": "allinluna",
-  "version": "0.1.1+codex.20260803090816",
+  "version": "0.1.1+codex.20260803103636",
   "description": "Plan and run complete, resource-aware agent development workflows.",
   "author": {
     "name": "zenx0x",
@@ -31,12 +31,12 @@
     ],
     "websiteURL": "https://github.com/zenx0x/allinluna",
     "defaultPrompt": [
-      "Plan this project with All in Luna.",
-      "Execute this plan with isolated parallel tasks and an explicit resource mode.",
-      "Resume the saved All in Luna workflow.",
-      "\u4f7f\u7528 All in Luna \u4e3a\u8fd9\u4e2a\u9879\u76ee\u751f\u6210\u5b8c\u6574\u8ba1\u5212\u3002",
-      "\u4f7f\u7528\u660e\u786e\u7684\u8d44\u6e90\u6a21\u5f0f\u548c\u9694\u79bb\u4efb\u52a1\u5b8c\u6574\u6267\u884c\u8fd9\u4e2a\u8ba1\u5212\u3002",
-      "\u6062\u590d\u5df2\u7ecf\u4fdd\u5b58\u7684 All in Luna \u5f00\u53d1\u6d41\u7a0b\u3002"
+      "Plan this project with independent owner lanes as user-visible top-level Codex tasks; each owner may use bounded internal subagents and no Goal is created.",
+      "Execute this plan through top-level Codex task owners; owners may use bounded internal subagents, but the root must not replace owner tasks with subagents.",
+      "Resume the saved All in Luna workflow through top-level owners and their bounded internal subagents.",
+      "\u4f7f\u7528 All in Luna \u89c4\u5212\u9879\u76ee\uff1a\u72ec\u7acb\u4e3b\u4f53\u7ebf\u8def\u9ed8\u8ba4\u4e3a\u7528\u6237\u53ef\u89c1\u7684\u9876\u5c42 Codex \u4efb\u52a1\uff0c\u6bcf\u4e2a\u8d1f\u8d23\u4eba\u53ef\u4f7f\u7528\u6709\u754c\u5b50\u4ee3\u7406\uff0c\u4e0d\u521b\u5efa Goal\u3002",
+      "\u901a\u8fc7\u9876\u5c42 Codex \u4efb\u52a1\u8d1f\u8d23\u4eba\u5b8c\u6574\u6267\u884c\u8ba1\u5212\uff1b\u8d1f\u8d23\u4eba\u53ef\u4f7f\u7528\u6709\u754c\u5b50\u4ee3\u7406\uff0c\u4f46\u6839\u534f\u8c03\u4e0d\u5f97\u7528\u5b50\u4ee3\u7406\u66ff\u4ee3\u9876\u5c42\u4e3b\u4f53\u4efb\u52a1\u3002",
+      "\u901a\u8fc7\u9876\u5c42\u8d1f\u8d23\u4eba\u53ca\u5176\u6709\u754c\u5185\u90e8\u5b50\u4ee3\u7406\u6062\u590d All in Luna \u5f00\u53d1\u6d41\u7a0b\u3002"
     ]
   }
 }

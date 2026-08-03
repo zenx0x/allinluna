@@ -1,7 +1,4 @@
 interface:
   display_name: "All in Luna — Run"
-  short_description: "Execute plans with agents and explicit resource controls"
-  default_prompt: "Use $allinluna-run to execute this plan completely with the requested models, reasoning, parallelism, recovery, and verification."
-
-policy:
-  allow_implicit_invocation: true
+  short_description: "Run through top-level Codex task owners"
+  default_prompt: "Use $allinluna-run to execute completely by dispatching independent owner lanes as user-visible top-level Codex tasks; each owner may use bounded internal subagents, but the root must not replace owner tasks with subagents and must not create a Goal."

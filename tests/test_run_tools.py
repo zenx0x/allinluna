@@ -180,6 +180,21 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertEqual(state["capabilities"]["host_concurrency"], 4)
             self.assertFalse(state["goal_authorized"])
 
+    def test_auto_runtime_refuses_root_subagent_fallback_without_top_level_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = command(
+                str(SCRIPTS / "init_run.py"),
+                str(EXAMPLE),
+                "--profile",
+                "all-luna",
+                "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+                "--state-root",
+                str(Path(temporary)),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("instead of falling back to subagents", result.stdout)
+
     def test_execution_revision_preserves_source_and_separates_authorizations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             temp = Path(temporary)

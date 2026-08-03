@@ -39,6 +39,8 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 
 模型、推理强度、委派层级、并发和预算是五个相互独立的控制维度。逻辑模型层级会在运行时根据宿主平台当前提供的模型进行解析；运行状态会分别记录请求值和实际值。
 
+默认情况下，根协调任务会把独立且有实质交付的负责人线路派发为用户可见的顶层 Codex 任务。每个顶层负责人可以在自己的所有权和模型策略内使用有界 subagents；根协调任务不会静默地用 subagent 替代原定顶层负责人。
+
 在 Codex App 中，All in Luna 会分别读取用户可见顶层任务与 subagent 的模型目录。因此，即使 subagent 只暴露 Sol/Terra，只要 `create_thread` 暴露 Luna，Luna 仍可用于顶层任务。Goal 权限与顶层任务权限彼此独立。
 
 如果用户之后要求执行一份较早生成的 plan-only 文件，All in Luna 会创建独立且经过验证的 execute-ready 修订版。当前明确授予的顶层任务权限会写入新修订版；历史计划不会被修改，旧的 `top_level_tasks=false` 也不会再触发静默 subagent 回退。
@@ -57,12 +59,12 @@ codex plugin marketplace add zenx0x/allinluna
 
 ```text
 使用 $allinluna-plan 检查这个仓库，只生成完整的实施计划。
-使用 balanced 模式。不要创建 Goal，也不要开始实施。
+使用 balanced 模式。将独立负责人线路规划为用户可见的顶层 Codex 任务；每个负责人可以使用有界 subagents。不要创建 Goal，也不要开始实施。
 ```
 
 ```text
 使用 $allinluna-run 完整执行已经批准的计划，持续推进到实施、集成和验收完成。
-使用 economy 模式；如需升级模型，必须先询问我。
+通过顶层 Codex 任务负责人执行；每个负责人可以使用有界 subagents。使用 economy 模式；如需升级模型，必须先询问我。
 ```
 
 ```text
@@ -81,6 +83,8 @@ codex plugin marketplace add zenx0x/allinluna
 - 用户要求的完整范围始终是完成标准；第一个纵向切片只是进度检查点。
 - Goal 必须由用户明确选择，不能因任务规模较大而自动创建。
 - 用户可见顶层任务是另一项独立授权；禁止 Goal 不等于禁止创建顶层任务。
+- Skill 自带 Prompt 会明确授权顶层负责人，因此这是普通用户默认的首次使用路径。
+- 每个顶层负责人可以使用有界 subagents；根协调任务不得用 subagent 替代负责人线路。
 - 项目指令和脏工作区会被检查并保留。
 - 独立写入者获得明确的文件所有权；发现缺陷后返回原实施任务修复。
 - 请求的模型/推理设置和实际运行设置分开记录。

@@ -47,6 +47,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id")
     parser.add_argument("--goal-authorized", action="store_true")
     parser.add_argument(
+        "--allow-delegation-fallback",
+        action="store_true",
+        help="Allow an explicitly user-approved fallback from the profile's top-level-task default.",
+    )
+    parser.add_argument(
         "--runtime-tier",
         choices=["auto", "top-level-task", "subagent", "sequential"],
         default="auto",
@@ -75,15 +80,31 @@ def main(argv: list[str] | None = None) -> int:
         catalog = read_json(args.catalog) if args.catalog else None
         runtime_tier = args.runtime_tier
         if runtime_tier == "auto" and catalog is not None:
-            if (
-                plan["authorizations"]["top_level_tasks"]
-                and catalog_surface(catalog, "top-level-task")["available"]
-            ):
-                runtime_tier = "top-level-task"
-            elif catalog_surface(catalog, "subagent")["available"]:
-                runtime_tier = "subagent"
-            else:
-                runtime_tier = "sequential"
+            profile = profiles.get("profiles", {}).get(profile_name, {})
+            delegation_policy = profile.get("delegation", {})
+            preferred = delegation_policy.get("root_preferred", "top-level-task")
+            if preferred == "top-level-task":
+                if not plan["authorizations"]["top_level_tasks"]:
+                    raise ValueError(
+                        "top-level-task is the default delegation but is not authorized; "
+                        "obtain explicit user authorization instead of falling back to subagents"
+                    )
+                if catalog_surface(catalog, "top-level-task")["available"]:
+                    runtime_tier = "top-level-task"
+                elif not args.allow_delegation_fallback:
+                    raise ValueError(
+                        "top-level-task is unavailable; delegation fallback requires explicit "
+                        "user approval via --allow-delegation-fallback"
+                    )
+                else:
+                    runtime_tier = next(
+                        (
+                            tier
+                            for tier in delegation_policy.get("root_fallback_order", [])
+                            if catalog_surface(catalog, tier)["available"]
+                        ),
+                        "sequential",
+                    )
         resolution = resolve(
             profiles,
             profile_name,

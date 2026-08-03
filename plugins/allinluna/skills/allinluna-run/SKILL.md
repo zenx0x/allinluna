@@ -46,6 +46,10 @@ Determine which execution tier the host actually exposes:
 2. **Subagents:** use for bounded independent work when available.
 3. **Sequential:** use the current task when neither delegation tier exists or when work is tightly coupled.
 
+The root coordinator's default delegation for every built-in resource profile is `top-level-task`. For independent substantive owner lanes, create user-visible top-level Codex tasks rather than root-level subagents. The skill's default prompt explicitly grants this permission. When a hand-written prompt does not explicitly authorize task/thread creation, ask once before dispatch. Do not use a root-level subagent as a substitute for a planned top-level owner.
+
+Each created top-level owner may create its own bounded subagents when that helps complete its assigned scope. Authorize this in the self-contained owner brief. Owner subagents must remain inside the owner's paths, base, model lock, budget, and completion contract; they do not become additional top-level lanes and their output is not completion until the owner integrates and verifies it. In `all-luna` and `mad-luna`, owner subagents must inherit or explicitly use Luna and may not silently switch families.
+
 Record requested and actual tier. Never represent subagents as top-level tasks or sequential work as parallel execution.
 
 On Codex App hosts, discover top-level capability before inspecting subagents:
@@ -75,6 +79,8 @@ python scripts/init_run.py PLAN.json --profile balanced --catalog RUNTIME_CATALO
 ```
 
 Pass `--runtime-tier top-level-task` when the user authorized user-visible tasks. If the user requested a specific model such as Luna, pass the exact supported model and reasoning to `codex_app__create_thread`; do not ask the user to select it manually when the tool can set it.
+
+If the preferred top-level surface is unavailable, pause and ask before passing `--allow-delegation-fallback`. Availability failure alone is not permission for the root coordinator to replace top-level owners with subagents. This does not restrict bounded subagents created inside an already assigned top-level owner.
 
 Pass `--goal-authorized` only when the user explicitly requested a Goal. Goal authorization in the plan and command must both be true.
 

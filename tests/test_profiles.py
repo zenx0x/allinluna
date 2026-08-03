@@ -29,6 +29,14 @@ class ResourceProfileTests(unittest.TestCase):
             {"premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"},
         )
 
+    def test_all_profiles_default_root_to_top_level_and_allow_owner_subagents(self) -> None:
+        for name, profile in self.profiles["profiles"].items():
+            with self.subTest(profile=name):
+                delegation = profile["delegation"]
+                self.assertEqual(delegation["root_preferred"], "top-level-task")
+                self.assertTrue(delegation["root_fallback_requires_user_approval"])
+                self.assertEqual(delegation["owner_subagents"], "allowed-bounded")
+
     def test_mad_luna_is_hard_locked_and_max_reasoning(self) -> None:
         result = resolve(self.profiles, "mad-luna")
         self.assertTrue(result["valid"], result)

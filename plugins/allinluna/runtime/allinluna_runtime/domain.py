@@ -109,6 +109,7 @@ __all__ = [
     "WorkUnitId",
     "WorkUnitRef",
     "WorkUnitState",
+    "WorkGraph",
     "RUN_STATES",
     "TASK_STATES",
     "WORK_UNIT_STATES",
@@ -1525,6 +1526,227 @@ class WorkUnit(Serializable):
         return result
 
 
+class WorkGraph:
+    """An in-memory, lane-local graph of dynamically expandable work units.
+
+    The graph is intentionally a domain-only object.  It does not persist nodes,
+    invoke a scheduler, contact a host, or perform any other external action.  A
+    caller can hand the returned records to the appropriate runtime adapter after
+    the graph has accepted an expansion.
+
+    Every edge is checked when it is created: a child may remove scope,
+    authority, or ownership, but it may not add anything outside its parent.
+    Keeping that check here makes recursive expansion safe even when the caller
+    has not yet constructed a scheduler envelope.
+    """
+
+    API_VERSION: ClassVar[int] = 1
+
+    def __init__(self, task_id: TaskId | str) -> None:
+        self.task_id = TaskId(task_id)
+        self._units: dict[str, dict[str, Any]] = {}
+        self._children: dict[str, list[str]] = {}
+
+    @staticmethod
+    def _values(value: Any, field_name: str) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, Mapping):
+            value = value.get("paths", value.get("actions", value.get(field_name, ())))
+        if isinstance(value, str):
+            value = (value,)
+        if not isinstance(value, Sequence) or isinstance(value, (bytes, bytearray)):
+            raise ValidationError(f"work graph {field_name} must be an array of strings")
+        result = tuple(
+            _require_text(item, f"work graph {field_name}[{index}]")
+            for index, item in enumerate(value)
+        )
+        if len(result) != len(set(result)):
+            raise ValidationError(f"work graph {field_name} must not contain duplicates")
+        return result
+
+    @staticmethod
+    def _record(value: Mapping[str, Any]) -> dict[str, Any]:
+        record = dict(value)
+        record["id"] = str(record["id"])
+        record["task_id"] = str(record["task_id"])
+        for field_name in ("scope", "authority", "ownership", "checks", "dependencies"):
+            record[field_name] = list(record.get(field_name, ()))
+        return record
+
+    @staticmethod
+    def _within(child_values: Sequence[str], parent_values: Sequence[str]) -> bool:
+        return _all_paths_within(child_values, parent_values)
+
+    def _normalize(
+        self,
+        work_unit_id: WorkUnitId | str | Mapping[str, Any],
+        *,
+        objective: str | None = None,
+        parent_id: WorkUnitId | str | None = None,
+        scope: Any = None,
+        authority: Any = None,
+        ownership: Any = None,
+        checks: Any = None,
+        dependencies: Any = None,
+        state: WorkUnitState | str = WorkUnitState.PROPOSED,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        if isinstance(work_unit_id, Mapping):
+            supplied = dict(work_unit_id)
+            supplied.update(extra)
+            extra = supplied
+            raw_id = supplied.get("id", supplied.get("work_unit_id"))
+            objective = supplied.get("objective", objective)
+            parent_id = supplied.get("parent_id", supplied.get("parent_work_unit_id", parent_id))
+            scope = supplied.get("scope", scope)
+            authority = supplied.get("authority", authority)
+            ownership = supplied.get("ownership", ownership)
+            checks = supplied.get("checks", checks)
+            dependencies = supplied.get("dependencies", dependencies)
+            state = supplied.get("state", supplied.get("status", state))
+        else:
+            raw_id = work_unit_id
+        unit_id = str(WorkUnitId(raw_id))
+        text_objective = _require_text(
+            objective if objective is not None else unit_id,
+            "work graph objective",
+            max_length=12000,
+        )
+        return {
+            "id": unit_id,
+            "task_id": str(self.task_id),
+            "parent_id": str(WorkUnitId(parent_id)) if parent_id is not None else None,
+            "objective": text_objective,
+            "state": _enum(WorkUnitState, state, "work graph state").value,
+            "scope": list(self._values(scope, "scope")),
+            "authority": list(self._values(authority, "authority")),
+            "ownership": list(self._values(ownership, "ownership")),
+            "checks": list(self._values(checks, "checks")),
+            "dependencies": list(dependencies or ()),
+        }
+
+    def _assert_child(self, parent: Mapping[str, Any], child: Mapping[str, Any]) -> None:
+        if str(parent["task_id"]) != str(child["task_id"]):
+            raise ValidationError("child WorkUnit must remain in the parent Task")
+        if not self._within(child["scope"], parent["scope"]):
+            raise ValidationError("child scope must be a subset of parent scope")
+        if not set(child["authority"]).issubset(set(parent["authority"])):
+            raise ValidationError("child authority must be a subset of parent authority")
+        if not self._within(child["ownership"], parent["ownership"]):
+            raise ValidationError("child ownership must be a subset of parent ownership")
+
+    def _commit(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        value = self._record(record)
+        unit_id = value["id"]
+        if unit_id in self._units:
+            raise ValidationError(f"work graph already contains WorkUnit {unit_id!r}")
+        parent_id = value.get("parent_id")
+        if parent_id is not None:
+            parent = self._units.get(str(parent_id))
+            if parent is None:
+                raise ValidationError(f"work graph parent WorkUnit {parent_id!r} does not exist")
+            self._assert_child(parent, value)
+        self._units[unit_id] = value
+        if parent_id is not None:
+            self._children.setdefault(str(parent_id), []).append(unit_id)
+        return self._record(value)
+
+    def add(self, work_unit_id: WorkUnitId | str | Mapping[str, Any], **kwargs: Any) -> dict[str, Any]:
+        """Add a root work unit, or an explicitly parented unit, to the graph."""
+
+        record = self._normalize(work_unit_id, **kwargs)
+        return self._commit(record)
+
+    def add_child(
+        self,
+        parent_id: WorkUnitId | str,
+        child_id: WorkUnitId | str | Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Add one child after checking all three monotone policy dimensions."""
+
+        parent_key = str(WorkUnitId(parent_id))
+        if parent_key not in self._units:
+            raise ValidationError(f"work graph parent WorkUnit {parent_key!r} does not exist")
+        record = self._normalize(child_id, parent_id=parent_key, **kwargs)
+        if record["parent_id"] != parent_key:
+            raise ValidationError("child WorkUnit parent_id must match the expansion parent")
+        parent = self._units[parent_key]
+        # Omitted child policies inherit the parent's boundary.  Explicit values
+        # remain free to narrow that inherited boundary but never to widen it.
+        for field_name in ("scope", "authority", "ownership"):
+            if field_name not in kwargs and not isinstance(child_id, Mapping):
+                record[field_name] = list(parent[field_name])
+            elif isinstance(child_id, Mapping) and field_name not in child_id:
+                record[field_name] = list(parent[field_name])
+        self._assert_child(parent, record)
+        return self._commit(record)
+
+    def expand(
+        self,
+        parent_id: WorkUnitId | str,
+        children: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Atomically append a batch of children below an existing work unit."""
+
+        if isinstance(children, (str, bytes, bytearray)) or not isinstance(children, Sequence):
+            raise ValidationError("work graph expansion must be an array of child objects")
+        parent_key = str(WorkUnitId(parent_id))
+        if parent_key not in self._units:
+            raise ValidationError(f"work graph parent WorkUnit {parent_key!r} does not exist")
+        parent = self._units[parent_key]
+        prepared: list[dict[str, Any]] = []
+        seen = set(self._units)
+        for index, child in enumerate(children):
+            if not isinstance(child, Mapping):
+                raise ValidationError(f"work graph expansion child {index} must be an object")
+            record = self._normalize(child, parent_id=parent_key)
+            if record["parent_id"] != parent_key:
+                raise ValidationError("expanded child WorkUnit parent_id must match the expansion parent")
+            if record["id"] in seen:
+                raise ValidationError(f"work graph already contains WorkUnit {record['id']!r}")
+            for field_name in ("scope", "authority", "ownership"):
+                if field_name not in child:
+                    record[field_name] = list(parent[field_name])
+            self._assert_child(parent, record)
+            prepared.append(record)
+            seen.add(record["id"])
+        return [self._commit(record) for record in prepared]
+
+    def get(self, work_unit_id: WorkUnitId | str) -> dict[str, Any] | None:
+        value = self._units.get(str(WorkUnitId(work_unit_id)))
+        return self._record(value) if value is not None else None
+
+    def children(self, parent_id: WorkUnitId | str) -> list[dict[str, Any]]:
+        parent_key = str(WorkUnitId(parent_id))
+        if parent_key not in self._units:
+            raise KeyError(parent_key)
+        return [self._record(self._units[item]) for item in self._children.get(parent_key, ())]
+
+    def records(self) -> list[dict[str, Any]]:
+        return [self._record(self._units[item]) for item in self._units]
+
+    def validate_monotonic_narrowing(self) -> bool:
+        """Validate every stored edge and return ``True`` when the graph is sound."""
+
+        for unit_id, unit in self._units.items():
+            parent_id = unit.get("parent_id")
+            if parent_id is None:
+                continue
+            parent = self._units.get(str(parent_id))
+            if parent is None:
+                raise ValidationError(f"work graph parent WorkUnit {parent_id!r} does not exist")
+            if unit_id == str(parent_id):
+                raise ValidationError("work graph cannot contain a self-parenting WorkUnit")
+            self._assert_child(parent, unit)
+        return True
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate_monotonic_narrowing()
+        return {"task_id": str(self.task_id), "work_units": self.records()}
+
+
 _WORK_UNIT_TRANSITIONS: dict[WorkUnitState, frozenset[WorkUnitState]] = {
     WorkUnitState.PROPOSED: frozenset({WorkUnitState.READY, WorkUnitState.DELEGATED, WorkUnitState.ACTIVE}),
     WorkUnitState.READY: frozenset({WorkUnitState.DELEGATED, WorkUnitState.ACTIVE}),
@@ -2344,7 +2566,18 @@ class DomainAPI:
     points for validation, state transitions and JSON-safe serialization.
     """
 
-    primitives = (Run, Task, LaneAttempt, WorkUnit, Contract, Artifact, Snapshot, Signal, HostReceipt)
+    primitives = (
+        Run,
+        Task,
+        LaneAttempt,
+        WorkUnit,
+        WorkGraph,
+        Contract,
+        Artifact,
+        Snapshot,
+        Signal,
+        HostReceipt,
+    )
     run_states = RUN_STATES
     task_states = TASK_STATES
     work_unit_states = WORK_UNIT_STATES

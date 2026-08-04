@@ -27,7 +27,7 @@ The expected sidebar result is multiple route Owners comparing routes and eviden
 
 ## First use: what you will see
 
-First use remains outcome-first: the Sponsor keeps the question’s direction, an independent Coordinator appears in the sidebar, and multiple route Owners follow. Repeated ticks reconcile known dispatches with `no-op`, `reuse`, or `wait`, never by creating the same Owner twice. You see real thread receipts, host/worktree/repository identity, and a monitor cursor before the final `mechanical-only` integration boundary.
+First use remains outcome-first: the Sponsor keeps the question’s direction, an independent Coordinator appears in the sidebar, and multiple route Owners follow. Repeated ticks reconcile known dispatches with `no-op`, `reuse`, or `wait`, never by creating the same Owner twice. You see real thread receipts, host/worktree/repository identity, and a monitor cursor before the final `mechanical-only` integration boundary. The persisted receipt must also retain `source=codex_app`, `actual_tool`, complete capability evidence, monitor cursor/receipts, and the integration boundary; only `threadId`, `hostId`, and an output directory is BLOCKED/UNVERIFIED.
 
 ### Resource confirmation card and shortest prompt
 

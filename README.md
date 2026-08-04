@@ -117,7 +117,7 @@ CounterPilot 是只读的独立挑战者，用来检查范围、假设、依赖�
 
 第一次运行的目标不是让你学习内部协议，而是让你看见一条真实、可追踪的执行链：Sponsor 对话保持你的方向，独立 Coordinator 出现在侧边栏，随后出现两个或更多有名字的顶层 Owner。重复刷新或 tick 只会对已知 dispatch 做 `no-op`、`reuse` 或 `wait`，不会重复创建同一个 Owner。
 
-接下来你会看到 Owner 的真实 thread receipt、host/worktree/repo 身份和 monitor cursor；最后到达 `mechanical-only` integration boundary。没有真实 Codex App receipt 时，结果会明确显示 BLOCKED/UNVERIFIED，不会把 CI fixture 当成真实成功。
+接下来你会看到 Owner 的真实 thread receipt、host/worktree/repo 身份和 monitor cursor；最后到达 `mechanical-only` integration boundary。持久 receipt 还必须保留 `source=codex_app`、`actual_tool`、完整 capability、monitor cursor/receipt 和 integration boundary；如果只有 `threadId`、`hostId`、output dir，结果会明确显示 BLOCKED/UNVERIFIED，不会把 CI fixture 当成真实成功。
 
 ### 资源确认卡
 

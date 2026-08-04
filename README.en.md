@@ -117,7 +117,7 @@ The table describes request policy, not invented fixed model names: `tier:fronti
 
 The first run is outcome-first; you do not need to learn the internal protocol. Your Sponsor conversation keeps direction, an independent Coordinator appears in the sidebar, and then two or more named top-level Owners appear. Repeating a refresh or tick reconciles known dispatches with `no-op`, `reuse`, or `wait`; it does not create the same Owner twice.
 
-You then see each Owner’s real thread receipt, host/worktree/repository identity, and monitor cursor before the `mechanical-only` integration boundary. Without a real Codex App receipt, the result is explicitly BLOCKED/UNVERIFIED; a CI fixture is never presented as real success.
+You then see each Owner’s real thread receipt, host/worktree/repository identity, and monitor cursor before the `mechanical-only` integration boundary. The persisted receipt must also retain `source=codex_app`, `actual_tool`, complete capability evidence, monitor cursor/receipts, and the integration boundary; an object with only `threadId`, `hostId`, and an output directory is explicitly BLOCKED/UNVERIFIED, never real success.
 
 ### Resource confirmation card
 

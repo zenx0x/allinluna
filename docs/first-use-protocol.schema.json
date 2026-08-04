@@ -3,7 +3,7 @@
   "$id": "https://github.com/zenx0x/allinluna/schemas/first-use-protocol.schema.json",
   "title": "All in Luna bounded first-use receipt",
   "type": "object",
-  "required": ["protocol", "schema_version", "verification_mode", "identities", "events", "monitor", "integration_boundary"],
+  "required": ["protocol", "schema_version", "verification_mode", "identities", "capability_evidence", "events", "monitor", "integration_boundary"],
   "properties": {
     "protocol": { "const": "allinluna.first_use" },
     "schema_version": { "const": "1.0" },
@@ -25,12 +25,12 @@
     "events": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event" } },
     "monitor": {
       "type": "object",
-      "required": ["cursor", "receipts"],
+      "required": ["source", "cursor", "receipts"],
       "properties": { "cursor": { "type": "string", "minLength": 1 }, "receipts": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "source": { "enum": ["fixture", "codex_app"] } }
     },
     "integration_boundary": {
       "type": "object",
-      "required": ["boundary"],
+      "required": ["source", "boundary"],
       "properties": { "boundary": { "const": "mechanical-only" }, "source": { "enum": ["fixture", "codex_app"] }, "semantic_owner": { "type": "string" } }
     },
     "failures": { "type": "array", "items": { "$ref": "#/$defs/failure" } }
@@ -72,7 +72,22 @@
         "identity": { "$ref": "#/$defs/identity" },
         "tool_capability": { "$ref": "#/$defs/capability" },
         "idempotency": { "type": "object", "additionalProperties": { "enum": ["no-op", "reuse", "wait"] } },
-        "receipt": { "type": "object" }
+        "receipt": { "$ref": "#/$defs/thread_receipt" }
+      }
+    },
+    "thread_receipt": {
+      "type": "object",
+      "required": ["source", "actual_tool", "thread_id", "host_id", "worktree", "repo"],
+      "properties": {
+        "source": { "enum": ["fixture", "codex_app"] },
+        "actual_tool": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string", "minLength": 1 },
+        "client_thread_id": { "type": "string" },
+        "host_id": { "type": "string", "minLength": 1 },
+        "worktree": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "status": { "type": "string" },
+        "failure_class": { "enum": ["product_failure", "host_tool_unavailable", "checker_error"] }
       }
     },
     "failure": {
@@ -80,5 +95,27 @@
       "required": ["class"],
       "properties": { "class": { "enum": ["product_failure", "host_tool_unavailable", "checker_error"] }, "message": { "type": "string" }, "recovered": { "type": "boolean" } }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["verification_mode"],
+        "properties": { "verification_mode": { "const": "real" } }
+      },
+      "then": {
+        "properties": {
+          "capability_evidence": {
+            "items": {
+              "allOf": [
+                { "$ref": "#/$defs/capability" },
+                { "properties": { "source": { "const": "codex_app" }, "actual_tool": { "const": "codex_app__create_thread" } } }
+              ]
+            }
+          },
+          "monitor": { "properties": { "source": { "const": "codex_app" } } },
+          "integration_boundary": { "properties": { "source": { "const": "codex_app" } } }
+        }
+      }
+    }
+  ]
 }

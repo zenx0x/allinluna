@@ -27,7 +27,7 @@ Research Routes 是可独立安装、也可与 All in Luna 共存的 Codex 研�
 
 ## 第一次使用：你会先看到什么
 
-第一次使用仍然是 outcome-first：Sponsor 保持问题方向，独立 Coordinator 出现在侧边栏，随后出现多个 route Owner。重复 tick 只会对已知 dispatch 做 `no-op`、`reuse` 或 `wait`，不会重复创建 Owner。你会看到真实 thread receipt、host/worktree/repo 身份和 monitor cursor；最后的 integration 只做 `mechanical-only` 对账。
+第一次使用仍然是 outcome-first：Sponsor 保持问题方向，独立 Coordinator 出现在侧边栏，随后出现多个 route Owner。重复 tick 只会对已知 dispatch 做 `no-op`、`reuse` 或 `wait`，不会重复创建 Owner。你会看到真实 thread receipt、host/worktree/repo 身份和 monitor cursor；持久 receipt 必须同时保留 `source=codex_app`、`actual_tool`、完整 capability、monitor cursor/receipt 和 `mechanical-only` integration boundary。只有 `threadId`、`hostId`、output dir 时会 BLOCKED/UNVERIFIED。
 
 ### 资源确认卡与最短 prompt
 

@@ -21,6 +21,7 @@ LIST_THREADS_TOOL = "codex_app__list_threads"
 READ_THREAD_TOOL = "codex_app__read_thread"
 SEND_MESSAGE_TOOL = "codex_app__send_message_to_thread"
 WAIT_THREADS_TOOL = "codex_app__wait_threads"
+CODEX_APP_SOURCE = "codex_app"
 
 FORBIDDEN_ACTION_FIELDS = {"environment", "reasoning", "brief_path"}
 
@@ -43,6 +44,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
             },
         },
         "receipt": ["threadId", "clientThreadId", "hostId"],
+        "receipt_protocol": {
+            "source": CODEX_APP_SOURCE,
+            "actual_tool": CREATE_THREAD_TOOL,
+            "required": ["source", "actual_tool", "output_dir", "capability"],
+            "capability": ["requested", "resolved", "actual", "fallback"],
+        },
     },
     LIST_PROJECTS_TOOL: {
         "kind": "app",
@@ -537,29 +544,230 @@ def send_message_action(
     }
 
 
-def normalize_thread_receipt(payload: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a real create_thread response into dispatch or task receipt evidence."""
+def _receipt_evidence_source(
+    payload: dict[str, Any],
+    runtime_evidence: dict[str, Any] | None,
+    capability_receipt: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Find a capability evidence object without treating a bare receipt as one."""
 
+    candidates: list[Any] = [
+        payload.get("capability"),
+        payload.get("capabilityEvidence"),
+        payload.get("capability_evidence"),
+        payload.get("capabilityReceipt"),
+        payload.get("capability_receipt"),
+        runtime_evidence.get("capability") if runtime_evidence else None,
+        runtime_evidence.get("capabilityReceipt") if runtime_evidence else None,
+        runtime_evidence.get("capability_receipt") if runtime_evidence else None,
+        capability_receipt.get("capability") if capability_receipt else None,
+        capability_receipt,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict) and any(
+            field in candidate for field in ("requested", "resolved", "actual", "fallback")
+        ):
+            return candidate
+    return None
+
+
+def _normalize_create_receipt_evidence(
+    payload: dict[str, Any],
+    *,
+    thread_id: str | None,
+    client_thread_id: str | None,
+    host_id: str | None,
+    output_dir: str | None,
+    capability_receipt: dict[str, Any] | None = None,
+    requested: dict[str, Any] | None = None,
+) -> tuple[str, str, dict[str, Any], dict[str, Any], str | None]:
+    """Normalize first-use receipt provenance and capability evidence in one place."""
+
+    provided_runtime = payload.get("runtimeEvidence") or payload.get("runtime_evidence")
+    runtime_evidence = provided_runtime if isinstance(provided_runtime, dict) else None
+    evidence_source = _receipt_evidence_source(payload, runtime_evidence, capability_receipt)
+
+    source_value = payload.get("source")
+    if not isinstance(source_value, str) and runtime_evidence:
+        source_value = runtime_evidence.get("source")
+    source = _string(source_value) or CODEX_APP_SOURCE
+    fallback_reasons: list[str] = []
+    if not _string(source_value):
+        fallback_reasons.append("source-missing-from-receipt;inferred-from-codex-app-adapter")
+    if source != CODEX_APP_SOURCE:
+        raise ValueError(f"create_thread receipt source must be {CODEX_APP_SOURCE!r}: {source!r}")
+
+    actual_payload = payload.get("actual") if isinstance(payload.get("actual"), dict) else {}
+    runtime_actual = runtime_evidence.get("actual") if runtime_evidence else None
+    if not isinstance(runtime_actual, dict):
+        runtime_actual = {}
+    actual_tool_value = (
+        payload.get("actual_tool")
+        or payload.get("actualTool")
+        or actual_payload.get("actual_tool")
+        or actual_payload.get("actualTool")
+        or actual_payload.get("tool")
+        or runtime_actual.get("actual_tool")
+        or runtime_actual.get("actualTool")
+        or runtime_actual.get("tool")
+        or (
+            evidence_source.get("actual", {}).get("tool")
+            if isinstance(evidence_source, dict)
+            and isinstance(evidence_source.get("actual"), dict)
+            else None
+        )
+    )
+    actual_tool = _string(actual_tool_value) or CREATE_THREAD_TOOL
+    if not _string(actual_tool_value):
+        fallback_reasons.append("actual-tool-missing-from-receipt;inferred-from-create-thread-context")
+    if actual_tool != CREATE_THREAD_TOOL:
+        raise ValueError(
+            f"create_thread receipt actual_tool must be {CREATE_THREAD_TOOL!r}: {actual_tool!r}"
+        )
+
+    requested_evidence = None
+    resolved_evidence = None
+    actual_evidence = None
+    explicit_fallback: Any = None
+    if evidence_source:
+        requested_evidence = evidence_source.get("requested")
+        resolved_evidence = evidence_source.get("resolved")
+        actual_evidence = evidence_source.get("actual")
+        explicit_fallback = evidence_source.get("fallback")
+    if not isinstance(requested_evidence, dict) and runtime_evidence:
+        requested_evidence = runtime_evidence.get("requested")
+    if not isinstance(resolved_evidence, dict) and runtime_evidence:
+        resolved_evidence = runtime_evidence.get("resolved")
+    if not isinstance(actual_evidence, dict) and runtime_evidence:
+        actual_evidence = runtime_actual
+
+    if not isinstance(requested_evidence, dict):
+        requested_evidence = deepcopy(requested or {"tool": CREATE_THREAD_TOOL, "arguments": {}})
+    else:
+        requested_evidence = deepcopy(requested_evidence)
+
+    if not isinstance(resolved_evidence, dict):
+        catalog_entry = TOOL_CATALOG.get(actual_tool, {})
+        resolved_evidence = {
+            "tool": actual_tool if catalog_entry else None,
+            "source": "capability-receipt" if capability_receipt else "adapter-tool-catalog",
+            "schema": deepcopy(catalog_entry.get("parameters")),
+        }
+        if not capability_receipt:
+            fallback_reasons.append(
+                "capability-evidence-missing-from-receipt;resolved-against-adapter-catalog"
+            )
+    else:
+        resolved_evidence = deepcopy(resolved_evidence)
+
+    if not isinstance(actual_evidence, dict):
+        actual_evidence = {}
+    else:
+        actual_evidence = deepcopy(actual_evidence)
+    actual_evidence.setdefault("tool", actual_tool)
+    if thread_id:
+        actual_evidence["threadId"] = thread_id
+    elif client_thread_id:
+        actual_evidence["clientThreadId"] = client_thread_id
+    if host_id:
+        actual_evidence["hostId"] = host_id
+    if output_dir:
+        actual_evidence["outputDir"] = output_dir
+
+    if isinstance(explicit_fallback, str) and explicit_fallback:
+        fallback = explicit_fallback
+    elif explicit_fallback is not None:
+        fallback = str(explicit_fallback)
+    elif client_thread_id:
+        # Keep the existing pending receipt contract stable; a clientThreadId is
+        # never evidence that the host created a real thread.
+        fallback = "pending-client-thread-id"
+    else:
+        fallback = ";".join(fallback_reasons) if fallback_reasons else None
+
+    capability = {
+        "requested": requested_evidence,
+        "resolved": resolved_evidence,
+        "actual": actual_evidence,
+        "fallback": fallback,
+    }
+    return source, actual_tool, capability, actual_evidence, fallback
+
+
+def normalize_thread_receipt(
+    payload: dict[str, Any],
+    *,
+    capability_receipt: dict[str, Any] | None = None,
+    requested: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Normalize a real create_thread response into dispatch or task receipt evidence.
+
+    The returned receipt is the persistence boundary for first-use protocol evidence.  A
+    host may provide source/tool/capability fields directly or via a capability receipt;
+    when it does not, the adapter derives only the create_thread context and records an
+    explicit fallback instead of presenting the adapter schema as a live invocation.
+    """
+
+    if not isinstance(payload, dict):
+        raise ValueError("create_thread receipt must be a JSON object")
     thread_id = _string(payload.get("threadId") or payload.get("thread_id"))
     host_id = _string(payload.get("hostId") or payload.get("host_id"))
     client_thread_id = _string(payload.get("clientThreadId") or payload.get("client_thread_id"))
     dispatch = _string(payload.get("dispatchId") or payload.get("dispatch_id"))
+    payload_actual = payload.get("actual") if isinstance(payload.get("actual"), dict) else {}
+    output_dir = _string(
+        payload.get("outputDir")
+        or payload.get("output_dir")
+        or payload_actual.get("outputDir")
+        or payload_actual.get("output_dir")
+    )
+    embedded_capability_receipt = (
+        payload.get("capabilityReceipt") or payload.get("capability_receipt")
+    )
+    effective_capability_receipt = (
+        capability_receipt
+        if isinstance(capability_receipt, dict)
+        else embedded_capability_receipt
+        if isinstance(embedded_capability_receipt, dict)
+        else None
+    )
+    source, actual_tool, capability, actual_evidence, _ = _normalize_create_receipt_evidence(
+        payload,
+        thread_id=thread_id,
+        client_thread_id=client_thread_id,
+        host_id=host_id,
+        output_dir=output_dir,
+        capability_receipt=effective_capability_receipt,
+        requested=requested,
+    )
+    runtime_evidence = deepcopy(
+        payload.get("runtimeEvidence") or payload.get("runtime_evidence")
+    )
+    if not isinstance(runtime_evidence, dict):
+        runtime_evidence = {}
+    runtime_evidence.update(
+        {
+            "source": source,
+            "actual_tool": actual_tool,
+            "requested": deepcopy(capability["requested"]),
+            "resolved": deepcopy(capability["resolved"]),
+            "actual": deepcopy(capability["actual"]),
+            "fallback": capability["fallback"],
+            "capability": deepcopy(capability),
+        }
+    )
+    common = {
+        "source": source,
+        "actual_tool": actual_tool,
+        "output_dir": output_dir,
+        "capability": deepcopy(capability),
+        "capability_evidence": deepcopy(capability),
+        "actual": deepcopy(actual_evidence),
+        "runtime_evidence": runtime_evidence,
+    }
     if thread_id:
-        runtime_evidence = deepcopy(
-            payload.get("runtimeEvidence") or payload.get("runtime_evidence")
-        )
-        if not isinstance(runtime_evidence, dict):
-            runtime_evidence = {
-                "requested": {"tool": CREATE_THREAD_TOOL, "arguments": {}},
-                "resolved": {"tool": CREATE_THREAD_TOOL, "source": "create-thread-receipt"},
-                "actual": {
-                    "tool": CREATE_THREAD_TOOL,
-                    "threadId": thread_id,
-                    "hostId": host_id,
-                },
-                "fallback": None,
-            }
         return {
+            **common,
             "kind": "thread-receipt",
             "status": "ready",
             "thread_id": thread_id,
@@ -569,30 +777,14 @@ def normalize_thread_receipt(payload: dict[str, Any]) -> dict[str, Any]:
             "branch": payload.get("branch"),
             "base_commit": payload.get("baseCommit") or payload.get("base_commit"),
             "runtime_receipt": payload.get("runtimeReceipt") or payload.get("runtime_receipt"),
-            "actual": deepcopy(payload.get("actual")) if isinstance(payload.get("actual"), dict) else {},
-            "runtime_evidence": runtime_evidence,
         }
     if client_thread_id:
-        runtime_evidence = deepcopy(
-            payload.get("runtimeEvidence") or payload.get("runtime_evidence")
-        )
-        if not isinstance(runtime_evidence, dict):
-            runtime_evidence = {
-                "requested": {"tool": CREATE_THREAD_TOOL, "arguments": {}},
-                "resolved": {"tool": CREATE_THREAD_TOOL, "source": "create-thread-receipt"},
-                "actual": {
-                    "tool": CREATE_THREAD_TOOL,
-                    "clientThreadId": client_thread_id,
-                    "hostId": host_id,
-                },
-                "fallback": "pending-client-thread-id",
-            }
         return {
+            **common,
             "kind": "dispatch-receipt",
             "status": "pending",
             "client_thread_id": client_thread_id,
             "host_id": host_id,
             "dispatch_id": dispatch,
-            "runtime_evidence": runtime_evidence,
         }
     raise ValueError("create_thread returned neither threadId nor clientThreadId")

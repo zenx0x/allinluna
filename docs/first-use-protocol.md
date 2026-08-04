@@ -21,6 +21,21 @@ Every receipt carries machine-readable event sequence and identity fields:
 - monitor evidence records a cursor and receipts; integration is explicitly
   `mechanical-only`, so semantic defects return to the original Owner.
 
+### Persistent receipt contract
+
+The persisted real protocol receipt is an evidence envelope, not the raw
+transport response from `create_thread`. It must persist, in the same receipt
+chain, `source=codex_app`, `actual_tool=codex_app__create_thread`, all requested /
+resolved / actual tool and capability values, every Sponsor/Coordinator/Owner
+identity, `monitor.source=codex_app` with both `cursor` and `receipts`, and
+`integration_boundary.source=codex_app` with `boundary=mechanical-only`.
+
+An object containing only `threadId`, `hostId`, and an output directory is an
+incomplete host transport receipt. The checker does not infer the missing
+protocol fields from those values or from the output directory. It reports
+`BLOCKED`/`UNVERIFIED` and lists the missing paths; it cannot produce
+`REAL_PASS`.
+
 The JSON contract is [`first-use-protocol.schema.json`](first-use-protocol.schema.json).
 The checker is [`scripts/first_use_protocol.py`](../scripts/first_use_protocol.py).
 
@@ -36,7 +51,7 @@ The checker is [`scripts/first_use_protocol.py`](../scripts/first_use_protocol.p
 | Integration boundary | The host evidence must show mechanical reconciliation only; product semantics remain Owner-owned. | The same boundary is checked synthetically. |
 
 Real mode is deliberately read-only: `first_use_protocol.py --mode real` reads
-one host receipt and reports evidence. It never calls `codex_app__create_thread`,
+one persisted host receipt and reports evidence. It never calls `codex_app__create_thread`,
 never creates an unbounded sidebar task, and never mutates a worktree. A missing
 receipt, pending `clientThreadId` without a returned `thread_id`, unavailable
 tool, or missing host identity stops at `BLOCKED`/`UNVERIFIED`; it is not a pass.

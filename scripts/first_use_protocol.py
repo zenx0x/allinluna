@@ -29,6 +29,15 @@ EVENT_ORDER = (
 )
 FAILURE_CLASSES = {"product_failure", "host_tool_unavailable", "checker_error"}
 IDEMPOTENCY_ACTIONS = {"no-op", "reuse", "wait"}
+CAPABILITY_FIELDS = (
+    "requested_tool",
+    "resolved_tool",
+    "actual_tool",
+    "requested_capability",
+    "resolved_capability",
+    "actual_capability",
+)
+IDENTITY_FIELDS = ("thread_id", "role", "host_id", "worktree", "repo", "branch", "commit")
 
 
 def _identity(
@@ -155,6 +164,10 @@ def build_fixture_receipt(scenario: str = "success") -> dict[str, Any]:
                 receipt={
                     "source": "fixture",
                     "thread_id": failed["thread_id"],
+                    "host_id": failed["host_id"],
+                    "worktree": failed["worktree"],
+                    "repo": failed["repo"],
+                    "actual_tool": "fixture-simulated",
                     "status": "failed",
                     "failure_class": "product_failure",
                 },
@@ -259,7 +272,11 @@ def build_fixture_receipt(scenario: str = "success") -> dict[str, Any]:
             }
         ],
         "events": events,
-        "monitor": {"cursor": "fixture-cursor-2", "receipts": ["fixture-owner-api", "fixture-owner-docs"]},
+        "monitor": {
+            "source": "fixture",
+            "cursor": "fixture-cursor-2",
+            "receipts": ["fixture-owner-api", "fixture-owner-docs"],
+        },
         "integration_boundary": {
             "boundary": "mechanical-only",
             "source": "fixture",
@@ -280,6 +297,12 @@ def _issue(failure_class: str, message: str, *, path: str | None = None) -> dict
     return result
 
 
+def _missing_issue(mode: str, message: str, *, path: str) -> dict[str, str]:
+    """Missing real host evidence is blocked, not a checker/schema success."""
+
+    return _issue("host_tool_unavailable" if mode == "real" else "checker_error", message, path=path)
+
+
 def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
     """Return typed checker issues; this function has no external side effects."""
 
@@ -287,35 +310,57 @@ def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
     if not isinstance(receipt, dict):
         return [_issue("checker_error", "receipt must be a JSON object", path="$")]
     if receipt.get("protocol") != PROTOCOL:
-        errors.append(_issue("checker_error", "unexpected protocol", path="protocol"))
+        errors.append(
+            _missing_issue(mode, "protocol is required in the persisted first-use receipt", path="protocol")
+            if "protocol" not in receipt
+            else _issue("checker_error", "unexpected protocol", path="protocol")
+        )
     if receipt.get("schema_version") != SCHEMA_VERSION:
-        errors.append(_issue("checker_error", "unsupported schema version", path="schema_version"))
+        errors.append(
+            _missing_issue(mode, "schema_version is required in the persisted first-use receipt", path="schema_version")
+            if "schema_version" not in receipt
+            else _issue("checker_error", "unsupported schema version", path="schema_version")
+        )
     if receipt.get("verification_mode") != mode:
-        errors.append(_issue("checker_error", "receipt verification_mode does not match checker mode", path="verification_mode"))
+        errors.append(
+            _missing_issue(mode, "verification_mode is required in the persisted first-use receipt", path="verification_mode")
+            if "verification_mode" not in receipt
+            else _issue("checker_error", "receipt verification_mode does not match checker mode", path="verification_mode")
+        )
     if mode == "real" and receipt.get("verification_mode") == "fixture":
         errors.append(_issue("checker_error", "fixture evidence cannot be promoted to real evidence", path="verification_mode"))
     identities = receipt.get("identities")
     if not isinstance(identities, dict):
-        errors.append(_issue("checker_error", "identities object is required", path="identities"))
+        errors.append(_missing_issue(mode, "identities object is required in the persisted receipt", path="identities"))
         identities = {}
     sponsor = identities.get("sponsor", {})
     coordinator = identities.get("coordinator", {})
     owners = identities.get("owners", [])
     if not isinstance(sponsor, dict) or not sponsor.get("thread_id"):
-        errors.append(_issue("checker_error", "sponsor thread identity is required", path="identities.sponsor"))
+        errors.append(_missing_issue(mode, "Sponsor thread identity is required", path="identities.sponsor"))
     if not isinstance(coordinator, dict) or not coordinator.get("thread_id"):
-        errors.append(_issue("checker_error", "coordinator thread identity is required", path="identities.coordinator"))
+        errors.append(_missing_issue(mode, "Coordinator thread identity is required", path="identities.coordinator"))
     if isinstance(sponsor, dict) and isinstance(coordinator, dict) and sponsor.get("thread_id") == coordinator.get("thread_id"):
         errors.append(_issue("product_failure", "Sponsor and Coordinator must be distinct threads", path="identities.coordinator.thread_id"))
     if not isinstance(owners, list) or len(owners) < 2:
-        errors.append(_issue("product_failure", "at least two top-level Owners are required", path="identities.owners"))
+        errors.append(
+            _missing_issue(mode, "at least two top-level Owners are required", path="identities.owners")
+            if "owners" not in identities
+            else _issue("product_failure", "at least two top-level Owners are required", path="identities.owners")
+        )
         owners = []
+    for identity_name, identity in (("sponsor", sponsor), ("coordinator", coordinator), *[("owner", owner) for owner in owners]):
+        if not isinstance(identity, dict):
+            continue
+        for field in IDENTITY_FIELDS:
+            if not identity.get(field):
+                errors.append(_missing_issue(mode, f"{identity_name} identity is missing {field}", path=f"identities.{identity_name}.{field}"))
     thread_ids = [item.get("thread_id") for item in [sponsor, coordinator, *owners] if isinstance(item, dict)]
     if len(thread_ids) != len(set(thread_ids)):
         errors.append(_issue("product_failure", "control-plane and Owner thread IDs must be unique", path="identities"))
     events = receipt.get("events")
     if not isinstance(events, list) or not events:
-        errors.append(_issue("checker_error", "events must be a non-empty array", path="events"))
+        errors.append(_missing_issue(mode, "events are required in the persisted first-use receipt", path="events"))
         events = []
     names = [event.get("event") for event in events if isinstance(event, dict)]
     if names[:2] != list(EVENT_ORDER[:2]):
@@ -323,7 +368,11 @@ def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
     required = set(EVENT_ORDER)
     missing = required.difference(names)
     for name in sorted(missing):
-        errors.append(_issue("product_failure", f"required protocol event is missing: {name}", path="events"))
+        errors.append(
+            _missing_issue(mode, f"required protocol event is missing: {name}", path="events")
+            if mode == "real"
+            else _issue("product_failure", f"required protocol event is missing: {name}", path="events")
+        )
     sequences = [event.get("seq") for event in events if isinstance(event, dict)]
     if sequences != list(range(1, len(sequences) + 1)):
         errors.append(_issue("checker_error", "event seq values must be contiguous from 1", path="events.seq"))
@@ -331,25 +380,30 @@ def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
         if not isinstance(event, dict):
             errors.append(_issue("checker_error", "event must be an object", path=f"events[{index}]"))
             continue
-        if not event.get("event_id") or not isinstance(event.get("identity"), dict):
-            errors.append(_issue("checker_error", "event_id and identity are required", path=f"events[{index}]"))
+        if not event.get("event_id"):
+            errors.append(_missing_issue(mode, "event_id is required", path=f"events[{index}].event_id"))
+        if not isinstance(event.get("identity"), dict):
+            errors.append(_missing_issue(mode, "event identity is required", path=f"events[{index}].identity"))
         if event.get("event") == "owner_dispatch_requested":
             capability = event.get("tool_capability")
-            for field in ("requested_tool", "resolved_tool", "actual_tool", "requested_capability", "resolved_capability", "actual_capability"):
+            for field in CAPABILITY_FIELDS:
                 if not isinstance(capability, dict) or not capability.get(field):
-                    errors.append(_issue("checker_error", f"dispatch evidence missing {field}", path=f"events[{index}].tool_capability"))
+                    errors.append(_missing_issue(mode, f"dispatch evidence missing {field}", path=f"events[{index}].tool_capability.{field}"))
         if event.get("event") == "owner_thread_receipt":
             receipt_data = event.get("receipt")
             if not isinstance(receipt_data, dict):
-                errors.append(_issue("checker_error", "Owner thread receipt must be an object", path=f"events[{index}].receipt"))
+                errors.append(_missing_issue(mode, "Owner thread receipt must be persisted", path=f"events[{index}].receipt"))
             elif receipt_data.get("client_thread_id") and not receipt_data.get("thread_id"):
                 errors.append(_issue("host_tool_unavailable", "pending clientThreadId has no host thread receipt yet", path=f"events[{index}].receipt"))
             elif not receipt_data.get("thread_id"):
                 errors.append(_issue("host_tool_unavailable", "host did not return a real thread_id", path=f"events[{index}].receipt"))
             if mode == "real" and isinstance(receipt_data, dict):
-                if receipt_data.get("source") != "codex_app":
+                for field in ("source", "actual_tool", "host_id", "worktree", "repo"):
+                    if not receipt_data.get(field):
+                        errors.append(_issue("host_tool_unavailable", f"real Owner receipt is missing {field}", path=f"events[{index}].receipt.{field}"))
+                if receipt_data.get("source") not in {None, "codex_app"}:
                     errors.append(_issue("host_tool_unavailable", "real mode requires a Codex App receipt", path=f"events[{index}].receipt.source"))
-                if receipt_data.get("actual_tool") != "codex_app__create_thread":
+                if receipt_data.get("actual_tool") not in {None, "codex_app__create_thread"}:
                     errors.append(_issue("host_tool_unavailable", "real mode requires actual Codex App tool evidence", path=f"events[{index}].receipt.actual_tool"))
     repeated = next((event for event in events if isinstance(event, dict) and event.get("event") == "repeated_tick"), None)
     if repeated:
@@ -357,33 +411,48 @@ def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
         if not isinstance(idem, dict) or not set(idem.values()).intersection(IDEMPOTENCY_ACTIONS):
             errors.append(_issue("product_failure", "repeated tick has no no-op/reuse/wait evidence", path="repeated_tick.idempotency"))
     monitor = receipt.get("monitor")
-    if not isinstance(monitor, dict) or not monitor.get("cursor") or not monitor.get("receipts"):
-        errors.append(_issue("host_tool_unavailable" if mode == "real" else "checker_error", "monitor cursor and receipts are required", path="monitor"))
+    if not isinstance(monitor, dict):
+        errors.append(_missing_issue(mode, "monitor cursor and receipts are required", path="monitor"))
+    else:
+        for field in ("cursor", "receipts", "source"):
+            if not monitor.get(field):
+                errors.append(_missing_issue(mode, f"monitor {field} is required", path=f"monitor.{field}"))
+        if monitor.get("receipts") and not isinstance(monitor.get("receipts"), list):
+            errors.append(_issue("checker_error", "monitor receipts must be an array", path="monitor.receipts"))
     if mode == "real":
         capabilities = receipt.get("capability_evidence")
         if not isinstance(capabilities, list) or not capabilities:
-            errors.append(_issue("host_tool_unavailable", "real receipt lacks capability evidence", path="capability_evidence"))
+            errors.append(_issue("host_tool_unavailable", "capability_evidence with requested/resolved/actual tool and capability plus source=codex_app is required", path="capability_evidence"))
         else:
             for index, capability in enumerate(capabilities):
-                if not isinstance(capability, dict) or capability.get("source") != "codex_app" or capability.get("actual_tool") != "codex_app__create_thread":
-                    errors.append(_issue("host_tool_unavailable", "real capability evidence must come from Codex App", path=f"capability_evidence[{index}]"))
+                if not isinstance(capability, dict):
+                    errors.append(_issue("host_tool_unavailable", "real capability evidence must be persisted", path=f"capability_evidence[{index}]"))
+                    continue
+                for field in CAPABILITY_FIELDS:
+                    if not capability.get(field):
+                        errors.append(_issue("host_tool_unavailable", f"real capability evidence is missing {field}", path=f"capability_evidence[{index}].{field}"))
+                if capability.get("source") != "codex_app":
+                    errors.append(_issue("host_tool_unavailable", "real capability evidence must have source=codex_app", path=f"capability_evidence[{index}].source"))
+                if capability.get("actual_tool") != "codex_app__create_thread":
+                    errors.append(_issue("host_tool_unavailable", "real capability evidence must have actual_tool=codex_app__create_thread", path=f"capability_evidence[{index}].actual_tool"))
         if isinstance(monitor, dict) and monitor.get("source") != "codex_app":
-            errors.append(_issue("host_tool_unavailable", "real monitor evidence must come from the Codex host", path="monitor.source"))
+            errors.append(_issue("host_tool_unavailable", "real monitor evidence must have source=codex_app", path="monitor.source"))
     boundary = receipt.get("integration_boundary")
-    if not isinstance(boundary, dict) or boundary.get("boundary") != "mechanical-only":
-        errors.append(_issue("product_failure", "integration boundary must be mechanical-only", path="integration_boundary"))
-    elif mode == "real" and boundary.get("source") != "codex_app":
-        errors.append(_issue("host_tool_unavailable", "real integration evidence must come from the Codex host", path="integration_boundary.source"))
+    if not isinstance(boundary, dict):
+        errors.append(_missing_issue(mode, "integration_boundary with mechanical-only boundary is required", path="integration_boundary"))
+    else:
+        if not boundary.get("boundary"):
+            errors.append(_missing_issue(mode, "integration boundary value is required", path="integration_boundary.boundary"))
+        elif boundary.get("boundary") != "mechanical-only":
+            errors.append(_issue("product_failure", "integration boundary must be mechanical-only", path="integration_boundary.boundary"))
+        if not boundary.get("source"):
+            errors.append(_missing_issue(mode, "integration boundary source is required", path="integration_boundary.source"))
+        elif mode == "real" and boundary.get("source") != "codex_app":
+            errors.append(_issue("host_tool_unavailable", "real integration evidence must have source=codex_app", path="integration_boundary.source"))
     if mode == "real":
         for name, identity in (("sponsor", sponsor), ("coordinator", coordinator), *[("owner", owner) for owner in owners]):
             if isinstance(identity, dict) and (str(identity.get("repo", "")).startswith("fixture://") or str(identity.get("worktree", "")).startswith("fixture://")):
                 errors.append(_issue("host_tool_unavailable", f"real {name} identity cannot use fixture paths", path=f"identities.{name}"))
-        for event in events:
-            if isinstance(event, dict) and event.get("event") == "owner_thread_receipt":
-                receipt_data = event.get("receipt", {})
-                if isinstance(receipt_data, dict) and receipt_data.get("worktree") and receipt_data.get("repo"):
-                    continue
-                errors.append(_issue("host_tool_unavailable", "real receipt lacks worktree/repo identity", path="events.receipt"))
     return errors
 
 

@@ -7,6 +7,13 @@
     "captured_at": "example",
     "actual_invocation_receipt_required": true
   },
+  "receipt_protocol": {
+    "source": "codex_app",
+    "actual_tool": "codex_app__create_thread",
+    "required": ["source", "actual_tool", "output_dir", "capability"],
+    "capability": ["requested", "resolved", "actual", "fallback"],
+    "fallback_when_missing": "infer-create-thread-context-and-record-capability-catalog-fallback"
+  },
   "max_concurrency": 4,
   "thread_tools": [
     "codex_app__create_thread",
@@ -29,7 +36,14 @@
           "title": {"type": "string"}
         }
       },
-      "receipt": {"required_any": ["threadId", "clientThreadId"], "host_id": "hostId"}
+      "receipt": {
+        "required_any": ["threadId", "clientThreadId"],
+        "host_id": "hostId",
+        "output_dir": "outputDir",
+        "source": "source",
+        "actual_tool": "actual_tool",
+        "capability": ["requested", "resolved", "actual", "fallback"]
+      }
     },
     "codex_app__list_projects": {
       "available": true,

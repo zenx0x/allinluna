@@ -17,7 +17,8 @@
     "capability": {"$ref": "#/$defs/capability"},
     "tool_schema": {"$ref": "#/$defs/tool_schema"},
     "fallback_evidence": {"$ref": "#/$defs/evidence"},
-    "runtime_catalog": {"$ref": "#/$defs/runtime_catalog"}
+    "runtime_catalog": {"$ref": "#/$defs/runtime_catalog"},
+    "receipt_evidence": {"$ref": "#/$defs/receipt_evidence"}
   },
   "$defs": {
     "capability": {
@@ -54,6 +55,44 @@
         "fallback": {"type": ["string", "null"]}
       }
     },
+    "receipt_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "actual_tool", "output_dir", "capability"],
+      "properties": {
+        "source": {"const": "codex_app"},
+        "actual_tool": {"type": "string", "minLength": 1},
+        "output_dir": {"type": ["string", "null"]},
+        "capability": {"$ref": "#/$defs/evidence"},
+        "capability_evidence": {"$ref": "#/$defs/evidence"},
+        "runtime_evidence": {"$ref": "#/$defs/runtime_evidence"}
+      }
+    },
+    "runtime_evidence": {
+      "type": "object",
+      "required": ["source", "actual_tool", "requested", "resolved", "actual", "fallback"],
+      "properties": {
+        "source": {"const": "codex_app"},
+        "actual_tool": {"type": "string", "minLength": 1},
+        "requested": {},
+        "resolved": {},
+        "actual": {},
+        "fallback": {"type": ["string", "null"]},
+        "capability": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "receipt_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "actual_tool", "required", "capability"],
+      "properties": {
+        "source": {"const": "codex_app"},
+        "actual_tool": {"type": "string", "minLength": 1},
+        "required": {"type": "array", "items": {"type": "string"}},
+        "capability": {"type": "array", "items": {"type": "string"}},
+        "fallback_when_missing": {"type": "string", "minLength": 1}
+      }
+    },
     "runtime_catalog": {
       "type": "object",
       "additionalProperties": false,
@@ -64,7 +103,8 @@
         "capability_receipt": {"type": "object"},
         "thread_tools": {"type": "array", "items": {"type": "string"}},
         "tool_catalog": {"type": "object"},
-        "fallbacks": {"type": "object"}
+        "fallbacks": {"type": "object"},
+        "receipt_protocol": {"$ref": "#/$defs/receipt_protocol"}
       }
     }
   }

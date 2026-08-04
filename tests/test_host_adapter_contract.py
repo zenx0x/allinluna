@@ -45,6 +45,17 @@ class HostAdapterContractTests(unittest.TestCase):
             set(asset["fallbacks"]["wait_threads"]["resolved"]),
             {LIST_THREADS_TOOL, READ_THREAD_TOOL},
         )
+        self.assertEqual(asset["receipt_protocol"]["source"], "codex_app")
+        self.assertEqual(asset["receipt_protocol"]["actual_tool"], CREATE_THREAD_TOOL)
+        self.assertEqual(
+            asset["receipt_protocol"]["capability"],
+            ["requested", "resolved", "actual", "fallback"],
+        )
+        schema = json.loads(
+            (RUN / "assets" / "capability.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("receipt_evidence", schema["properties"])
+        self.assertIn("receipt_protocol", schema["$defs"])
 
     def test_wait_is_used_only_when_host_declares_it_and_fallback_is_evidenced(self) -> None:
         targets = [{"thread_id": "thread-1", "host_id": "host-1", "after_cursor": "cursor-1"}]
@@ -89,6 +100,58 @@ class HostAdapterContractTests(unittest.TestCase):
         real = normalize_thread_receipt({"threadId": "thread-1", "hostId": "host-1", "dispatchId": "dispatch-1"})
         self.assertEqual(real["kind"], "thread-receipt")
         self.assertEqual(real["runtime_evidence"]["actual"]["threadId"], "thread-1")
+
+    def test_real_receipt_persists_first_use_envelope_and_explicit_fallback(self) -> None:
+        receipt = normalize_thread_receipt(
+            {
+                "threadId": "thread-1",
+                "hostId": "host-1",
+                "outputDir": "D:/runs/owner-1",
+            }
+        )
+        self.assertEqual(receipt["source"], "codex_app")
+        self.assertEqual(receipt["actual_tool"], CREATE_THREAD_TOOL)
+        self.assertEqual(receipt["output_dir"], "D:/runs/owner-1")
+        self.assertEqual(
+            set(receipt["capability"]),
+            {"requested", "resolved", "actual", "fallback"},
+        )
+        self.assertEqual(receipt["capability"]["actual"]["threadId"], "thread-1")
+        self.assertEqual(receipt["capability"]["actual"]["hostId"], "host-1")
+        self.assertEqual(receipt["capability"]["actual"]["outputDir"], "D:/runs/owner-1")
+        self.assertIn("capability-evidence-missing-from-receipt", receipt["capability"]["fallback"])
+        self.assertEqual(receipt["runtime_evidence"]["source"], "codex_app")
+        self.assertEqual(receipt["runtime_evidence"]["actual_tool"], CREATE_THREAD_TOOL)
+        self.assertEqual(receipt["runtime_evidence"]["capability"], receipt["capability"])
+
+    def test_receipt_uses_host_capability_evidence_and_rejects_wrong_provenance(self) -> None:
+        capability = {
+            "requested": {"tool": CREATE_THREAD_TOOL, "arguments": {"model": "gpt-5.6-luna"}},
+            "resolved": {"tool": CREATE_THREAD_TOOL, "source": "capability-receipt"},
+            "actual": {"tool": CREATE_THREAD_TOOL, "receipt_id": "host-receipt-1"},
+            "fallback": None,
+        }
+        receipt = normalize_thread_receipt(
+            {
+                "threadId": "thread-1",
+                "hostId": "host-1",
+                "outputDir": "D:/runs/owner-1",
+                "source": "codex_app",
+                "actual_tool": CREATE_THREAD_TOOL,
+                "capabilityReceipt": capability,
+            }
+        )
+        self.assertEqual(receipt["capability"]["requested"], capability["requested"])
+        self.assertEqual(receipt["capability"]["resolved"], capability["resolved"])
+        self.assertIsNone(receipt["capability"]["fallback"])
+        with self.assertRaises(ValueError):
+            normalize_thread_receipt(
+                {
+                    "threadId": "thread-1",
+                    "hostId": "host-1",
+                    "source": "unknown-host",
+                }
+            )
 
     def test_send_message_fails_closed_without_capability_receipt(self) -> None:
         with self.assertRaises(ValueError):

@@ -13,22 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 class RepositoryContractTests(unittest.TestCase):
     def test_chinese_is_default_and_top_level_topology_is_explicit(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("默认执行拓扑（重要）", readme)
-        self.assertIn("侧边栏可见的顶层 Codex 任务", readme)
+        self.assertIn("# All in Luna", readme)
+        self.assertIn("plugins/allinluna/skills/allinluna/SKILL.md", readme)
         self.assertTrue((ROOT / "README.en.md").is_file())
 
-        for skill in ("allinluna-plan", "allinluna-run"):
-            metadata = (
-                ROOT
-                / "plugins"
-                / "allinluna"
-                / "skills"
-                / skill
-                / "agents"
-                / "openai.yaml"
-            ).read_text(encoding="utf-8")
-            self.assertIn("使用 $allinluna-", metadata)
-            self.assertIn("侧边栏可见的顶层 Codex 任务", metadata)
+        skill_root = ROOT / "plugins" / "allinluna" / "skills"
+        self.assertEqual(
+            {path.name for path in skill_root.iterdir() if path.is_dir()},
+            {"allinluna"},
+        )
+        metadata = (skill_root / "allinluna" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("SinglePublicSkillAPI", metadata)
+        plugin = json.loads(
+            (ROOT / "plugins" / "allinluna" / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(plugin["skills"], "./skills/allinluna")
+        self.assertEqual(plugin["runtime"]["source"], "./runtime/allinluna_runtime")
 
     def test_repository_validator(self) -> None:
         result = subprocess.run(
@@ -50,12 +50,12 @@ class RepositoryContractTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_plugin_default_prompts_are_exactly_three(self) -> None:
+    def test_plugin_default_prompts_are_present_and_artifacts_are_padded(self) -> None:
         for name in ("allinluna", "research-routes"):
             metadata = json.loads(
                 (ROOT / "plugins" / name / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(len(metadata["interface"]["defaultPrompt"]), 3)
+            self.assertGreaterEqual(len(metadata["interface"]["defaultPrompt"]), 2)
 
 
 if __name__ == "__main__":

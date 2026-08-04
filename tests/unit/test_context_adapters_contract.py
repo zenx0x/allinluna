@@ -39,17 +39,20 @@ def test_context_compaction_invalidation_reconstruction_and_artifact_trace(vnext
 
 def test_host_adapter_jit_permissions_and_legacy_import(vnext_module, tmp_path, fake_codex_host, git_fixture):
     host_module = vnext_module("adapters.host.codex_app")
-    permissions_module = vnext_module("permissions")
+    public_skill_module = vnext_module("packs.public_skill")
     compat_module = vnext_module("compat.legacy_plan")
     adapter = construct(require_symbol(host_module, "CodexAppHost"), fake_codex_host)
     assert invoke(adapter, "discover")["host_id"] == "fake-codex-host"
-    permission = construct(
-        require_symbol(permissions_module, "PermissionIntent"),
-        action="push",
-        scope=[str(git_fixture.repository)],
-        status="required",
+    public_skill = construct(require_symbol(public_skill_module, "SinglePublicSkillAPI"))
+    permission = invoke(
+        public_skill,
+        "permission_at_action",
+        "push",
+        scopes=(str(git_fixture.repository),),
+        policy="ask",
     )
-    assert invoke(permission, "is_jit") is True
+    assert permission.action == "push"
+    assert permission.status == "ask"
     imported = invoke(
         construct(require_symbol(compat_module, "LegacyPlanImporter")),
         "import_plan",
@@ -57,15 +60,27 @@ def test_host_adapter_jit_permissions_and_legacy_import(vnext_module, tmp_path, 
     )
     assert imported["source_format"] == "legacy-plan"
     assert imported["write_back"] is False
-    ownership = invoke(
-        adapter,
-        "verify_ownership",
-        git_fixture.worktree,
-        allowed_paths=["tracked.txt"],
+    workspace_module = vnext_module("adapters.workspace.git")
+    workspace = construct(
+        require_symbol(workspace_module, "GitWorktreeAdapter"),
+        worktree=git_fixture.worktree,
+        repo_root=git_fixture.repository,
         base_commit=git_fixture.base_commit,
+        ownership=("tracked.txt",),
     )
-    assert ownership["worktree"] == str(git_fixture.worktree)
-    assert ownership["base_commit"] == git_fixture.base_commit
+    ownership = invoke(
+        workspace,
+        "verify_changed_paths",
+        {
+            "worktree": git_fixture.worktree,
+            "repo_root": git_fixture.repository,
+            "base_commit": git_fixture.base_commit,
+        },
+        (),
+    )
+    assert ownership["valid"] is True
+    assert ownership["identity"]["worktree"] == str(git_fixture.worktree)
+    assert ownership["identity"]["base_commit"] == git_fixture.base_commit
 
 
 def test_adapter_receipt_is_real_and_wait_fallback_is_evidenced(vnext_module, fake_codex_host):

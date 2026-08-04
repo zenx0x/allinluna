@@ -65,14 +65,12 @@ def expand_sources(root: Path, entries: list[str]) -> list[tuple[str, Path]]:
     return expanded
 
 
-def shared_inventory(root: Path, manifest: dict) -> dict[str, list[dict[str, str]]]:
-    inventory: dict[str, list[dict[str, str]]] = {}
-    for category, entries in manifest["shared_paths"].items():
-        inventory[category] = [
-            {"source": relative, "sha256": sha256(path)}
-            for relative, path in expand_sources(root, entries)
-        ]
-    return inventory
+def canonical_inventory(root: Path, manifest: dict) -> list[dict[str, str]]:
+    return [
+        {"source": relative, "sha256": sha256(path)}
+        for entry in manifest["canonical_paths"]
+        for relative, path in expand_sources(root, [entry])
+    ]
 
 
 def copy_tree(source: Path, target: Path) -> None:
@@ -105,6 +103,10 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     plugin_root = plugin_root_for(artifact, spec)
     source_plugin = root / manifest["source_plugin"]
     copy_tree(source_plugin / "skills", plugin_root / "skills")
+    copy_tree(source_plugin / "runtime", plugin_root / "runtime")
+    duplicate_runtime = plugin_root / "runtime" / "shared"
+    if duplicate_runtime.exists():
+        shutil.rmtree(duplicate_runtime)
     overlay_plugin = root / "plugins" / spec["plugin_name"]
     if (overlay_plugin / "skills").is_dir():
         copy_tree(overlay_plugin / "skills", plugin_root / "skills")
@@ -128,15 +130,19 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     metadata_root = root / "plugins" / spec["plugin_name"]
     metadata_path = metadata_root / ".codex-plugin" / "plugin.json"
     source_plugin_json = read_json(metadata_path if metadata_path.is_file() else source_plugin / ".codex-plugin" / "plugin.json")
+    default_prompts = list(source_plugin_json.get("interface", {}).get("defaultPrompt", []))
+    while len(default_prompts) < 3:
+        default_prompts.append("Use the canonical vNext runtime and report requested, resolved, actual, and receipt evidence separately.")
     plugin = {
         **source_plugin_json,
         "name": spec["plugin_name"],
         "description": f"{spec['display_name']}: {read_json(overlay / 'brand.json')['purpose']}",
-        "skills": "./skills/",
+        "skills": "./skills/allinluna" if spec["id"] == "all-in-luna" else "./skills/",
         "interface": {
             **source_plugin_json.get("interface", {}),
             "displayName": spec["display_name"],
             "shortDescription": read_json(overlay / "brand.json")["tagline"],
+            "defaultPrompt": default_prompts,
         },
     }
     plugin_dir = plugin_root / ".codex-plugin"
@@ -165,15 +171,9 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         json.dumps(marketplace, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
-    inventory = shared_inventory(root, manifest)
-    for category, entries in manifest["shared_paths"].items():
-        for relative, path in expand_sources(root, entries):
-            if relative.startswith("plugins/allinluna/skills/") or relative in {"tests", "evals"} or relative.startswith("tests/") or relative.startswith("evals/"):
-                continue
-            copy_tree(path, plugin_root / "shared" / category / Path(relative).name)
-    shared_files = [item for items in inventory.values() for item in items]
-    (artifact / "shared-files.json").write_text(
-        json.dumps({"schema_version": "1.0", "files": shared_files}, indent=2) + "\n",
+    inventory = canonical_inventory(root, manifest)
+    (artifact / "canonical-files.json").write_text(
+        json.dumps({"schema_version": "2.0", "files": inventory}, indent=2) + "\n",
         encoding="utf-8",
     )
     (artifact / ".source-provenance.json").write_text(
@@ -184,7 +184,8 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         "distribution_id": spec["id"],
         "plugin_name": spec["plugin_name"],
         "display_name": spec["display_name"],
-        "shared_categories": sorted(inventory),
+        "canonical_runtime": "runtime/allinluna_runtime",
+        "canonical_skill": "skills/allinluna/SKILL.md",
         "overlay": spec["overlay"],
         "provenance": provenance,
     }

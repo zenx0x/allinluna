@@ -2,6 +2,6 @@
   "brand": "All in Luna",
   "tagline": "Adaptive orchestration for complete software delivery.",
   "purpose": "Development concurrency: plan, delegate, execute, recover, integrate, and accept complete work.",
-  "default_skill": "allinluna-plan",
+  "default_skill": "allinluna",
   "plugin_name": "allinluna"
 }

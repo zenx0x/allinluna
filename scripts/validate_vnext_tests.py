@@ -31,6 +31,8 @@ SUITE_ROOTS = {
 DEFAULT_RUNTIME_MODULE = "allinluna_runtime"
 RUNTIME_ROOT = ROOT / "plugins" / "allinluna" / "runtime"
 BLOCKED_EXIT = 2
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def load_catalog_module() -> ModuleType:
@@ -64,19 +66,19 @@ def discover_suites() -> dict[str, list[str]]:
 
 
 def runtime_status() -> dict[str, Any]:
-    module_name = os.environ.get("ALLINLUNA_VNEXT_RUNTIME_MODULE", DEFAULT_RUNTIME_MODULE)
-    package_init = RUNTIME_ROOT / module_name.replace(".", "/") / "__init__.py"
+    module_name = "tests.fixtures.vnext.scenario_runner"
+    helper = ROOT / "tests" / "fixtures" / "vnext" / "scenario_runner.py"
     try:
         module_spec = importlib.util.find_spec(module_name)
     except (ImportError, ModuleNotFoundError):
         module_spec = None
-    available = package_init.is_file() or module_spec is not None
+    available = helper.is_file() and module_spec is not None
     if available:
         return {"status": "available", "module": module_name}
     return {
         "status": "blocked",
         "module": module_name,
-        "reason": "vNext runtime package or importable module is missing",
+        "reason": "test-side vNext scenario composer is missing",
     }
 
 

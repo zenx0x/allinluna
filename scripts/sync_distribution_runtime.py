@@ -1,40 +1,37 @@
 #!/usr/bin/env python3
-"""Synchronize the canonical shared runtime into each independently installable plugin."""
+"""Check that the repository has one canonical runtime source tree.
+
+Distribution builds copy this tree into temporary artifacts; this command is a
+read-only consistency check and never writes a second runtime into the source.
+"""
+
 from __future__ import annotations
 
 import argparse
-import filecmp
-import shutil
+import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "shared"
-DISTROS = (ROOT / "plugins" / "allinluna",)
+ROOT = Path(__file__).resolve().parents[1]
+CANONICAL = ROOT / "plugins" / "allinluna" / "runtime" / "allinluna_runtime"
 
 
 def sync(write: bool = False) -> dict[str, object]:
-    files = sorted(path for path in SOURCE.iterdir() if path.is_file() and path.suffix in {".py", ".json"})
-    mismatches: list[str] = []
-    for distro in DISTROS:
-        target = distro / "runtime" / "shared"
-        target.mkdir(parents=True, exist_ok=True)
-        for source in files:
-            destination = target / source.name
-            if write:
-                shutil.copy2(source, destination)
-            elif not destination.is_file() or not filecmp.cmp(source, destination, shallow=False):
-                mismatches.append(str(destination.relative_to(ROOT)))
-    return {"ok": not mismatches, "write": write, "mismatches": mismatches,
-            "distributions": [str(path.relative_to(ROOT)) for path in DISTROS]}
+    del write
+    errors: list[str] = []
+    if not CANONICAL.is_dir():
+        errors.append("canonical runtime is missing")
+    duplicate_paths = [ROOT / "shared", ROOT / "plugins" / "allinluna" / "runtime" / "shared"]
+    errors.extend(f"forbidden duplicate: {path.relative_to(ROOT)}" for path in duplicate_paths if path.exists())
+    return {"ok": not errors, "write": False, "errors": errors, "canonical": str(CANONICAL.relative_to(ROOT))}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--write", action="store_true")
+    parser.add_argument("--write", action="store_true", help="retained for compatibility; no source writes are performed")
     args = parser.parse_args()
-    import json
-    print(json.dumps(sync(args.write), indent=2))
-    return 0 if sync(False)["ok"] or args.write else 1
+    result = sync(args.write)
+    print(json.dumps(result, indent=2))
+    return 0 if result["ok"] else 1
 
 
 if __name__ == "__main__":

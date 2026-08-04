@@ -11,12 +11,7 @@ from pathlib import Path
 from build_distributions import ROOT, build, expand_sources, plugin_root_for, read_json, sha256, source_provenance
 
 
-SOURCE_ONLY_README_PATHS = (
-    "scripts/build_distributions.py",
-    "scripts/validate_distributions.py",
-    "scripts/validate_installations.py",
-    "scripts/validate_route_packet.py",
-)
+SOURCE_ONLY_README_PATHS = ("shared/", "runtime/shared", "allinluna-plan", "allinluna-run")
 
 
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
@@ -25,7 +20,7 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     specs = manifest.get("distributions", [])
     if {spec.get("id") for spec in specs} != {"all-in-luna", "research-routes"}:
         errors.append("manifest must define exactly all-in-luna and research-routes")
-    if not manifest.get("overlay_allowlist"):
+    if not manifest.get("overlay_allowlist") or not manifest.get("canonical_paths"):
         errors.append("overlay allowlist is missing")
     try:
         expected_provenance = source_provenance(root)
@@ -33,13 +28,11 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
         errors.append(f"cannot resolve source provenance: {exc}")
         expected_provenance = {}
     with tempfile.TemporaryDirectory(prefix="allinluna-distributions-") as temp:
-        built = build(root, Path(temp) if dist is None else Path(temp) / "built")
-        if dist is not None:
-            built = build(root, Path(temp) / "built")
+        built = build(root, Path(temp)) if dist is None else [dist / spec["id"] for spec in specs]
         inventories: list[dict] = []
         for artifact, spec in zip(built, specs, strict=True):
             plugin_root = plugin_root_for(artifact, spec)
-            required = [plugin_root / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
+            required = [plugin_root / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "canonical-files.json", artifact / "LICENSE", plugin_root / "runtime/allinluna_runtime/__init__.py", plugin_root / "skills/allinluna/SKILL.md"]
             if spec["id"] == "research-routes":
                 required.extend([artifact / "README.md", artifact / "README.en.md"])
             for path in required:
@@ -53,6 +46,9 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             prompts = plugin.get("interface", {}).get("defaultPrompt")
             if not isinstance(prompts, list) or len(prompts) != 3:
                 errors.append(f"{spec['id']} must expose exactly 3 defaultPrompt entries")
+            expected_skills = "./skills/allinluna" if spec["id"] == "all-in-luna" else "./skills/"
+            if plugin.get("skills") != expected_skills:
+                errors.append(f"{spec['id']} skill entrypoint is not canonical: {plugin.get('skills')!r}")
             marketplace = read_json(artifact / ".agents/plugins/marketplace.json")
             entries = marketplace.get("plugins", [])
             if marketplace.get("name") != spec["plugin_name"] or len(entries) != 1:
@@ -73,9 +69,11 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
                     for source_only_path in SOURCE_ONLY_README_PATHS:
                         if source_only_path in readme:
                             errors.append(f"{spec['id']} {readme_name} contains source-only path {source_only_path}")
-            inventories.append(read_json(artifact / "shared-files.json"))
+            inventories.append(read_json(artifact / "canonical-files.json"))
+            if (plugin_root / "shared").exists() or (plugin_root / "runtime" / "shared").exists():
+                errors.append(f"{spec['id']} contains a duplicate shared runtime")
         if len(inventories) == 2 and inventories[0] != inventories[1]:
-            errors.append("shared file inventory differs between distributions")
+            errors.append("canonical source inventory differs between distributions")
         if len(built) == 2:
             luna_root = plugin_root_for(built[0], specs[0])
             routes_root = plugin_root_for(built[1], specs[1])

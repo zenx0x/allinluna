@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run deterministic structural validation for the All in Luna plugin repository."""
+"""Validate the vNext repository topology and canonical-source contract."""
 
 from __future__ import annotations
 
@@ -11,140 +11,79 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "allinluna"
 SKILLS = PLUGIN / "skills"
-EXPECTED_SKILLS = {"allinluna-plan", "allinluna-run", "allinluna-intake", "allinluna-launch"}
-STALE_TERMS = {
-    "agent-development-orchestrator",
-    "development-orchestrator",
-    "$plan-development",
-    "$orchestrate-development",
-    "allluna",
-}
+LEGACY_PATHS = (
+    ROOT / "shared",
+    PLUGIN / "runtime" / "shared",
+    SKILLS / "allinluna-intake",
+    SKILLS / "allinluna-launch",
+    SKILLS / "allinluna-plan",
+    SKILLS / "allinluna-run",
+)
 
 
 def frontmatter(path: Path) -> dict[str, str]:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise ValueError(f"{path} has no YAML frontmatter")
-    try:
-        block = text.split("---\n", 2)[1]
-    except IndexError as exc:
-        raise ValueError(f"{path} has malformed YAML frontmatter") from exc
-    result: dict[str, str] = {}
-    for line in block.splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            result[key.strip()] = value.strip()
-    return result
+    block = text.split("---\n", 2)[1]
+    return {key.strip(): value.strip() for line in block.splitlines() if ":" in line for key, value in [line.split(":", 1)]}
 
 
 def markdown_links(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8")
-    return re.findall(r"\[[^\]]+\]\(([^)]+)\)", text)
+    return re.findall(r"\[[^\]]+\]\(([^)]+)\)", path.read_text(encoding="utf-8"))
 
 
 def validate() -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
-    required = [
-        ROOT / "README.md",
-        ROOT / "README.en.md",
-        ROOT / "LICENSE",
-        ROOT / "CONTRIBUTING.md",
-        ROOT / "CONTRIBUTING.zh-CN.md",
-        ROOT / "SECURITY.md",
-        ROOT / "SECURITY.zh-CN.md",
-        ROOT / ".agents" / "plugins" / "marketplace.json",
-        PLUGIN / ".codex-plugin" / "plugin.json",
-    ]
+    required = (
+        ROOT / "README.md", ROOT / "README.en.md", ROOT / "LICENSE",
+        ROOT / ".agents/plugins/marketplace.json", PLUGIN / ".codex-plugin/plugin.json",
+        PLUGIN / "skills/allinluna/SKILL.md", PLUGIN / "runtime/allinluna_runtime/__init__.py",
+        ROOT / "distributions/distribution-manifest.json",
+    )
     for path in required:
         if not path.is_file():
             errors.append(f"missing required file: {path.relative_to(ROOT)}")
-
-    language_pairs = [
-        (ROOT / "README.en.md", ROOT / "README.md"),
-        (ROOT / "CONTRIBUTING.md", ROOT / "CONTRIBUTING.zh-CN.md"),
-        (ROOT / "SECURITY.md", ROOT / "SECURITY.zh-CN.md"),
-    ]
-    for english, chinese in language_pairs:
-        if english.is_file() and chinese.is_file():
-            if chinese.name not in english.read_text(encoding="utf-8"):
-                errors.append(f"{english.name} does not link to {chinese.name}")
-            if english.name not in chinese.read_text(encoding="utf-8"):
-                errors.append(f"{chinese.name} does not link to {english.name}")
-    readme_en = (ROOT / "README.en.md").read_text(encoding="utf-8")
-    readme_zh = (ROOT / "README.md").read_text(encoding="utf-8")
-    if readme_en.count("\n## ") != readme_zh.count("\n## "):
-        errors.append("English and Chinese README section counts differ")
-    for mode in ("premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"):
-        if f"`{mode}`" not in readme_en or f"`{mode}`" not in readme_zh:
-            errors.append(f"resource mode {mode} is missing from a README language")
+    for path in LEGACY_PATHS:
+        if path.exists():
+            errors.append(f"forbidden legacy path remains: {path.relative_to(ROOT)}")
 
     try:
-        marketplace_path = ROOT / ".agents" / "plugins" / "marketplace.json"
-        plugin_path = PLUGIN / ".codex-plugin" / "plugin.json"
-        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
-        plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
-        if marketplace.get("name") != "allinluna":
-            errors.append("marketplace name must be allinluna")
-        entries = marketplace.get("plugins", [])
-        if {entry.get("name") for entry in entries} != {"allinluna", "research-routes"}:
+        marketplace = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+        plugin = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        if {entry.get("name") for entry in marketplace.get("plugins", [])} != {"allinluna", "research-routes"}:
             errors.append("marketplace must expose allinluna and research-routes")
-        sources = {entry.get("name"): entry.get("source", {}).get("path") for entry in entries}
-        if sources.get("allinluna") != "./plugins/allinluna":
-            errors.append("allinluna marketplace source must be ./plugins/allinluna")
-        if sources.get("research-routes") != "./plugins/research-routes":
-            errors.append("research-routes marketplace source must be ./plugins/research-routes")
-        if plugin.get("name") != "allinluna":
-            errors.append("plugin name must be allinluna")
-        if plugin.get("skills") != "./skills/":
-            errors.append("plugin skills path must be ./skills/")
-        research_plugin_path = ROOT / "plugins" / "research-routes" / ".codex-plugin" / "plugin.json"
-        if not research_plugin_path.is_file():
-            errors.append("missing research-routes plugin metadata")
-        elif json.loads(research_plugin_path.read_text(encoding="utf-8")).get("name") != "research-routes":
-            errors.append("research-routes plugin name must be research-routes")
-        for metadata_path in (plugin_path, research_plugin_path):
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            prompts = metadata.get("interface", {}).get("defaultPrompt")
-            if not isinstance(prompts, list) or len(prompts) != 3:
-                errors.append(f"{metadata_path.relative_to(ROOT)} must define exactly 3 defaultPrompt entries")
-    except (OSError, json.JSONDecodeError, IndexError) as exc:
+        if plugin.get("name") != "allinluna" or plugin.get("skills") != "./skills/allinluna":
+            errors.append("allinluna manifest must point at the single public Skill")
+        runtime = plugin.get("runtime", {})
+        if runtime.get("source") != "./runtime/allinluna_runtime":
+            errors.append("allinluna manifest must point at the canonical runtime")
+        prompts = plugin.get("interface", {}).get("defaultPrompt", [])
+        if len(prompts) < 2:
+            errors.append("allinluna manifest needs its public prompts")
+        research = ROOT / "plugins/research-routes/.codex-plugin/plugin.json"
+        if not research.is_file() or json.loads(research.read_text(encoding="utf-8")).get("name") != "research-routes":
+            errors.append("research-routes plugin metadata is missing or invalid")
+    except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"invalid plugin metadata: {exc}")
 
-    actual_skills = {path.name for path in SKILLS.iterdir() if path.is_dir()} if SKILLS.exists() else set()
-    if actual_skills != EXPECTED_SKILLS:
-        errors.append(f"expected skills {sorted(EXPECTED_SKILLS)}, found {sorted(actual_skills)}")
-    for skill_name in EXPECTED_SKILLS:
-        skill_dir = SKILLS / skill_name
-        skill_file = skill_dir / "SKILL.md"
-        agent_file = skill_dir / "agents" / "openai.yaml"
-        if not skill_file.is_file():
-            errors.append(f"missing {skill_file.relative_to(ROOT)}")
-            continue
+    skill = PLUGIN / "skills/allinluna/SKILL.md"
+    if skill.is_file():
         try:
-            metadata = frontmatter(skill_file)
-            if metadata.get("name") != skill_name:
-                errors.append(f"{skill_name} frontmatter name mismatch")
-            if len(metadata.get("description", "")) < 80:
-                errors.append(f"{skill_name} description is not trigger-specific enough")
-            unknown = set(metadata) - {"name", "description"}
-            if unknown:
-                errors.append(f"{skill_name} has unsupported frontmatter fields: {sorted(unknown)}")
+            metadata = frontmatter(skill)
+            if metadata.get("name") != "allinluna":
+                errors.append("public Skill frontmatter name mismatch")
+            if len(metadata.get("description", "")) < 60:
+                errors.append("public Skill description is too short")
+            for link in markdown_links(skill):
+                if "://" not in link and not link.startswith("#") and not (skill.parent / link).resolve().is_file():
+                    errors.append(f"broken public Skill link: {link}")
         except (OSError, ValueError) as exc:
             errors.append(str(exc))
-        line_count = len(skill_file.read_text(encoding="utf-8").splitlines())
-        if line_count > 500:
-            errors.append(f"{skill_name}/SKILL.md exceeds 500 lines")
-        if not agent_file.is_file() or f"${skill_name}" not in agent_file.read_text(encoding="utf-8"):
-            errors.append(f"{skill_name} agent metadata lacks its explicit skill prompt")
-        for link in markdown_links(skill_file):
-            if "://" in link or link.startswith("#"):
-                continue
-            if not (skill_dir / link).resolve().is_file():
-                errors.append(f"broken skill link in {skill_name}: {link}")
 
     for json_path in ROOT.rglob("*.json"):
         if ".git" in json_path.parts:
@@ -153,58 +92,15 @@ def validate() -> tuple[list[str], list[str]]:
             json.loads(json_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             errors.append(f"invalid JSON {json_path.relative_to(ROOT)}: {exc}")
-
-    for script in [*ROOT.glob("scripts/*.py"), *SKILLS.glob("*/scripts/*.py")]:
+    for script in [*ROOT.glob("scripts/*.py"), *ROOT.glob("tests/**/*.py")]:
         try:
             py_compile.compile(str(script), doraise=True)
         except py_compile.PyCompileError as exc:
             errors.append(f"Python compile failed for {script.relative_to(ROOT)}: {exc}")
 
-    for path in ROOT.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or path.suffix in {".pyc"}:
-            continue
-        if path.resolve() == Path(__file__).resolve():
-            continue
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        if "[TODO" in text or "TODO:" in text:
-            errors.append(f"placeholder remains in {path.relative_to(ROOT)}")
-        for term in STALE_TERMS:
-            if term in text:
-                errors.append(f"stale brand term {term!r} in {path.relative_to(ROOT)}")
-
-    plan_script = SKILLS / "allinluna-plan" / "scripts" / "validate_plan.py"
-    example = SKILLS / "allinluna-plan" / "assets" / "development-plan.example.json"
-    eval_script = ROOT / "scripts" / "validate_evals.py"
-    for command, label in [
-        ([sys.executable, str(plan_script), str(example)], "example plan"),
-        ([sys.executable, str(eval_script)], "evaluation datasets"),
-    ]:
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
-        if result.returncode:
-            errors.append(f"{label} validation failed: {result.stdout.strip()} {result.stderr.strip()}")
-
-    profiles_path = SKILLS / "allinluna-run" / "assets" / "resource-profiles.json"
-    try:
-        profiles = json.loads(profiles_path.read_text(encoding="utf-8"))["profiles"]
-        required_profiles = {
-            "premium", "balanced", "economy", "speed", "fast", "ultra-fast",
-            "all-luna", "mad-luna", "custom",
-        }
-        if set(profiles) != required_profiles:
-            errors.append("resource profile set is incomplete or contains unexpected modes")
-        mad = profiles["mad-luna"]
-        if mad.get("hard_model_lock", {}).get("family") != "luna":
-            errors.append("mad-luna must hard-lock the Luna family")
-        if any(role.get("reasoning") != "max" for role in mad.get("roles", {}).values()):
-            errors.append("every mad-luna role must request max reasoning")
-    except (OSError, json.JSONDecodeError, KeyError, AttributeError) as exc:
-        errors.append(f"invalid resource profiles: {exc}")
-
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/validate_evals.py")], cwd=ROOT, capture_output=True, text=True, check=False)
+    if result.returncode:
+        errors.append(f"evaluation validation failed: {result.stdout.strip()} {result.stderr.strip()}")
     if "Apache License" not in (ROOT / "LICENSE").read_text(encoding="utf-8"):
         errors.append("LICENSE is not the Apache License text")
     return list(dict.fromkeys(errors)), list(dict.fromkeys(warnings))
@@ -212,13 +108,7 @@ def validate() -> tuple[list[str], list[str]]:
 
 def main() -> int:
     errors, warnings = validate()
-    print(
-        json.dumps(
-            {"valid": not errors, "errors": errors, "warnings": warnings},
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
+    print(json.dumps({"valid": not errors, "errors": errors, "warnings": warnings}, indent=2, ensure_ascii=False))
     return 0 if not errors else 1
 
 

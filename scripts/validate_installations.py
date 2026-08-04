@@ -60,8 +60,12 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             installed_plugin_root = install_root / name / source_path[2:]
             if not (installed_plugin_root / "skills").is_dir():
                 errors.append(f"{name} has no installable skills directory")
-            if not (install_root / name / "shared-files.json").is_file():
-                errors.append(f"{name} has no shared parity manifest")
+            if not (install_root / name / "canonical-files.json").is_file():
+                errors.append(f"{name} has no canonical source manifest")
+            if not (installed_plugin_root / "runtime" / "allinluna_runtime").is_dir():
+                errors.append(f"{name} has no canonical runtime")
+            if (installed_plugin_root / "shared").exists() or (installed_plugin_root / "runtime" / "shared").exists():
+                errors.append(f"{name} contains a forbidden duplicate shared runtime")
     return errors
 
 

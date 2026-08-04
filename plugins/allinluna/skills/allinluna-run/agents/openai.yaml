@@ -1,4 +1,0 @@
-interface:
-  display_name: "All in Luna — 执行"
-  short_description: "由独立 Coordinator 按依赖波次派发隔离 Owner"
-  default_prompt: "使用 $allinluna-run 完整执行：当前用户对话仅作 Sponsor，创建独立顶层 Coordinator；由 Coordinator 按依赖波次派发侧边栏可见的顶层 Codex 任务 Owner，高并发时才创建必要的子协调分片。保留模型、reasoning、并发、worktree 隔离、稳定 task id、resume 和用户自带计划/Research Routes；quick 为默认路径，full 需显式升级，不默认创建 CounterPilot 或 Acceptance，不创建 Goal。"

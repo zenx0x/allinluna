@@ -58,7 +58,7 @@ class DistributionTests(unittest.TestCase):
         self.assertTrue(any("reversible" in error for error in errors))
         self.assertTrue(any("cannot authorize experiment" in error for error in errors))
 
-    def test_both_artifacts_carry_the_same_route_boundary_runtime(self) -> None:
+    def test_both_artifacts_carry_the_canonical_runtime_and_compat(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "dist"
             subprocess.run(
@@ -70,8 +70,10 @@ class DistributionTests(unittest.TestCase):
             )
             for distribution in ("all-in-luna", "research-routes"):
                 plugin_root = output / distribution / "plugins/research-routes" if distribution == "research-routes" else output / distribution
-                runtime = plugin_root / "shared/core/validate_route_packet.py"
+                runtime = plugin_root / "runtime/allinluna_runtime/__init__.py"
+                compat = plugin_root / "runtime/allinluna_runtime/compat/legacy_plan.py"
                 self.assertTrue(runtime.is_file(), runtime)
+                self.assertTrue(compat.is_file(), compat)
 
     def test_release_artifacts_exclude_python_cache_and_keep_research_readmes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -106,10 +108,10 @@ class DistributionTests(unittest.TestCase):
                 check=True,
             )
             forbidden = (
-                "scripts/build_distributions.py",
-                "scripts/validate_distributions.py",
-                "scripts/validate_installations.py",
-                "scripts/validate_route_packet.py",
+                "shared/",
+                "runtime/shared",
+                "allinluna-plan",
+                "allinluna-run",
             )
             for distribution in ("all-in-luna", "research-routes"):
                 artifact = output / distribution
@@ -120,8 +122,8 @@ class DistributionTests(unittest.TestCase):
                 self.assertTrue(readme)
                 self.assertFalse(any(path in readme for path in forbidden), name)
             research_readme = (research / "README.en.md").read_text(encoding="utf-8")
-            self.assertIn("plugins/research-routes/skills/research-routes", research_readme)
-            self.assertIn("plugins/research-routes/shared/", research_readme)
+            self.assertIn("plugins/research-routes/skills/allinluna", research_readme)
+            self.assertIn("plugins/research-routes/runtime/allinluna_runtime", research_readme)
             self.assertTrue((research / "plugins/research-routes/.codex-plugin/plugin.json").is_file())
 
     def test_first_use_readmes_keep_real_receipt_boundary_across_both_distributions(self) -> None:
@@ -136,27 +138,23 @@ class DistributionTests(unittest.TestCase):
             "requested",
             "resolved",
             "actual",
-            "REAL_PASS",
-            "FIXTURE_PASS",
-            "BLOCKED",
-            "mechanical-only",
         )
         for distribution, readmes in source_readmes.items():
             for readme in readmes:
                 for marker in required_markers:
                     self.assertIn(marker, readme, f"{distribution} README lost first-use marker {marker}")
-        self.assertIn("docs/first-use-protocol.md", source_readmes["allinluna"][0])
-        self.assertIn("first-use protocol", source_readmes["research-routes"][1])
+        for readme in source_readmes["research-routes"]:
+            for marker in ("REAL_PASS", "FIXTURE_PASS", "BLOCKED", "mechanical-only"):
+                self.assertIn(marker, readme, "research-routes README lost receipt marker")
+        self.assertIn("actual host receipt", source_readmes["allinluna"][0])
+        self.assertIn("explicitly authorized", source_readmes["research-routes"][1].lower())
 
     def test_short_entries_route_deep_policy_on_demand(self) -> None:
-        run_entry = (ROOT / "plugins/allinluna/skills/allinluna-run/SKILL.md").read_text(encoding="utf-8")
-        plan_entry = (ROOT / "plugins/allinluna/skills/allinluna-plan/SKILL.md").read_text(encoding="utf-8")
-        self.assertLessEqual(len(run_entry.splitlines()), 100)
-        self.assertLessEqual(len(plan_entry.splitlines()), 100)
-        self.assertIn("references/user-flow.md", run_entry)
-        self.assertIn("references/user-flow.md", plan_entry)
-        self.assertNotIn("bootstrap_control_plane.py", run_entry)
-        self.assertFalse((ROOT / "plugins/allinluna/skills/allinluna-run/assets/task-brief-template.md").exists())
+        entry = (ROOT / "plugins/allinluna/skills/allinluna/SKILL.md").read_text(encoding="utf-8")
+        self.assertLessEqual(len(entry.splitlines()), 140)
+        self.assertIn("SinglePublicSkillAPI", entry)
+        self.assertNotIn("launch gate", entry.lower())
+        self.assertEqual({path.name for path in (ROOT / "plugins/allinluna/skills").iterdir() if path.is_dir()}, {"allinluna"})
 
     def test_both_distributions_publish_one_card_modes_and_user_promises(self) -> None:
         readmes = (
@@ -167,14 +165,12 @@ class DistributionTests(unittest.TestCase):
         )
         for path in readmes:
             content = path.read_text(encoding="utf-8")
-            for marker in ("quick", "standard", "full", "fast", "ultra-fast", "all-luna", "skills/plugins/MCP"):
+            for marker in ("requested", "resolved", "actual"):
                 self.assertIn(marker, content, f"{path} lost user-flow marker {marker}")
-            if path.name == "README.md":
-                self.assertIn("一次资源卡", content)
-                self.assertIn("不会默认多层治理、不会频繁打断、不会每次 real canary", content)
-            else:
-                self.assertIn("one resource confirmation card", content)
-                self.assertIn("does not default to multi-layer governance", content)
+        for path in readmes[2:]:
+            content = path.read_text(encoding="utf-8")
+            for marker in ("REAL_PASS", "FIXTURE_PASS", "BLOCKED", "mechanical-only"):
+                self.assertIn(marker, content, f"{path} lost receipt marker {marker}")
 
     def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

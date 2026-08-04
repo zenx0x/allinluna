@@ -37,7 +37,7 @@ def validate() -> list[str]:
             ids.add(case.get("id"))
             if isinstance(case.get("should_trigger"), bool):
                 outcomes.add(case["should_trigger"])
-            if case.get("expected_skill") not in {"allinluna-plan", "allinluna-run", None}:
+            if case.get("expected_skill") is not None and not isinstance(case.get("expected_skill"), str):
                 errors.append(f"trigger case {case.get('id')} has invalid expected_skill")
         if outcomes != {True, False}:
             errors.append("trigger evals must contain positive and negative cases")
@@ -55,7 +55,7 @@ def validate() -> list[str]:
             if case.get("id") in ids:
                 errors.append(f"duplicate behavior id: {case.get('id')}")
             ids.add(case.get("id"))
-            if case.get("skill") not in {"allinluna-plan", "allinluna-run"}:
+            if not isinstance(case.get("skill"), str) or not case.get("skill"):
                 errors.append(f"behavior case {case.get('id')} has invalid skill")
             if not isinstance(case.get("must"), list) or not case.get("must"):
                 errors.append(f"behavior case {case.get('id')} must list required behaviors")

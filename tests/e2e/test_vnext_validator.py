@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class VNextValidatorTests(unittest.TestCase):
-    def test_validator_discovers_all_vnext_suites_and_reports_missing_runtime(self) -> None:
+    def test_validator_discovers_all_vnext_suites_and_test_side_composer(self) -> None:
         result = subprocess.run(
             [sys.executable, "scripts/validate_vnext_tests.py", "--json"],
             cwd=ROOT,
@@ -23,6 +23,7 @@ class VNextValidatorTests(unittest.TestCase):
         self.assertTrue(report["valid"], report)
         self.assertEqual(set(report["suites"]), {"unit", "integration", "e2e"})
         self.assertTrue(all(report["suites"].values()))
+        self.assertEqual(report["runtime"]["module"], "tests.fixtures.vnext.scenario_runner")
         if report["runtime"]["status"] == "blocked":
             self.assertEqual(result.returncode, 2)
             self.assertEqual(report["status"], "blocked")

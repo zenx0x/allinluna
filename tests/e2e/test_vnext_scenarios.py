@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import os
 import subprocess
 import sys
@@ -14,8 +13,7 @@ from typing import Any, Iterator
 
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_ROOT = ROOT / "plugins" / "allinluna" / "runtime"
-DEFAULT_RUNTIME_MODULE = "allinluna_runtime"
+from tests.fixtures.vnext import scenario_runner
 
 
 @dataclass(frozen=True)
@@ -224,32 +222,9 @@ def run_git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedPr
 
 
 def load_vnext_runtime() -> Any:
-    """Load only the vNext runtime hook, never a legacy implementation."""
+    """Load the test-side composer; product runtime has no test hook."""
 
-    module_name = os.environ.get("ALLINLUNA_VNEXT_RUNTIME_MODULE", DEFAULT_RUNTIME_MODULE)
-    runtime_root_added = False
-    if RUNTIME_ROOT.is_dir() and str(RUNTIME_ROOT) not in sys.path:
-        sys.path.insert(0, str(RUNTIME_ROOT))
-        runtime_root_added = True
-    try:
-        try:
-            runtime = importlib.import_module(module_name)
-        except ModuleNotFoundError as exc:
-            if exc.name and not exc.name.startswith(module_name):
-                raise
-            raise unittest.SkipTest(
-                f"blocked: vNext runtime {module_name!r} is unavailable ({exc})"
-            ) from exc
-        runner = getattr(runtime, "run_e2e_scenario", None)
-        if not callable(runner):
-            raise AssertionError(
-                f"vNext runtime {module_name!r} lacks "
-                "run_e2e_scenario(scenario_id, fixture)"
-            )
-        return runtime
-    finally:
-        if runtime_root_added:
-            sys.path.remove(str(RUNTIME_ROOT))
+    return scenario_runner
 
 
 def run_scenario(contract: ScenarioContract, fixture: TemporaryGitFixture) -> dict[str, Any]:
@@ -406,10 +381,7 @@ class VNextE2ETests(unittest.TestCase):
         pack = require(result, "pack")
         self.assertEqual(pack.get("name"), "gsd")
         self.assertTrue(pack.get("compiled"))
-        self.assertEqual(
-            set(pack.get("stages", [])),
-            {"goal", "spec", "plan", "execute", "verify", "ship"},
-        )
+        self.assertEqual(set(pack.get("stages", [])), {"clarify", "specify", "decompose", "implement", "verify", "integrate"})
         self.assertTrue(pack.get("core_unchanged"))
 
     def test_push_and_external_permission_are_jit(self) -> None:

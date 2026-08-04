@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -100,6 +100,7 @@ __all__ = [
     "TaskDependency",
     "TaskId",
     "TaskRef",
+    "TaskGraph",
     "TaskState",
     "ValidationError",
     "WorkUnit",
@@ -1416,6 +1417,389 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 }
 
 
+def _canonical_task_ref(value: TaskRef | TaskId | str) -> TaskRef:
+    """Return one canonical task reference from an id or a task reference."""
+
+    if isinstance(value, TaskRef):
+        text = str(value)
+        if not re.fullmatch(r"task://[A-Za-z][A-Za-z0-9._:-]{0,127}", text):
+            raise ValidationError(f"invalid task reference: {text!r}")
+        return TaskRef.from_id(text.removeprefix("task://"))
+    text = str(value)
+    if text.startswith("task://"):
+        return _canonical_task_ref(TaskRef(text))
+    return TaskRef.from_id(TaskId(value))
+
+
+def _canonical_contract_ref(value: ContractRef | ContractId | str) -> ContractRef:
+    """Return one canonical task-contract reference from an id or reference."""
+
+    if isinstance(value, ContractRef):
+        ref = ContractRef(str(value))
+    else:
+        text = str(value)
+        ref = ContractRef.from_parts(text.removeprefix("contract://task/").split("@", 1)[0], 1)
+        if text.startswith("contract://"):
+            ref = ContractRef(text)
+    # Accessors enforce the stricter task-contract shape accepted by Contract.
+    ContractId(ref.contract_id)
+    if ref.version < 1:
+        raise ValidationError("contract version must be positive")
+    return ContractRef.from_parts(ref.contract_id, ref.version)
+
+
+def _canonical_dependency(value: TaskDependency | Mapping[str, Any]) -> TaskDependency:
+    if isinstance(value, TaskDependency):
+        return TaskDependency(
+            task_ref=_canonical_task_ref(value.task_ref),
+            condition=value.condition,
+            exports=value.exports,
+        )
+    if not isinstance(value, Mapping):
+        raise ValidationError("task dependency must be a TaskDependency or object")
+    data = dict(value)
+    parent = data.pop("task_ref", data.pop("parent", data.pop("parent_ref", None)))
+    if parent is None:
+        raise ValidationError("task dependency requires task_ref")
+    data["task_ref"] = _canonical_task_ref(parent)
+    return TaskDependency.from_dict(data)
+
+
+def _canonical_ownership(value: Ownership | Mapping[str, Any] | Sequence[str] | str | None) -> Ownership:
+    if value is None:
+        return Ownership()
+    if isinstance(value, Ownership):
+        return value
+    if isinstance(value, Mapping):
+        return Ownership.from_dict(value)
+    if isinstance(value, str):
+        return Ownership(paths=(value,))
+    return Ownership(paths=tuple(value))
+
+
+class TaskGraph:
+    """Dependency-free, in-memory graph primitive shared by packs and schedulers.
+
+    The graph owns only domain values.  It deliberately has no Store, host,
+    scheduler, persistence, or signal side effects; orchestration may consume
+    its stable JSON-safe projection through :meth:`to_dict`.
+    """
+
+    def __init__(self, run_id: RunId | str) -> None:
+        self.run_id = RunId(run_id)
+        self._tasks: dict[str, Task] = {}
+        self._contracts: dict[str, Contract] = {}
+        self._dependencies: dict[str, list[TaskDependency]] = {}
+        self._ownership: dict[str, Ownership] = {}
+
+    @property
+    def tasks(self) -> dict[str, Task]:
+        return dict(self._tasks)
+
+    @property
+    def contracts(self) -> dict[str, Contract]:
+        return dict(self._contracts)
+
+    @property
+    def dependencies(self) -> dict[str, tuple[TaskDependency, ...]]:
+        return {task_id: tuple(items) for task_id, items in self._dependencies.items()}
+
+    @property
+    def ownership(self) -> dict[str, Ownership]:
+        return dict(self._ownership)
+
+    def add_task(
+        self,
+        task_id: TaskId | str,
+        task: Task | None = None,
+        contract: Contract | Mapping[str, Any] | None = None,
+        *,
+        outcome: str | None = None,
+        contract_ref: ContractRef | ContractId | str | None = None,
+        ownership: Ownership | Mapping[str, Any] | Sequence[str] | str | None = None,
+        dependencies: Sequence[TaskDependency | Mapping[str, Any]] | None = None,
+    ) -> Task:
+        """Add one task and its contract, normalizing all graph references."""
+
+        task_key = str(TaskId(task_id))
+        if task_key in self._tasks:
+            raise ValidationError(f"duplicate task id: {task_key}")
+        if task is not None and not isinstance(task, Task):
+            raise ValidationError("task must be a Task")
+        contract_value = (
+            contract if isinstance(contract, Contract) else Contract.from_dict(contract)
+            if contract is not None
+            else None
+        )
+        if task is not None:
+            if str(task.id) != task_key:
+                raise ValidationError("task id does not match task_id")
+            if str(task.run_id) != str(self.run_id):
+                raise ValidationError("task run_id does not match graph run_id")
+            task_ref = _canonical_contract_ref(task.contract_ref)
+        else:
+            task_ref = None
+        requested_ref = _canonical_contract_ref(contract_ref) if contract_ref is not None else None
+        if requested_ref is not None and task_ref is not None and requested_ref != task_ref:
+            raise ValidationError("task contract_ref and contract object disagree")
+        if requested_ref is not None:
+            task_ref = requested_ref
+        if contract_value is not None:
+            contract_ref_value = _canonical_contract_ref(contract_value.ref)
+            if task_ref is not None and task_ref != contract_ref_value:
+                raise ValidationError("task contract_ref and contract disagree")
+            task_ref = contract_ref_value
+            existing_contract = self._contracts.get(str(contract_ref_value))
+            if existing_contract is not None and existing_contract.to_dict() != contract_value.to_dict():
+                raise ValidationError(f"duplicate contract ref: {contract_ref_value}")
+        if task_ref is None:
+            task_outcome = outcome or task_key
+            default_ownership = _canonical_ownership(ownership)
+            contract_value = Contract(
+                id=f"contract-{task_key}",
+                version=1,
+                outcome=task_outcome,
+                done_when=(task_outcome,),
+                ownership=default_ownership,
+            )
+            task_ref = contract_value.ref
+        elif contract_value is None:
+            contract_value = self._contracts.get(str(task_ref))
+            if contract_value is None:
+                contract_outcome = outcome or (task.outcome if task is not None else task_key)
+                contract_value = Contract(
+                    id=task_ref.contract_id,
+                    version=task_ref.version,
+                    outcome=contract_outcome,
+                    done_when=(contract_outcome,),
+                )
+        if str(task_ref) not in self._contracts:
+            self._contracts[str(task_ref)] = contract_value
+
+        task_ownership = _canonical_ownership(
+            ownership if ownership is not None else contract_value.ownership
+        )
+        normalized_dependencies = (
+            tuple(_canonical_dependency(item) for item in dependencies)
+            if dependencies is not None
+            else tuple(_canonical_dependency(item) for item in task.dependencies)
+            if task is not None
+            else ()
+        )
+        if task is None:
+            task = Task(
+                id=task_key,
+                run_id=self.run_id,
+                outcome=outcome or contract_value.outcome,
+                contract_ref=task_ref,
+                dependencies=normalized_dependencies,
+            )
+        else:
+            task.contract_ref = task_ref
+            if outcome is not None:
+                task.outcome = _require_text(outcome, "task.outcome", max_length=20000)
+            task.dependencies = normalized_dependencies
+        self._tasks[task_key] = task
+        self._dependencies[task_key] = list(normalized_dependencies)
+        self._ownership[task_key] = task_ownership
+        try:
+            self.validate()
+        except Exception:
+            self._tasks.pop(task_key, None)
+            self._dependencies.pop(task_key, None)
+            self._ownership.pop(task_key, None)
+            if str(task_ref) not in {
+                str(item.contract_ref) for item in self._tasks.values()
+            }:
+                self._contracts.pop(str(task_ref), None)
+            raise
+        return task
+
+    def add_dependency(
+        self,
+        parent: TaskRef | TaskId | str,
+        child: TaskRef | TaskId | str,
+        condition: DependencyCondition | str | Mapping[str, Any] = DependencyCondition.COMPLETED,
+        *,
+        exports: Sequence[str] = (),
+    ) -> TaskDependency:
+        """Add a canonical parent -> child edge after validating graph bounds."""
+
+        parent_ref = _canonical_task_ref(parent)
+        child_ref = _canonical_task_ref(child)
+        parent_id = str(parent_ref).removeprefix("task://")
+        child_id = str(child_ref).removeprefix("task://")
+        if parent_id not in self._tasks or child_id not in self._tasks:
+            raise ValidationError("dependency references a missing task node")
+        if parent_id == child_id:
+            raise ValidationError("task graph cannot contain a self-dependency")
+        condition_value: Any = condition
+        export_values: Sequence[str] = exports
+        if isinstance(condition, Mapping):
+            condition_value = condition.get("type", condition.get("condition", DependencyCondition.COMPLETED))
+            export_values = condition.get("exports", exports)
+        dependency = TaskDependency(
+            task_ref=parent_ref,
+            condition=condition_value,
+            exports=tuple(export_values),
+        )
+        if dependency in self._dependencies[child_id]:
+            raise ValidationError("duplicate task dependency")
+        parent_ownership = self._ownership[parent_id]
+        child_ownership = self._ownership[child_id]
+        if not _all_paths_within(child_ownership.paths, parent_ownership.paths):
+            raise ValidationError("child ownership exceeds parent ownership")
+        if not set(child_ownership.non_file_scope).issubset(parent_ownership.non_file_scope):
+            raise ValidationError("child non-file ownership exceeds parent ownership")
+        self._dependencies[child_id].append(dependency)
+        self._tasks[child_id].dependencies = tuple(self._dependencies[child_id])
+        try:
+            self.validate()
+        except Exception:
+            self._dependencies[child_id].pop()
+            self._tasks[child_id].dependencies = tuple(self._dependencies[child_id])
+            raise
+        return dependency
+
+    def dependencies_satisfied(
+        self,
+        task_id: TaskRef | TaskId | str,
+        completed: Iterable[str] | Mapping[str, Any] = (),
+        exports: Mapping[str, Iterable[str] | str] | None = None,
+    ) -> bool:
+        """Report readiness using task state plus optional completion/export facts."""
+
+        task_key = str(_canonical_task_ref(task_id)).removeprefix("task://")
+        if task_key not in self._tasks:
+            raise ValidationError(f"missing task node: {task_key}")
+        completed_ids: set[str] = set()
+        available_exports: dict[str, set[str]] = {}
+        if isinstance(completed, Mapping):
+            for key, value in completed.items():
+                normalized = str(_canonical_task_ref(key)).removeprefix("task://")
+                if isinstance(value, Mapping):
+                    state = value.get("state")
+                    if state in {TaskState.COMPLETED, TaskState.VERIFYING, "completed", "verifying"}:
+                        completed_ids.add(normalized)
+                    value = value.get("exports", ())
+                elif isinstance(value, str) and value in {item.value for item in TaskState}:
+                    if value in {TaskState.COMPLETED.value, TaskState.VERIFYING.value}:
+                        completed_ids.add(normalized)
+                    value = ()
+                else:
+                    completed_ids.add(normalized)
+                if value:
+                    available_exports[normalized] = set(_string_tuple(value, "completed.exports"))
+        else:
+            completed_ids = {
+                str(_canonical_task_ref(item)).removeprefix("task://") for item in completed
+            }
+        for key, value in (exports or {}).items():
+            normalized = str(_canonical_task_ref(key)).removeprefix("task://")
+            available_exports[normalized] = set(_string_tuple((value,) if isinstance(value, str) else value, "exports"))
+
+        def is_completed(parent_id: str) -> bool:
+            return parent_id in completed_ids or self._tasks[parent_id].state == TaskState.COMPLETED
+
+        for dependency in self._dependencies[task_key]:
+            parent_id = str(dependency.task_ref).removeprefix("task://")
+            if dependency.condition == DependencyCondition.COMPLETED:
+                if not is_completed(parent_id):
+                    return False
+                continue
+            parent = self._tasks[parent_id]
+            if parent.state not in {TaskState.VERIFYING, TaskState.COMPLETED} and parent_id not in completed_ids:
+                return False
+            actual = available_exports.get(parent_id)
+            if actual is None and is_completed(parent_id):
+                contract = self._contracts[str(parent.contract_ref)]
+                actual = {port.name for port in contract.exports}
+            if actual is None or not set(dependency.exports).issubset(actual):
+                return False
+        return True
+
+    def validate(self) -> bool:
+        """Validate references, ownership bounds, uniqueness, and acyclicity."""
+
+        task_ids = set(self._tasks)
+        if len(task_ids) != len(self._tasks):
+            raise ValidationError("TaskGraph contains duplicate task ids")
+        for task_id, task in self._tasks.items():
+            if str(task.id) != task_id or str(task.run_id) != str(self.run_id):
+                raise ValidationError(f"task {task_id} is not owned by graph run {self.run_id}")
+            ref = _canonical_contract_ref(task.contract_ref)
+            if str(ref) not in self._contracts:
+                raise ValidationError(f"task {task_id} references missing contract node: {ref}")
+            if task_id not in self._dependencies or task_id not in self._ownership:
+                raise ValidationError(f"task {task_id} is missing graph metadata")
+            if tuple(task.dependencies) != tuple(self._dependencies[task_id]):
+                raise ValidationError(f"task {task_id} dependency metadata disagrees")
+        for ref, contract in self._contracts.items():
+            if str(_canonical_contract_ref(contract.ref)) != ref:
+                raise ValidationError(f"contract key is not canonical: {ref}")
+        edges: dict[str, set[str]] = {}
+        for child_id, items in self._dependencies.items():
+            if child_id not in task_ids:
+                raise ValidationError(f"dependency metadata references missing child: {child_id}")
+            edges[child_id] = set()
+            for dependency in items:
+                parent_id = str(_canonical_task_ref(dependency.task_ref)).removeprefix("task://")
+                if parent_id not in task_ids:
+                    raise ValidationError(f"dependency references missing parent: {parent_id}")
+                if parent_id == child_id:
+                    raise ValidationError("TaskGraph contains a self-dependency")
+                if not _all_paths_within(self._ownership[child_id].paths, self._ownership[parent_id].paths):
+                    raise ValidationError("child ownership exceeds parent ownership")
+                if not set(self._ownership[child_id].non_file_scope).issubset(
+                    self._ownership[parent_id].non_file_scope
+                ):
+                    raise ValidationError("child non-file ownership exceeds parent ownership")
+                edges[child_id].add(parent_id)
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(node: str) -> None:
+            if node in visiting:
+                raise ValidationError("TaskGraph contains a dependency cycle")
+            if node in visited:
+                return
+            visiting.add(node)
+            for parent_id in sorted(edges.get(node, ())):
+                visit(parent_id)
+            visiting.remove(node)
+            visited.add(node)
+
+        for node in sorted(task_ids):
+            visit(node)
+        return True
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        dependency_rows = []
+        for child_id in sorted(self._dependencies):
+            for dependency in sorted(
+                self._dependencies[child_id],
+                key=lambda item: (str(item.task_ref), str(item.condition), tuple(item.exports)),
+            ):
+                dependency_rows.append(
+                    {
+                        "parent": str(_canonical_task_ref(dependency.task_ref)),
+                        "child": str(TaskRef.from_id(child_id)),
+                        "condition": dependency.condition.value,
+                        **({"exports": list(dependency.exports)} if dependency.exports else {}),
+                    }
+                )
+        return {
+            "run_id": str(self.run_id),
+            "tasks": [self._tasks[key].to_dict() for key in sorted(self._tasks)],
+            "contracts": [self._contracts[key].to_dict() for key in sorted(self._contracts)],
+            "dependencies": dependency_rows,
+            "ownership": {
+                key: self._ownership[key].to_dict() for key in sorted(self._ownership)
+            },
+        }
+
+
 @dataclass
 class WorkUnit(Serializable):
     id: WorkUnitId | str
@@ -2572,6 +2956,7 @@ class DomainAPI:
         LaneAttempt,
         WorkUnit,
         WorkGraph,
+        TaskGraph,
         Contract,
         Artifact,
         Snapshot,

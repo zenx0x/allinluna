@@ -49,6 +49,7 @@ allinluna resume RUN_ID
 allinluna retry RUN_ID --task TASK_ID
 allinluna cancel RUN_ID --task TASK_ID
 allinluna reconcile RUN_ID
+allinluna set-policy RUN_ID POLICY.json
 ```
 
 The runtime CLI also provides `set-policy`. Legacy plan/run import is exposed through the read-only API below. Recovery uses SQLite state/journal, real host receipts, leases, Git/workspace identity, and snapshot validity to recompute ready actions; unrecoverable conditions return a blocker while immutable artifacts are retained.

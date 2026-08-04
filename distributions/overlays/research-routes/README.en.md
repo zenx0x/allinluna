@@ -2,74 +2,49 @@
 
 [简体中文（默认）](README.md) | [English](README.en.md)
 
-**Put a question into Research Routes and get a route-neutral evidence map: Claims, Evidence, contradictions, failure regimes, and unknowns stay separate, and the next step is limited to reversible exploration.**
+**Put a question into Research Routes and get a route-neutral evidence map: Claims, Evidence, unknowns, contradictions, failure regimes, and reversible probes stay separate.**
 
-Research Routes is an independently installable Codex research distribution that can also coexist with All in Luna. Use it to understand a problem and compare routes first; use All in Luna for complete software delivery after the scope is explicitly authorized.
+Research Routes is independently installable and can coexist with All in Luna. It owns route-neutral research; when product delivery is explicitly authorized, hand a bounded evidence package to All in Luna.
 
-## Understand it in 30 seconds
+## The fixed ordinary-user path
 
-It is not a jump page, and it does not disguise a terrain map as an implementation plan. Keep routes A/B, positive and negative evidence, and failure regimes visible until there is enough basis to choose the next probe. AI inference does not become experiment authorization, implementation order, HumanDecision, or canonical state automatically.
+```text
+one-sentence research question or existing evidence package → one resource confirmation card → Coordinator → route dependency waves → result
+```
 
-## Three entry points
+The one card confirms research scope, delivery mode, speed/model, Coordinator, and any user-provided skills/plugins/MCP bindings. Research Routes does not default to multi-layer governance, frequent interruptions, or a real canary on every run; ordinary exploration does not require turning a terrain map into an implementation plan.
+
+| Mode | Default path | Boundary |
+| --- | --- | --- |
+| `quick` | Coordinator + necessary route Owner(s) | Small route mapping; no Integration/Acceptance by default |
+| `standard` | Coordinator + multiple independent route Owners | Use for parallel comparison; one Integration only for a shared evidence artifact or real conflict |
+| `full` | Coordinator + route Owners + the risk-required path | Only for high-risk, large cross-contract, or scientific-authority work; an explicit evidence upgrade while the lean runtime materializes no Acceptance/CounterPilot lanes |
+
+`fast`, `ultra-fast`, and `all-luna` remain available as resource policies; they change speed/model locking and do not add governance automatically. A complete third-party plan remains `parallel-only`, preserving its direction and completion standard.
+
+## Three research entry points
 
 1. **`$research-routes-plan`**: define the problem boundary, candidate routes, Claims/Evidence structure, and unknowns.
-2. **`$research-routes-explore`**: compare routes, preserve positive, negative, and contradictory evidence, identify failure regimes, and design a reversible probe.
-3. **`$research-routes-run`**: run a probe only within explicitly authorized research scope, record its result, and preserve rollback boundaries; hand a bounded evidence package to All in Luna when product implementation is ready.
+2. **`$research-routes-explore`**: compare routes, preserve positive/negative/contradictory evidence, identify failure regimes, and design a reversible probe.
+3. **`$research-routes-run`**: run a probe only inside explicitly authorized research scope, record the result, and preserve rollback boundaries.
 
-## The real experience and a small example
+AI inference does not become experiment authorization, implementation order, HumanDecision, or canonical state automatically. Each Claim should point to Evidence, Evidence keeps its polarity, and a probe explicitly sets `reversible: true`.
 
-```text
-Use Research Routes to compare sparse retrieval and knowledge-graph retrieval for this question:
-Preserve Claims, Evidence, unknowns, contradictory results, and failure regimes; do not select a route prematurely. Design only one reversible next probe.
-```
+## First-use evidence (on demand)
 
-The expected sidebar result is multiple route Owners comparing routes and evidence in parallel, with an independent read-only CounterPilot challenge. The output is a terrain map and a reversible next probe, not an unauthorized conclusion.
+An ordinary research run does not require a real canary every time. When real host verification is needed, receipts distinguish `requested`, `resolved`, and `actual`; CI reports only `FIXTURE_PASS`, complete real evidence may report `REAL_PASS`, missing proof is `BLOCKED`/`UNVERIFIED`, and the Integration boundary is `mechanical-only`. See the [first-use protocol](https://github.com/zenx0x/allinluna/blob/main/docs/first-use-protocol.md) for the read-only contract.
 
-## First use: what you will see
+## Handoff to All in Luna
 
-First use remains outcome-first: the Sponsor keeps the question’s direction, an independent Coordinator appears in the sidebar, and multiple route Owners follow. Repeated ticks reconcile known dispatches with `no-op`, `reuse`, or `wait`, never by creating the same Owner twice. You see real thread receipts, host/worktree/repository identity, and a monitor cursor before the final `mechanical-only` integration boundary. The persisted receipt must also retain `source=codex_app`, `actual_tool`, complete capability evidence, monitor cursor/receipts, and the integration boundary; only `threadId`, `hostId`, and an output directory is BLOCKED/UNVERIFIED.
+When product implementation is ready, hand off the route/evidence package and list facts that remain unknown; do not treat the terrain map as an implementation plan. See the [All in Luna README](../../../README.en.md) for its one-card and dependency-wave path.
 
-### Resource confirmation card and shortest prompt
+## Install and file locations
 
-`requested` is the request, `resolved` is the host resolution, and `actual` is proven only by a real host receipt; without one the result must be BLOCKED/UNVERIFIED. Copy this for a first run:
+From the source repository, choose the repository root in Codex Plugins; its marketplace lists both distributions. In a standalone package, the actual plugin root is `plugins/research-routes/`, and the source-repository builder does not need to run again inside the package.
 
-```text
-Use Research Routes to compare the candidate routes for this question:
-[question, constraints, and known material]
-Preserve Claims, Evidence, unknowns, contradictions, and failure regimes; have an independent Coordinator dispatch multiple route Owners, keep repeated ticks idempotent, and continue through real receipts, monitoring, and one reversible probe. Do not turn a terrain map into experiment authorization or a product implementation plan.
-```
-
-A successful run produces a route-neutral terrain map, multiple Owner receipts, a monitor cursor, and one reversible probe. If an Owner has a `product_failure`, recovery returns to the same dispatch; host/tool unavailability and checker errors stop separately as BLOCKED or CHECKER_ERROR. CI `FIXTURE_PASS` never equals `REAL_PASS`. See the [first-use protocol](https://github.com/zenx0x/allinluna/blob/main/docs/first-use-protocol.md) for the advanced protocol, schema, and read-only checker.
-
-## Shortest install and first use
-
-From the source repository, choose installation from a local path in Codex Plugins and select the repository root; its marketplace lists both All in Luna and Research Routes. If you received a standalone distribution, select that package root; its actual plugin root is `plugins/research-routes/`, and you do not need to run the source-repository builder again inside it.
-
-The plugin entry points live under `plugins/research-routes/skills/`, the manifest is `plugins/research-routes/.codex-plugin/plugin.json`, and shared contracts live under `plugins/research-routes/shared/`.
-
-## Research boundary
-
-A terrain map is not experiment authorization, implementation order, HumanDecision, or canonical-state promotion. Each Claim should point to Evidence; Evidence keeps its polarity; and the next probe must explicitly set `reversible: true`. The shared runtime fails closed on boundary violations.
-
-When product implementation is ready, hand off a bounded route/evidence package and state which facts remain unknown; do not treat the research map as an implementation plan.
-
-## Good fits
-
-- Compare two scientific routes without selecting one prematurely.
-- Preserve contradictory results and failure regimes instead of retaining only positive conclusions.
-- Choose a low-cost, reversible probe that can distinguish competing assumptions before implementation.
-- Build a traceable route map from software options, paper directions, experiment records, or existing material.
-
-## Frequently asked questions
-
-**Will Research Routes choose a route for me?** No. It keeps differences, evidence, and unknowns visible; a human choice still requires an explicit HumanDecision.
-
-**Can it edit product code directly?** Research execution preserves route boundaries. When software delivery is ready, hand the bounded evidence package to All in Luna.
-
-**Can I use only All in Luna?** Yes. All in Luna is the fit when the outcome is clear and you need complete development concurrency and delivery.
-
-## Advanced contracts and license
-
-See `plugins/research-routes/skills/research-routes/SKILL.md`, `plugins/research-routes/skills/research-routes-run/SKILL.md`, `plugins/research-routes/shared/`, and `plugins/research-routes/.codex-plugin/plugin.json` for the detailed boundary contracts.
+- Plugin entry points: `plugins/research-routes/skills/`, including `plugins/research-routes/skills/research-routes`
+- Manifest: `plugins/research-routes/.codex-plugin/plugin.json`
+- Shared contracts: `plugins/research-routes/shared/`
+- Detailed All in Luna user flow: `plugins/allinluna/skills/allinluna-run/references/user-flow.md`
 
 Apache License 2.0. See `LICENSE`.

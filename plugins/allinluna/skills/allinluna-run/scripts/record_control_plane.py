@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record real Codex App receipts for Sponsor, Coordinator, or CounterPilot tasks."""
+"""Record real Codex App receipts for Sponsor, Coordinator, or child Coordinator tasks."""
 
 from __future__ import annotations
 
@@ -12,17 +12,12 @@ from pathlib import Path
 from codex_app_adapter import control_target, default_repository_identity
 from dispatcher_lease import (
     DispatcherLeaseError,
-    append_event_locked,
     dispatcher_session,
-    load_lease,
     make_owner_identity,
     state_lock,
 )
 from workflow_state import (
-    append_event,
     atomic_write_json,
-    counterpilot_trigger,
-    event,
     load_state,
     now_iso,
 )
@@ -47,21 +42,10 @@ def _mutation_context(
             repository_identity=default_repository_identity(state),
             worktree_identity=control_target(state, "primary-coordinator"),
         )
-        existing = load_lease(run_dir)
-        handoff = None
-        if existing and existing["owner_identity"].get("role") == "sponsor-bootstrap":
-            handoff = {
-                "type": "dispatcher-handoff",
-                "actor": "sponsor",
-                "from_owner_identity": existing["owner_identity"],
-                "to_owner_identity": identity,
-                "reason": args.reason,
-            }
         with dispatcher_session(
             run_dir,
             identity,
             purpose="record primary Coordinator thread receipt",
-            handoff_event=handoff,
         ) as session:
             yield session
     else:
@@ -72,7 +56,7 @@ def _mutation_context(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
-    parser.add_argument("--role", choices=["sponsor", "primary-coordinator", "subcoordinator", "counterpilot", "secondary-counterpilot"], required=True)
+    parser.add_argument("--role", choices=["sponsor", "primary-coordinator", "subcoordinator"], required=True)
     parser.add_argument("--coordinator-id")
     parser.add_argument("--thread-id")
     parser.add_argument("--client-thread-id")
@@ -93,31 +77,15 @@ def main() -> int:
                 target = control["sponsor"]
             elif args.role == "primary-coordinator":
                 target = control["primary_coordinator"]
-            elif args.role == "counterpilot":
-                target = control["counterpilot"]
-            elif args.role == "secondary-counterpilot":
-                target = control["secondary_counterpilot"]
             else:
                 if not args.coordinator_id or args.coordinator_id not in control["subcoordinators"]:
                     raise ValueError("subcoordinator requires a valid --coordinator-id")
                 target = control["subcoordinators"][args.coordinator_id]
-            if args.role == "counterpilot":
-                if target.get("status") == "disabled":
-                    raise ValueError("CounterPilot is disabled by the selected mode")
-                effective_mode = target.get("effective_mode", target.get("mode", "off"))
-                if effective_mode != "continuous":
-                    if not args.trigger:
-                        raise ValueError("deferred CounterPilot creation requires a real --trigger")
-                    expected_trigger = counterpilot_trigger(state)
-                    if expected_trigger != args.trigger:
-                        raise ValueError(
-                            f"CounterPilot trigger is not active: expected {expected_trigger!r}"
-                        )
 
             receipt_id = args.thread_id or args.client_thread_id
             all_threads = {
                 item.get("thread_id")
-                for item in [control["sponsor"], control["primary_coordinator"], control["counterpilot"], control["secondary_counterpilot"], *control["subcoordinators"].values()]
+                for item in [control["sponsor"], control["primary_coordinator"], *control["subcoordinators"].values()]
                 if item.get("thread_id")
             }
             if args.thread_id and args.thread_id in all_threads and target.get("thread_id") != args.thread_id:
@@ -189,24 +157,11 @@ def main() -> int:
                     target["status"] = "running"
                 current = args.thread_id
                 receipt_status = "thread-receipt"
-            if not duplicate_resolution and args.role == "counterpilot" and args.trigger:
-                if args.trigger not in target.setdefault("creation_triggers", []):
-                    target["creation_triggers"].append(args.trigger)
-                target.setdefault("trigger_history", []).append(
-                    {"trigger": args.trigger, "status": "created", "recorded_at": now_iso()}
-                )
             state["updated_at"] = now_iso()
             atomic_write_json(run_dir / "run-state.json", state)
             dispatcher_evidence = lease_session.evidence() if lease_session else {
-                "epoch": (load_lease(run_dir) or {}).get("epoch"),
-                "owner_identity": (load_lease(run_dir) or {}).get("owner_identity"),
+                "persistent_lease": False,
             }
-            append_event(run_dir, event("host-adapter", f"control-plane:{args.role}", previous, current, args.reason, {
-                "receipt_status": receipt_status,
-                "dispatcher": dispatcher_evidence,
-                "pending_client_thread_id_is_not_thread_id": bool(args.client_thread_id),
-                "duplicate_resolution": duplicate_resolution,
-            }))
             output = {
                 "ok": True,
                 "role": args.role,

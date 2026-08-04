@@ -7,14 +7,8 @@ import argparse
 import json
 from pathlib import Path
 
-from workflow_state import (
-    append_event,
-    atomic_write_json,
-    dependencies_satisfied,
-    event,
-    load_state,
-    now_iso,
-)
+from dispatcher_lease import state_lock
+from workflow_state import atomic_write_json, dependencies_satisfied, load_state, now_iso
 
 
 def main() -> int:
@@ -28,51 +22,34 @@ def main() -> int:
     args = parser.parse_args()
     output: dict
     try:
-        run_dir, state = load_state(args.run)
-        previous = state["status"]
-        entity = f"run:{state['run_id']}"
-        if args.action == "pause":
-            if state["status"] not in {"planned", "running"}:
-                raise ValueError("only planned or running runs can be paused")
-            state["status"] = "paused"
-            current = "paused"
-        elif args.action == "resume":
-            if state["status"] not in {"paused", "blocked"}:
-                raise ValueError("only paused or blocked runs can be resumed")
-            state["status"] = "running"
-            current = "running"
-        elif args.action == "set-concurrency":
-            if args.concurrency is None or args.concurrency < 1:
-                raise ValueError("set-concurrency requires a positive --concurrency")
-            old = state["resource_policy"]["concurrency"]["desired"]
-            state["resource_policy"]["concurrency"]["desired"] = args.concurrency
-            previous, current = str(old), str(args.concurrency)
-            entity = f"run:{state['run_id']}:concurrency"
-        else:
-            if not args.task or args.task not in state["tasks"]:
-                raise ValueError("retry-task requires a valid --task")
-            task = state["tasks"][args.task]
-            if task["status"] not in {"blocked", "failed"}:
-                raise ValueError("only blocked or failed tasks can be retried")
-            if not dependencies_satisfied(task, state["tasks"]):
-                raise ValueError("task dependencies are not complete")
-            previous = task["status"]
-            task["status"] = "ready"
-            task["updated_at"] = now_iso()
-            current = "ready"
-            entity = f"task:{args.task}"
-        state["updated_at"] = now_iso()
-        atomic_write_json(run_dir / "run-state.json", state)
-        append_event(
-            run_dir,
-            event(
-                actor="human-control",
-                entity=entity,
-                previous=previous,
-                current=current,
-                reason=args.reason,
-            ),
-        )
+        run_dir, _ = load_state(args.run)
+        with state_lock(run_dir):
+            _, state = load_state(run_dir)
+            if args.action == "pause":
+                if state["status"] not in {"planned", "running"}:
+                    raise ValueError("only planned or running runs can be paused")
+                state["status"] = "paused"
+            elif args.action == "resume":
+                if state["status"] not in {"paused", "blocked"}:
+                    raise ValueError("only paused or blocked runs can be resumed")
+                state["status"] = "running"
+            elif args.action == "set-concurrency":
+                if args.concurrency is None or args.concurrency < 1:
+                    raise ValueError("set-concurrency requires a positive --concurrency")
+                state["resource_policy"]["concurrency"]["desired"] = args.concurrency
+            else:
+                if not args.task or args.task not in state["tasks"]:
+                    raise ValueError("retry-task requires a valid --task")
+                task = state["tasks"][args.task]
+                if task["status"] not in {"blocked", "failed"}:
+                    raise ValueError("only blocked or failed tasks can be retried")
+                if not dependencies_satisfied(task, state["tasks"]):
+                    raise ValueError("task dependencies are not complete")
+                task["status"] = "ready"
+                task["updated_at"] = now_iso()
+            state["coordination"]["last_intervention_at"] = now_iso()
+            state["updated_at"] = now_iso()
+            atomic_write_json(run_dir / "run-state.json", state)
         output = {
             "ok": True,
             "action": args.action,

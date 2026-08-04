@@ -28,7 +28,7 @@ class PlanValidationTests(unittest.TestCase):
 
     def test_detects_cycle(self) -> None:
         plan = deepcopy(self.example)
-        plan["tasks"][0]["dependencies"] = ["T4-accept"]
+        plan["tasks"][0]["dependencies"] = ["T3-integrate"]
         result = validate(plan)
         self.assertFalse(result["valid"])
         self.assertTrue(any("cycle" in error for error in result["errors"]))
@@ -119,21 +119,11 @@ class PlanValidationTests(unittest.TestCase):
         result = validate(plan)
         self.assertTrue(result["valid"], result)
 
-    def test_counterpilot_auto_and_high_risk_off_waiver_are_explicit(self) -> None:
+    def test_legacy_counterpilot_settings_are_ignored(self) -> None:
         plan = deepcopy(self.example)
         plan["orchestration"]["counterpilot"] = "auto"
         self.assertTrue(validate(plan)["valid"])
-
-        plan["orchestration"]["counterpilot"] = "off"
-        rejected = validate(plan)
-        self.assertFalse(rejected["valid"])
-        self.assertTrue(any("risk_waiver" in error for error in rejected["errors"]))
-        plan["orchestration"]["counterpilot_risk_waiver"] = {
-            "acknowledged": True,
-            "reason": "Sponsor accepts the high-risk review tradeoff.",
-        }
-        accepted = validate(plan)
-        self.assertTrue(accepted["valid"], accepted)
+        self.assertTrue(any("ignored" in warning for warning in validate(plan)["warnings"]))
 
     def test_high_concurrency_requires_explicit_decomposition_choice(self) -> None:
         plan = deepcopy(self.example)
@@ -172,7 +162,7 @@ class PlanValidationTests(unittest.TestCase):
         self.assertTrue(validate(low)["valid"], validate(low))
         low_topology = resolve_topology(low)["resolved"]
         self.assertFalse(low_topology["integration_required"])
-        self.assertFalse(low_topology["independent_acceptance_required"])
+        self.assertNotIn("independent_acceptance_required", low_topology)
 
         medium = deepcopy(self.example)
         medium["risk_level"] = "medium"
@@ -181,14 +171,14 @@ class PlanValidationTests(unittest.TestCase):
         self.assertTrue(validate(medium)["valid"], validate(medium))
         medium_topology = resolve_topology(medium)["resolved"]
         self.assertTrue(medium_topology["integration_required"])
-        self.assertFalse(medium_topology["independent_acceptance_required"])
+        self.assertNotIn("independent_acceptance_required", medium_topology)
 
         high = deepcopy(self.example)
         high_topology = resolve_topology(high)["resolved"]
         self.assertTrue(high_topology["integration_required"])
-        self.assertTrue(high_topology["independent_acceptance_required"])
+        self.assertNotIn("independent_acceptance_required", high_topology)
 
-    def test_shared_contract_requires_independent_acceptance_even_when_low(self) -> None:
+    def test_shared_contract_requires_integration_even_when_low(self) -> None:
         plan = deepcopy(self.example)
         plan["risk_level"] = "low"
         plan["tasks"] = [plan["tasks"][0]]
@@ -199,12 +189,10 @@ class PlanValidationTests(unittest.TestCase):
             "size": "small",
             "signals": {"shared_contract": True},
             "integration": "required",
-            "independent_acceptance": "required",
         }
         result = validate(plan)
         self.assertFalse(result["valid"])
         self.assertTrue(any("integration task" in error for error in result["errors"]))
-        self.assertTrue(any("independent acceptance" in error for error in result["errors"]))
 
 
 class ProjectInspectionTests(unittest.TestCase):

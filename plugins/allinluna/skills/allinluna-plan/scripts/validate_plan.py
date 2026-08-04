@@ -25,7 +25,6 @@ PROFILE_CONCURRENCY = {
     "all-luna": 8,
     "mad-luna": 24,
 }
-COUNTERPILOT_MODES = {"off", "auto", "risk-triggered", "milestone", "continuous"}
 TOPOLOGY_POLICIES = {"risk-adaptive"}
 TOPOLOGY_SIZES = {"small", "medium", "large"}
 TOPOLOGY_REQUIREMENTS = {"auto", "none", "required"}
@@ -81,7 +80,6 @@ REQUIRED_TASK = {
     "verification",
     "validation_level",
     "external_side_effects",
-    "acceptance_required",
     "capability_bindings",
     "full_read_requirements",
 }
@@ -89,14 +87,6 @@ REQUIRED_TASK = {
 
 def nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
-
-
-def valid_counterpilot_risk_waiver(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and value.get("acknowledged") is True
-        and nonempty_string(value.get("reason"))
-    )
 
 
 def _topology_signal(topology: dict[str, Any], name: str) -> bool:
@@ -109,9 +99,9 @@ def _topology_signal(topology: dict[str, Any], name: str) -> bool:
 def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
     """Resolve the risk-adaptive owner/integration/acceptance topology.
 
-    The resolver is intentionally additive: it never creates, removes, or
-    rewrites tasks.  It reports the topology implied by the plan so runtime
-    state can preserve task dependencies and ownership byte-for-byte.
+    The resolver only determines whether a mechanical integration wave is
+    needed.  Independent Acceptance and CounterPilot are legacy plan fields;
+    the lean runtime does not materialize either lane.
     """
     raw = data.get("topology")
     topology = raw if isinstance(raw, dict) else {}
@@ -135,7 +125,6 @@ def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
     )
     multiple_owners = owner_count > 1
     risk_requires_integration = risk_level in {"medium", "high", "critical"}
-    risk_requires_acceptance = risk_level in {"high", "critical"}
     integration_required = bool(
         risk_requires_integration
         or (multiple_owners and not parallel_only)
@@ -143,15 +132,9 @@ def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
         or scientific_safety
         or external_write
     )
-    acceptance_required = bool(
-        risk_requires_acceptance or shared_contract or scientific_safety or external_write
-    )
     requested_integration = topology.get("integration", "auto")
-    requested_acceptance = topology.get("independent_acceptance", "auto")
     if requested_integration == "required":
         integration_required = True
-    if requested_acceptance == "required":
-        acceptance_required = True
     drivers: list[str] = []
     if risk_requires_integration:
         drivers.append(f"risk:{risk_level}")
@@ -165,14 +148,11 @@ def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
         drivers.append("external-write")
     if requested_integration == "required":
         drivers.append("explicit-integration")
-    if requested_acceptance == "required":
-        drivers.append("explicit-independent-acceptance")
     return {
         "policy": "risk-adaptive",
         "requested": {
             "size": topology.get("size", "auto"),
             "integration": requested_integration,
-            "independent_acceptance": requested_acceptance,
             "signals": {
                 "shared_contract": shared_contract,
                 "scientific_safety": scientific_safety,
@@ -187,7 +167,6 @@ def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
             "owner_count": owner_count,
             "implementation_owner_ids": implementation_ids,
             "integration_required": integration_required,
-            "independent_acceptance_required": acceptance_required,
             "signals": {
                 "shared_contract": shared_contract,
                 "scientific_safety": scientific_safety,
@@ -196,9 +175,6 @@ def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
             "drivers": drivers,
             "integration_task_ids": [
                 str(task.get("id")) for task in tasks if task.get("resource_class") == "integration"
-            ],
-            "acceptance_task_ids": [
-                str(task.get("id")) for task in tasks if task.get("resource_class") == "acceptance"
             ],
         },
     }
@@ -222,7 +198,7 @@ def validate_topology_contract(
             errors.append("topology.policy must be risk-adaptive")
         if "size" in declared and declared.get("size") not in TOPOLOGY_SIZES:
             errors.append("topology.size must be small, medium, or large")
-        for field in ("integration", "independent_acceptance"):
+        for field in ("integration",):
             if field in declared and declared.get(field) not in TOPOLOGY_REQUIREMENTS:
                 errors.append(f"topology.{field} must be auto, none, or required")
         signals = declared.get("signals")
@@ -242,45 +218,25 @@ def validate_topology_contract(
     integration_ids = [
         task_id for task_id, task in tasks.items() if task.get("resource_class") == "integration"
     ]
-    acceptance_ids = [
-        task_id for task_id, task in tasks.items() if task.get("resource_class") == "acceptance"
-    ]
     integration_required = resolved["integration_required"]
-    acceptance_required = resolved["independent_acceptance_required"]
     if integration_required and len(integration_ids) != 1:
         errors.append(
             "risk-adaptive topology requires exactly one phase integration task; "
             f"found {len(integration_ids)}"
         )
-    if acceptance_required and len(acceptance_ids) != 1:
-        errors.append(
-            "risk-adaptive topology requires exactly one independent acceptance task; "
-            f"found {len(acceptance_ids)}"
-        )
     if not integration_required and integration_ids:
         warnings.append("integration task is present although the resolved topology does not require one")
-    if not acceptance_required and acceptance_ids:
-        warnings.append("acceptance task is present although the resolved topology does not require one")
     if isinstance(declared, dict) and declared.get("integration") == "none" and integration_ids:
         errors.append("topology.integration=none cannot include an integration task")
-    if isinstance(declared, dict) and declared.get("independent_acceptance") == "none" and acceptance_ids:
-        errors.append("topology.independent_acceptance=none cannot include an acceptance task")
     for integration_id in integration_ids:
         for implementation_id in resolved["implementation_owner_ids"]:
             if implementation_id not in closure.get(integration_id, set()):
                 errors.append(
                     f"implementation task {implementation_id} must feed phase integration {integration_id}"
                 )
-    for acceptance_id in acceptance_ids:
-        acceptance = tasks[acceptance_id]
-        if acceptance.get("ownership", {}).get("paths"):
-            errors.append(f"acceptance task {acceptance_id} must be read-only")
-        if acceptance.get("external_side_effects"):
-            errors.append(f"acceptance task {acceptance_id} cannot declare external side effects")
-        if integration_ids and not any(
-            integration_id in closure.get(acceptance_id, set()) for integration_id in integration_ids
-        ):
-            errors.append(f"acceptance task {acceptance_id} must depend on phase integration")
+    for task_id, task in tasks.items():
+        if task.get("resource_class") == "acceptance":
+            warnings.append(f"legacy Acceptance task {task_id} is ignored by the lean runtime")
 
 
 def path_prefix(value: str) -> str:
@@ -308,7 +264,7 @@ def dependency_closure(tasks: dict[str, dict[str, Any]]) -> tuple[dict[str, set[
     def visit(task_id: str, trail: list[str]) -> set[str]:
         if task_id in visiting:
             cycle_start = trail.index(task_id) if task_id in trail else 0
-            errors.append("dependency cycle: " + " -> ".join(trail[cycle_start:] + [task_id]))
+            errors.append("dependency cycle detected: " + " -> ".join(trail[cycle_start:] + [task_id]))
             return set()
         if task_id in visited:
             return closure[task_id]
@@ -342,25 +298,8 @@ def validate(data: Any) -> dict[str, Any]:
         errors.append(f"unknown top-level fields: {', '.join(extra)}")
     if "workflow_preset" in data and not isinstance(data["workflow_preset"], dict):
         errors.append("workflow_preset must be an object")
-    acceptance_policy = data.get("acceptance")
-    if acceptance_policy is not None:
-        if not isinstance(acceptance_policy, dict):
-            errors.append("acceptance must be an object")
-        else:
-            if "manifest_id" in acceptance_policy:
-                if not nonempty_string(acceptance_policy.get("manifest_id")):
-                    errors.append("acceptance.manifest_id must be a non-empty string")
-                elif acceptance_policy.get("manifest_id") != "allinluna-bounded-acceptance-v1":
-                    errors.append("acceptance.manifest_id must use the canonical bounded manifest")
-            if "read_only" in acceptance_policy and acceptance_policy.get("read_only") is not True:
-                errors.append("acceptance.read_only must be true")
-            if "reasoning" in acceptance_policy and acceptance_policy.get("reasoning") not in {"auto", "high", "xhigh"}:
-                errors.append("acceptance.reasoning must be auto, high, or xhigh")
-            if "time_budget_minutes" in acceptance_policy and (
-                not isinstance(acceptance_policy.get("time_budget_minutes"), int)
-                or acceptance_policy.get("time_budget_minutes") <= 0
-            ):
-                errors.append("acceptance.time_budget_minutes must be a positive integer")
+    if "acceptance" in data:
+        warnings.append("legacy Acceptance settings are ignored by the lean runtime")
     if data.get("schema_version") != "2.0":
         errors.append("schema_version must be 2.0")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,79}", str(data.get("plan_id", ""))):
@@ -431,18 +370,8 @@ def validate(data: Any) -> dict[str, Any]:
         for field, expected in required_orchestration.items():
             if orchestration.get(field) != expected:
                 errors.append(f"orchestration.{field} must be {expected}")
-        counterpilot_mode = orchestration.get("counterpilot")
-        if counterpilot_mode not in COUNTERPILOT_MODES:
-            errors.append("orchestration.counterpilot is invalid")
-        waiver = orchestration.get("counterpilot_risk_waiver")
-        if waiver is not None and not valid_counterpilot_risk_waiver(waiver):
-            errors.append(
-                "orchestration.counterpilot_risk_waiver must acknowledge the choice and include a reason"
-            )
-        if waiver is not None and counterpilot_mode != "off":
-            errors.append(
-                "orchestration.counterpilot_risk_waiver is only valid when counterpilot=off"
-            )
+        if "counterpilot" in orchestration or "counterpilot_risk_waiver" in orchestration:
+            warnings.append("legacy CounterPilot settings are ignored by the lean runtime")
         if orchestration.get("coordination_strategy") not in {"auto", "flat", "hierarchical"}:
             errors.append("orchestration.coordination_strategy is invalid")
         shard_size = orchestration.get("shard_size")
@@ -551,8 +480,6 @@ def validate(data: Any) -> dict[str, Any]:
             errors.append(f"{prefix} cannot run full validation outside integration/acceptance")
         if not isinstance(task.get("external_side_effects"), list):
             errors.append(f"{prefix}.external_side_effects must be an array")
-        if not isinstance(task.get("acceptance_required"), bool):
-            errors.append(f"{prefix}.acceptance_required must be boolean")
         if not isinstance(task.get("capability_bindings"), list):
             errors.append(f"{prefix}.capability_bindings must be an array")
         if not isinstance(task.get("full_read_requirements"), list) or not all(map(nonempty_string, task.get("full_read_requirements", []))):
@@ -614,14 +541,6 @@ def validate(data: Any) -> dict[str, Any]:
 
     topology = resolve_topology(data)
     validate_topology_contract(data, topology, tasks, closure, errors, warnings)
-    require_counterpilot = risk_level in {"high", "critical"}
-    if require_counterpilot and isinstance(orchestration, dict) and orchestration.get("counterpilot") == "off":
-        if not valid_counterpilot_risk_waiver(orchestration.get("counterpilot_risk_waiver")):
-            errors.append(
-                "high and critical plans may select counterpilot=off only with an explicit "
-                "counterpilot_risk_waiver"
-            )
-
     return {
         "valid": not errors,
         "errors": list(dict.fromkeys(errors)),

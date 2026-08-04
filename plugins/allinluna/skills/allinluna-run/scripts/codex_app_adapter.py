@@ -275,9 +275,9 @@ def _safe_name(value: str) -> str:
 def control_target(state: dict[str, Any], role: str) -> dict[str, Any]:
     """Use a separate projectless task for control-plane roles.
 
-    Coordinators and CounterPilots must be independent user-visible tasks, but they do not
-    need a product worktree.  Their prompt contains absolute run-state paths, so a projectless
-    target avoids accidentally granting a control-plane task a product worktree.
+    Coordinators must be independent user-visible tasks, but they do not need a product
+    worktree.  Their prompt contains absolute run-state paths, so a projectless target avoids
+    accidentally granting a control-plane task a product worktree.
     """
 
     return {

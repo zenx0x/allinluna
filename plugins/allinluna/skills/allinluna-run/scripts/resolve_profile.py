@@ -245,16 +245,6 @@ def resolve(
             policy["budget"] = deep_merge(policy.get("budget", {}), plan_budget)
     if role_overrides:
         policy["roles"] = deep_merge(policy.get("roles", {}), role_overrides)
-    explicit_acceptance_reasoning = bool(
-        isinstance(role_overrides, dict)
-        and isinstance(role_overrides.get("acceptance"), dict)
-        and "reasoning" in role_overrides["acceptance"]
-    )
-    if isinstance(plan_policy, dict) and isinstance(plan_policy.get("role_overrides"), dict):
-        plan_acceptance = plan_policy["role_overrides"].get("acceptance")
-        explicit_acceptance_reasoning = explicit_acceptance_reasoning or bool(
-            isinstance(plan_acceptance, dict) and "reasoning" in plan_acceptance
-        )
     if concurrency_override is not None:
         if concurrency_override < 1:
             errors.append("concurrency override must be positive")
@@ -262,18 +252,6 @@ def resolve(
             policy["concurrency"]["desired"] = concurrency_override
     if profile_name == "custom" and not policy.get("roles"):
         errors.append("custom profile requires at least one role override")
-    # Acceptance is an independent, read-only boundary.  Even mad-luna keeps
-    # its default at Luna xhigh rather than inheriting the implementation-wide
-    # max setting; an explicit role override may still request max.
-    acceptance_policy = policy.get("roles", {}).get("acceptance")
-    if (
-        isinstance(acceptance_policy, dict)
-        and acceptance_policy.get("model_request") == "family:luna"
-        and acceptance_policy.get("reasoning") == "max"
-        and not explicit_acceptance_reasoning
-    ):
-        acceptance_policy["reasoning"] = "xhigh"
-
     selected_delegation = delegation
     if catalog is not None and delegation == "auto":
         surfaces = catalog.get("surfaces")
@@ -298,12 +276,6 @@ def resolve(
     for role, request in policy.get("roles", {}).items():
         requested_model = request.get("model_request", "unavailable")
         requested_reasoning = request.get("reasoning", "unavailable")
-        if (
-            role == "acceptance"
-            and risk_level in {"high", "critical"}
-            and requested_reasoning == "high"
-        ):
-            requested_reasoning = "xhigh"
         role_resource_class = (
             role_resource_classes.get(role)
             if isinstance(role_resource_classes, dict) and role in role_resource_classes
@@ -479,7 +451,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--resource-class",
-        choices=["authority", "architecture", "implementation-complex", "implementation-clear", "mechanical", "integration", "acceptance"],
+        choices=["authority", "architecture", "implementation-complex", "implementation-clear", "mechanical", "integration"],
     )
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args(argv)

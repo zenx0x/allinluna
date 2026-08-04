@@ -1,25 +1,46 @@
 # First-use verification protocol
 
-This protocol is a small, repeatable check of the ordinary newcomer path. It
-proves the control-plane boundary without creating tasks from the checker and
-without writing runtime state into the product repository.
+This is an advanced, read-only evidence check for the ordinary newcomer path.
+It is not a mandatory multi-layer workflow and it does not create tasks or
+write runtime state into the product repository.
 
-## What the newcomer path proves
+## The ordinary path
 
-The bounded sequence is:
+The user-visible sequence is fixed:
 
-`Sponsor → distinct Coordinator → multiple top-level Owners → repeated tick →
-host thread receipt → monitor cursor/receipt → mechanical integration boundary`.
+```text
+one-sentence request or existing plan
+  -> one resource confirmation card
+  -> Coordinator
+  -> dependency waves
+  -> result
+```
 
-Every receipt carries machine-readable event sequence and identity fields:
+The card is confirmed once. `quick` uses a Coordinator and necessary Owner(s)
+without mechanical Integration by default; `standard` uses multiple Owners and
+at most one Integration when a shared result needs it; `full` is an explicit
+evidence upgrade reserved for high-risk, large cross-contract, or scientific-
+authority work, but the lean runtime does not materialize Acceptance/CounterPilot
+lanes. All in Luna does not
+default to multi-layer governance, frequent interruptions, or a real canary on
+every run.
 
-- `thread_id`, `host_id`, `worktree`, `repo`, `branch`, and `commit` identify the
-  real execution context;
-- each tool/capability records `requested`, `resolved`, and `actual` values;
-- a repeated tick records `no-op`, `reuse`, or `wait`, so polling cannot create a
-  duplicate Owner;
-- monitor evidence records a cursor and receipts; integration is explicitly
-  `mechanical-only`, so semantic defects return to the original Owner.
+## What the advanced check proves
+
+When a real first-use receipt is requested, the bounded evidence chain is:
+
+`Sponsor → distinct Coordinator → dependency-wave Owner receipt(s) → repeated tick → host receipt → monitor cursor/receipt → mechanical integration boundary`.
+
+The quick path may have only the necessary Owner(s); standard/full checks may
+show multiple Owners. Every receipt carries machine-readable identity fields:
+
+- `thread_id`, `host_id`, `worktree`, `repo`, `branch`, and `commit` identify
+  the real execution context;
+- every tool/capability records `requested`, `resolved`, and `actual` values;
+- a repeated tick records `no-op`, `reuse`, or `wait`, so polling cannot create
+  a duplicate Owner;
+- monitor evidence records a cursor and receipts; the integration boundary is
+  explicitly `mechanical-only`, so semantic defects return to the owning lane.
 
 ### Persistent receipt contract
 
@@ -31,10 +52,9 @@ identity, `monitor.source=codex_app` with both `cursor` and `receipts`, and
 `integration_boundary.source=codex_app` with `boundary=mechanical-only`.
 
 An object containing only `threadId`, `hostId`, and an output directory is an
-incomplete host transport receipt. The checker does not infer the missing
-protocol fields from those values or from the output directory. It reports
-`BLOCKED`/`UNVERIFIED` and lists the missing paths; it cannot produce
-`REAL_PASS`.
+incomplete host transport receipt. The checker does not infer missing protocol
+fields from those values or the output directory. It reports
+`BLOCKED`/`UNVERIFIED` and lists missing paths; it cannot produce `REAL_PASS`.
 
 The JSON contract is [`first-use-protocol.schema.json`](first-use-protocol.schema.json).
 The checker is [`scripts/first_use_protocol.py`](../scripts/first_use_protocol.py).
@@ -43,22 +63,23 @@ The checker is [`scripts/first_use_protocol.py`](../scripts/first_use_protocol.p
 
 | Step | Real Codex App / host receipt | CI fixture |
 | --- | --- | --- |
-| Sponsor and Coordinator | The App must create and return distinct real thread identities. | Deterministic synthetic identities are allowed. |
-| Owner dispatch | The independent Coordinator uses the host's top-level-task tool; the host returns each receipt. | The checker generates two synthetic Owners only to exercise ordering and idempotency. |
-| Repeated tick | The Coordinator re-reads host state and proves `no-op`/`reuse`/`wait`; it must not create a task itself. | The checker emits the same bounded actions without host calls. |
-| Thread receipt | `source=codex_app`, `actual_tool=codex_app__create_thread`, real `thread_id`, host/worktree/repo identity. | `source=fixture`, `actual_tool=fixture-simulated`; this can never become `REAL_PASS`. |
+| Sponsor and Coordinator | The App creates and returns distinct real thread identities. | Deterministic synthetic identities exercise the bounded ordering. |
+| Owner dispatch | The independent Coordinator uses the host's top-level-task tool and receives each receipt. | The checker creates synthetic Owner evidence only for ordering/idempotency. |
+| Repeated tick | The Coordinator re-reads host state and proves `no-op`/`reuse`/`wait`; it does not create a task itself. | The checker emits the same bounded actions without host calls. |
+| Thread receipt | `source=codex_app`, `actual_tool=codex_app__create_thread`, real thread and host/worktree/repo identity. | `source=fixture`, `actual_tool=fixture-simulated`; this can never become `REAL_PASS`. |
 | Monitor | A host cursor and externally observed receipts are required. | A deterministic fixture cursor and receipt list are sufficient for CI. |
-| Integration boundary | The host evidence must show mechanical reconciliation only; product semantics remain Owner-owned. | The same boundary is checked synthetically. |
+| Integration boundary | Host evidence shows mechanical reconciliation only; product semantics remain Owner-owned. | The same boundary is checked synthetically. |
 
 Real mode is deliberately read-only: `first_use_protocol.py --mode real` reads
-one persisted host receipt and reports evidence. It never calls `codex_app__create_thread`,
-never creates an unbounded sidebar task, and never mutates a worktree. A missing
-receipt, pending `clientThreadId` without a returned `thread_id`, unavailable
-tool, or missing host identity stops at `BLOCKED`/`UNVERIFIED`; it is not a pass.
+one persisted host receipt and reports evidence. It never calls
+`codex_app__create_thread`, creates an unbounded sidebar task, or mutates a
+worktree. A missing receipt, pending `clientThreadId` without a returned
+`thread_id`, unavailable tool, or missing host identity stops at
+`BLOCKED`/`UNVERIFIED`; it is not a pass.
 
 ## Run the bounded checker
 
-Fixture success and failure recovery are deterministic and safe to run in CI:
+Fixture success and failure recovery are deterministic and safe in CI:
 
 ```powershell
 python scripts/first_use_protocol.py --mode fixture --scenario success
@@ -72,20 +93,19 @@ receipt can be checked without changing the repository:
 python scripts/first_use_protocol.py --mode real --receipt C:\path\from\codex-host\first-use-receipt.json
 ```
 
-The checker returns zero only for `FIXTURE_PASS` or `REAL_PASS`; it returns a
-non-zero result for `BLOCKED`, `UNVERIFIED`, `CHECKER_ERROR`, or product `FAIL`.
-Use `--output` only when a caller explicitly wants a report file outside the
-product repository.
+The checker returns zero only for `FIXTURE_PASS` or `REAL_PASS`; it returns
+non-zero for `BLOCKED`, `UNVERIFIED`, `CHECKER_ERROR`, or product `FAIL`. Use
+`--output` only when a caller explicitly wants a report outside the product
+repository.
 
 ## Evidence and recovery cases
 
 ### Success
 
-The host returns a distinct Coordinator, two or more distinct Owner receipts,
-and a monitor cursor. The second tick reconciles the same dispatch IDs with
-`duplicate_dispatch=no-op`, completed work with `reuse`, or pending work with
-`wait`. The report can end at the mechanical integration boundary. Only this
-complete external receipt can produce `REAL_PASS`.
+The host returns a distinct Coordinator, the Owner receipt(s) required by the
+selected mode, and a monitor cursor. The next tick reconciles the same dispatch
+IDs with `duplicate_dispatch=no-op`, completed work with `reuse`, or pending
+work with `wait`. Only complete external evidence can produce `REAL_PASS`.
 
 ### Failure and recovery
 
@@ -94,5 +114,5 @@ returns recovery to that same dispatch identity, and the next tick reuses or
 waits on the existing thread. The checker accepts recovery evidence only when
 the original failure remains visible and no second Owner/thread is invented.
 Host/tool unavailability is separate from a product failure; malformed or
-schema-incompatible receipts are `CHECKER_ERROR`. The stop report always says
-whether evidence is sufficient and what is missing.
+schema-incompatible receipts are `CHECKER_ERROR`. The stop report says whether
+evidence is sufficient and what is missing.

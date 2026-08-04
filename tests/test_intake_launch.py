@@ -95,3 +95,19 @@ class IntakeLaunchTests(unittest.TestCase):
             )
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("risk waiver", rejected.stdout)
+
+    def test_launch_keeps_one_confirmation_and_user_toolchain_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            intake_path = Path(temporary) / "intake.json"
+            intake_path.write_text(json.dumps({"intake_id": "intake-card", "action": "idea-to-plan"}), encoding="utf-8")
+            launch = self.command(
+                str(LAUNCH),
+                str(intake_path),
+                "--toolchain",
+                "skills/plugins/MCP-bindings",
+                "--confirm",
+            )
+            self.assertEqual(launch["status"], "confirmed")
+            self.assertEqual(launch["coordinator"], "separate-top-level-task")
+            self.assertEqual(launch["toolchain"], "skills/plugins/MCP-bindings")
+            self.assertIn("once", launch["confirmation_prompt"])

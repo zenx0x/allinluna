@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Shared state primitives for All in Luna run tools."""
+"""Small shared state primitives for the All in Luna execution loop.
+
+The run state is deliberately a recovery snapshot, not an event store or a
+second governance system.  Dispatch intents, real thread receipts, task
+status, dependency progress, resource resolution, and Git evidence are the
+facts required to resume without creating duplicate work.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +25,6 @@ PLAN_SCRIPTS = SCRIPT_DIR.parent.parent / "allinluna-plan" / "scripts"
 if str(PLAN_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(PLAN_SCRIPTS))
 
-from acceptance_manifest import resolve_acceptance  # noqa: E402
 from validate_plan import resolve_topology  # noqa: E402
 
 
@@ -44,11 +49,17 @@ TASK_TRANSITIONS = {
 }
 
 TERMINAL_TASK_STATES = {"completed", "skipped", "cancelled"}
-
-COUNTERPILOT_MODES = frozenset(
-    {"off", "auto", "risk-triggered", "milestone", "continuous"}
-)
-COUNTERPILOT_DEFERRED_MODES = frozenset({"auto", "risk-triggered", "milestone"})
+LEGACY_CONTROL_FIELDS = {
+    "sponsor_role",
+    "coordinator_role",
+    "coordinator_product_implementation",
+    "owner_delegation",
+    "owner_subagents",
+    "coordination_strategy",
+    "shard_size",
+    "high_concurrency_review",
+    "decomposition_model",
+}
 
 
 def now_iso() -> str:
@@ -70,6 +81,8 @@ def read_json(path: Path) -> Any:
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
+    """Atomically persist the one recovery snapshot used by the runtime."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -87,14 +100,6 @@ def atomic_write_json(path: Path, data: Any) -> None:
             temporary.unlink()
 
 
-def append_event(run_dir: Path, event: dict[str, Any]) -> None:
-    event_path = run_dir / "events.jsonl"
-    with event_path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-
-
 def state_path(target: Path) -> Path:
     target = target.expanduser().resolve()
     return target if target.name == "run-state.json" else target / "run-state.json"
@@ -106,7 +111,6 @@ def load_state(target: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def role_for_task(task: dict[str, Any]) -> str:
-    resource_class = task.get("resource_class")
     return {
         "authority": "authority",
         "architecture": "architect",
@@ -114,42 +118,34 @@ def role_for_task(task: dict[str, Any]) -> str:
         "implementation-clear": "engineer",
         "mechanical": "worker",
         "integration": "integration",
-        "acceptance": "acceptance",
-    }.get(resource_class, "worker")
+    }.get(task.get("resource_class"), "worker")
 
 
-def requested_assignment(
-    task: dict[str, Any], policy: dict[str, Any], risk_level: str | None = None
-) -> dict[str, Any]:
+def requested_assignment(task: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     role = role_for_task(task)
     role_policy = deepcopy(policy.get("roles", {}).get(role, {}))
-    requested = {
+    return {
         "role": role,
         "model": role_policy.get("model_request", "unavailable"),
         "reasoning": role_policy.get("reasoning", "unavailable"),
         "delegation": "runtime-select",
     }
-    if role == "acceptance":
-        requested["read_only"] = True
-        requested["reasoning_policy"] = "luna-high-or-xhigh"
-        if risk_level in {"high", "critical"} and requested["reasoning"] in {"high", "max"}:
-            requested["reasoning"] = "xhigh"
-    return requested
 
 
 def dependencies_satisfied(task: dict[str, Any], tasks: dict[str, dict[str, Any]]) -> bool:
-    return all(tasks.get(dep, {}).get("status") in {"completed", "skipped"} for dep in task["dependencies"])
+    return all(
+        tasks.get(dep, {}).get("status") in {"completed", "skipped"}
+        for dep in task.get("dependencies", [])
+    )
 
 
 def promote_ready_tasks(state: dict[str, Any]) -> list[str]:
     promoted: list[str] = []
-    tasks = state["tasks"]
-    for task_id, task in tasks.items():
-        if task["status"] in {"pending", "blocked", "failed"} and dependencies_satisfied(task, tasks):
-            if task["status"] == "pending":
-                task["status"] = "ready"
-                task["updated_at"] = now_iso()
-                promoted.append(task_id)
+    for task_id, task in state["tasks"].items():
+        if task["status"] == "pending" and dependencies_satisfied(task, state["tasks"]):
+            task["status"] = "ready"
+            task["updated_at"] = now_iso()
+            promoted.append(task_id)
     return promoted
 
 
@@ -167,95 +163,34 @@ def model_matches_lock(model: str, family: str) -> bool:
     return family.casefold() in model.casefold()
 
 
-def resolve_counterpilot_mode(mode: str, risk_level: str) -> str:
-    """Resolve auto without hiding the user's requested mode."""
-    if mode not in COUNTERPILOT_MODES:
-        raise ValueError(f"invalid CounterPilot mode: {mode}")
-    if mode != "auto":
-        return mode
-    return "risk-triggered" if risk_level in {"high", "critical"} else "milestone"
+def _runtime_orchestration(plan: dict[str, Any]) -> dict[str, Any]:
+    raw = plan.get("orchestration") if isinstance(plan.get("orchestration"), dict) else {}
+    values = {key: deepcopy(raw[key]) for key in LEGACY_CONTROL_FIELDS if key in raw}
+    values.setdefault("sponsor_role", "user-conversation")
+    values.setdefault("coordinator_role", "separate-top-level-task")
+    values.setdefault("coordinator_product_implementation", "forbidden")
+    values.setdefault("owner_delegation", "top-level-task")
+    values.setdefault("owner_subagents", "allowed-bounded")
+    values.setdefault("coordination_strategy", "auto")
+    values.setdefault("shard_size", 8)
+    values.setdefault("high_concurrency_review", "not-required")
+    values.setdefault("decomposition_model", None)
+    return values
 
 
-def valid_counterpilot_risk_waiver(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and value.get("acknowledged") is True
-        and isinstance(value.get("reason"), str)
-        and bool(value["reason"].strip())
-    )
+def _materialized_plan_tasks(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ignore legacy independent-acceptance tasks at runtime.
 
+    Older plans remain readable, but the runtime never creates a separate
+    Acceptance lane.  Their product checks belong in owner/integration
+    verification and completion evidence.
+    """
 
-def counterpilot_initial_status(effective_mode: str) -> str:
-    if effective_mode == "off":
-        return "disabled"
-    if effective_mode == "continuous":
-        return "unassigned"
-    return "deferred"
-
-
-def _milestone_trigger(state: dict[str, Any], seen: set[str]) -> str | None:
-    tasks = state.get("tasks", {})
-    for milestone in state.get("milestones", []):
-        if not isinstance(milestone, dict):
-            continue
-        milestone_id = milestone.get("id")
-        if not isinstance(milestone_id, str) or not milestone_id:
-            continue
-        trigger = f"milestone:{milestone_id}"
-        if trigger in seen:
-            continue
-        if milestone.get("status") in {"reached", "completed"}:
-            return trigger
-        task_ids = milestone.get("task_ids")
-        if isinstance(task_ids, list) and task_ids and all(
-            tasks.get(task_id, {}).get("status") in TERMINAL_TASK_STATES
-            for task_id in task_ids
-        ):
-            return trigger
-    return None
-
-
-def counterpilot_trigger(state: dict[str, Any]) -> str | None:
-    """Return one evidence-bearing trigger, or None when creation must remain deferred."""
-    counterpilot = state.get("control_plane", {}).get("counterpilot", {})
-    mode = counterpilot.get("effective_mode") or counterpilot.get("mode", "off")
-    if mode == "off":
-        return None
-    seen = set(counterpilot.get("requested_triggers", [])) | set(
-        counterpilot.get("completed_triggers", [])
-    )
-    tasks = state.get("tasks", {})
-    topology = state.get("topology", {}).get("resolved", {})
-    integration_required = topology.get(
-        "integration_required",
-        any(task.get("resource_class") == "integration" for task in tasks.values()),
-    )
-    if mode == "milestone":
-        return _milestone_trigger(state, seen)
-
-    if mode == "risk-triggered":
-        if any(task.get("assignment", {}).get("attempt", 0) >= 2 for task in tasks.values()):
-            if "repeated-failure" not in seen:
-                return "repeated-failure"
-        if integration_required and any(
-            task.get("status") == "ready" and task.get("resource_class") == "integration"
-            for task in tasks.values()
-        ) and "before-integration" not in seen:
-            return "before-integration"
-        return None
-
-    if mode == "continuous" and "plan-formed" not in seen:
-        return "plan-formed"
-    if mode == "continuous" and integration_required and any(
-        task.get("status") == "ready" and task.get("resource_class") == "integration"
-        for task in tasks.values()
-    ) and "before-integration" not in seen:
-        return "before-integration"
-    if mode == "continuous" and any(
-        task.get("assignment", {}).get("attempt", 0) >= 2 for task in tasks.values()
-    ) and "repeated-failure" not in seen:
-        return "repeated-failure"
-    return None
+    return [
+        deepcopy(source)
+        for source in plan.get("tasks", [])
+        if isinstance(source, dict) and source.get("resource_class") != "acceptance"
+    ]
 
 
 def build_initial_state(
@@ -268,30 +203,22 @@ def build_initial_state(
     runtime_tier: str,
 ) -> dict[str, Any]:
     timestamp = now_iso()
-    orchestration = plan["orchestration"]
     topology = resolve_topology(plan)
-    acceptance_policy = plan.get("acceptance") if isinstance(plan.get("acceptance"), dict) else {}
-    acceptance = resolve_acceptance(
-        plan.get("risk_level", "low"),
-        requested_reasoning=acceptance_policy.get("reasoning"),
-        requested_time_budget=acceptance_policy.get("time_budget_minutes"),
-    )
-    counterpilot_mode = orchestration.get("counterpilot", "off")
-    effective_counterpilot_mode = resolve_counterpilot_mode(
-        counterpilot_mode, plan.get("risk_level", "low")
-    )
-    counterpilot_risk_waiver = deepcopy(orchestration.get("counterpilot_risk_waiver"))
     desired = int(policy.get("concurrency", {}).get("desired", 1))
-    strategy = orchestration.get("coordination_strategy", "auto")
-    hierarchical = strategy == "hierarchical" or (strategy == "auto" and desired >= 16)
-    shard_size = int(orchestration.get("shard_size", 8))
+    orchestration = _runtime_orchestration(plan)
+    hierarchical = orchestration["coordination_strategy"] == "hierarchical" or (
+        orchestration["coordination_strategy"] == "auto" and desired >= 16
+    )
+    sources = _materialized_plan_tasks(plan)
     implementation_ids = [
-        source["id"]
-        for source in plan["tasks"]
-        if source.get("resource_class") not in {"integration", "acceptance"}
+        source["id"] for source in sources if source.get("resource_class") != "integration"
     ]
+    shard_size = int(orchestration["shard_size"])
     shard_chunks = (
-        [implementation_ids[index : index + shard_size] for index in range(0, len(implementation_ids), shard_size)]
+        [
+            implementation_ids[index : index + shard_size]
+            for index in range(0, len(implementation_ids), shard_size)
+        ]
         if hierarchical and len(implementation_ids) > shard_size
         else []
     )
@@ -300,10 +227,12 @@ def build_initial_state(
         for index, chunk in enumerate(shard_chunks)
         for task_id in chunk
     }
+
     tasks: dict[str, dict[str, Any]] = {}
-    for source in plan["tasks"]:
-        status = "ready" if not source["dependencies"] else "pending"
-        task = {
+    for source in sources:
+        requested = requested_assignment(source, policy)
+        status = "ready" if not source.get("dependencies") else "pending"
+        tasks[source["id"]] = {
             "id": source["id"],
             "title": source["title"],
             "description": source["description"],
@@ -311,17 +240,16 @@ def build_initial_state(
             "role": source["role"],
             "resource_class": source["resource_class"],
             "status": status,
-            "dependencies": deepcopy(source["dependencies"]),
-            "ownership": deepcopy(source["ownership"]),
-            "external_side_effects": deepcopy(source["external_side_effects"]),
-            "acceptance_required": source["acceptance_required"],
-            "deliverables": deepcopy(source["deliverables"]),
-            "verification": deepcopy(source["verification"]),
-            "validation_level": source["validation_level"],
+            "dependencies": deepcopy(source.get("dependencies", [])),
+            "ownership": deepcopy(source.get("ownership", {})),
+            "external_side_effects": deepcopy(source.get("external_side_effects", [])),
+            "deliverables": deepcopy(source.get("deliverables", [])),
+            "verification": deepcopy(source.get("verification", [])),
+            "validation_level": source.get("validation_level", "focused"),
             "capability_bindings": deepcopy(source.get("capability_bindings", [])),
             "full_read_requirements": deepcopy(source.get("full_read_requirements", [])),
             "capability_usage": [],
-            "requested": requested_assignment(source, policy, plan.get("risk_level")),
+            "requested": requested,
             "actual": {
                 "model": "unavailable",
                 "reasoning": "unavailable",
@@ -333,6 +261,7 @@ def build_initial_state(
                 "host_id": None,
                 "cursor": None,
                 "last_activity_at": None,
+                "last_output_at": None,
                 "attempt": 0,
                 "resolved_model": None,
                 "resolved_reasoning": None,
@@ -345,19 +274,6 @@ def build_initial_state(
                 "dispatch_intent": None,
                 "dispatch_receipt": None,
                 "thread_receipt": None,
-                "requested": requested_assignment(source, policy, plan.get("risk_level")),
-                "resolved": {
-                    "model": None,
-                    "reasoning": None,
-                    "delegation": None,
-                    "resolution": None,
-                },
-                "actual": {
-                    "model": "unavailable",
-                    "reasoning": "unavailable",
-                    "delegation": "unavailable",
-                    "resolution": "unavailable",
-                },
             },
             "evidence": {
                 "final_commit": None,
@@ -369,8 +285,33 @@ def build_initial_state(
             "created_at": timestamp,
             "updated_at": timestamp,
         }
-        tasks[task["id"]] = task
 
+    primary = {
+        "status": "unassigned",
+        "thread_id": None,
+        "host_id": None,
+        "cursor": None,
+        "dispatch_intent": None,
+        "dispatch_receipt": None,
+        "thread_receipt": None,
+        "requested": {"role": "coordinator", "model": "unavailable", "reasoning": "unavailable"},
+        "resolved": {"model": None, "reasoning": None, "resolution": None},
+    }
+    subcoordinators = {
+        f"subcoordinator-{index + 1}": {
+            "id": f"subcoordinator-{index + 1}",
+            "status": "unassigned",
+            "task_ids": chunk,
+            "thread_id": None,
+            "host_id": None,
+            "cursor": None,
+            "dispatch_intent": None,
+            "dispatch_receipt": None,
+            "thread_receipt": None,
+            "slot_limit": max(1, desired // max(1, len(shard_chunks))),
+        }
+        for index, chunk in enumerate(shard_chunks)
+    }
     return {
         "schema_version": "2.0",
         "run_id": run_id,
@@ -379,7 +320,6 @@ def build_initial_state(
         "execution_style": plan["execution_style"],
         "risk_level": plan["risk_level"],
         "topology": topology,
-        "acceptance": acceptance,
         "run_dir": str(run_dir.resolve()),
         "status": "planned",
         "profile": profile,
@@ -390,7 +330,6 @@ def build_initial_state(
             "host_concurrency": "unavailable",
             "fallback_reason": None,
             "project_id": None,
-            "project_receipt": None,
             "project_resolution": None,
             "thread_tools": [],
             "requested": [],
@@ -408,117 +347,21 @@ def build_initial_state(
         },
         "repository": deepcopy(plan["repository"]),
         "authorizations": deepcopy(plan["authorizations"]),
-        "orchestration": deepcopy(plan["orchestration"]),
+        "orchestration": orchestration,
         "control_plane": {
             "sponsor": {"role": "user-conversation", "thread_id": None, "host_id": None},
-            "primary_coordinator": {
-                "status": "unassigned",
-                "thread_id": None,
-                "host_id": None,
-                "cursor": None,
-                "dispatch_intent": None,
-                "dispatch_receipt": None,
-                "thread_receipt": None,
-                "requested": {"role": "coordinator", "model": "unavailable", "reasoning": "unavailable"},
-                "resolved": {"model": None, "reasoning": None, "resolution": None},
-                "requested_triggers": [],
-                "completed_triggers": [],
-            },
-            "subcoordinators": {
-                f"subcoordinator-{index + 1}": {
-                    "id": f"subcoordinator-{index + 1}",
-                    "status": "unassigned",
-                    "task_ids": chunk,
-                    "thread_id": None,
-                    "host_id": None,
-                    "cursor": None,
-                    "dispatch_intent": None,
-                    "dispatch_receipt": None,
-                    "thread_receipt": None,
-                    "slot_limit": max(1, desired // max(1, len(shard_chunks))),
-                }
-                for index, chunk in enumerate(shard_chunks)
-            },
-            "counterpilot": {
-                "mode": counterpilot_mode,
-                "effective_mode": effective_counterpilot_mode,
-                "creation_policy": (
-                    "disabled"
-                    if effective_counterpilot_mode == "off"
-                    else "immediate"
-                    if effective_counterpilot_mode == "continuous"
-                    else "deferred"
-                ),
-                "status": counterpilot_initial_status(effective_counterpilot_mode),
-                "thread_id": None,
-                "host_id": None,
-                "cursor": None,
-                "dispatch_intent": None,
-                "dispatch_receipt": None,
-                "thread_receipt": None,
-                "requested": {"role": "counterpilot", "model": "unavailable", "reasoning": "unavailable"},
-                "resolved": {"model": None, "reasoning": None, "resolution": None},
-                "risk_waiver": counterpilot_risk_waiver,
-                "requested_triggers": [],
-                "completed_triggers": [],
-                "creation_triggers": [],
-                "trigger_history": [],
-            },
-            "secondary_counterpilot": {
-                "mode": counterpilot_mode,
-                "effective_mode": effective_counterpilot_mode,
-                "creation_policy": (
-                    "disabled"
-                    if effective_counterpilot_mode == "off"
-                    else "immediate"
-                    if effective_counterpilot_mode == "continuous"
-                    else "deferred"
-                ),
-                "status": counterpilot_initial_status(effective_counterpilot_mode),
-                "thread_id": None,
-                "host_id": None,
-                "cursor": None,
-                "dispatch_intent": None,
-                "dispatch_receipt": None,
-                "thread_receipt": None,
-                "requested": {"role": "counterpilot", "model": "unavailable", "reasoning": "unavailable"},
-                "resolved": {"model": None, "reasoning": None, "resolution": None},
-                "risk_waiver": counterpilot_risk_waiver,
-                "requested_triggers": [],
-                "completed_triggers": [],
-                "creation_triggers": [],
-                "trigger_history": [],
-            },
+            "primary_coordinator": primary,
+            "subcoordinators": subcoordinators,
         },
         "coordination": {
             "plan_revision": 0,
             "last_tick_at": None,
             "stop_boundary": plan.get("stop_boundary"),
+            "last_intervention_at": None,
         },
-        "defects": {},
-        "challenges": {},
         "completion_standard": deepcopy(plan["completion_standard"]),
         "tasks": tasks,
         "milestones": deepcopy(plan["milestones"]),
         "created_at": timestamp,
         "updated_at": timestamp,
-    }
-
-
-def event(
-    actor: str,
-    entity: str,
-    previous: str | None,
-    current: str | None,
-    reason: str,
-    evidence: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "timestamp": now_iso(),
-        "actor": actor,
-        "entity": entity,
-        "previous": previous,
-        "current": current,
-        "reason": reason,
-        "evidence": evidence or {},
     }

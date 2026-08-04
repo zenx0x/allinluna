@@ -35,7 +35,6 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int)
     parser.add_argument("--high-concurrency-review", choices=["accepted", "declined"])
     parser.add_argument("--decomposition-model")
-    parser.add_argument("--counterpilot", choices=["off", "auto", "risk-triggered", "milestone", "continuous"], default="off")
     parser.add_argument("--authorize-git-operations", action="store_true")
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
@@ -71,7 +70,6 @@ def main() -> int:
                     "verification": item["verification"],
                     "validation_level": item.get("validation_level", "focused"),
                     "external_side_effects": item.get("external_side_effects", []),
-                    "acceptance_required": item.get("acceptance_required", False),
                     "capability_bindings": item.get("capability_bindings", []),
                     "full_read_requirements": item.get("full_read_requirements", []),
                 }
@@ -104,7 +102,6 @@ def main() -> int:
                 "coordinator_product_implementation": "forbidden",
                 "owner_delegation": "top-level-task",
                 "owner_subagents": "allowed-bounded",
-                "counterpilot": args.counterpilot,
                 "coordination_strategy": "auto",
                 "shard_size": 8,
                 "high_concurrency_review": args.high_concurrency_review or "not-required",

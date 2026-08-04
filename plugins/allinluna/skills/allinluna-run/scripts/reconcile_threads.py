@@ -7,8 +7,8 @@ import argparse
 import json
 from pathlib import Path
 
-from dispatcher_lease import append_event_locked, state_lock
-from workflow_state import atomic_write_json, event, load_state, now_iso
+from dispatcher_lease import state_lock
+from workflow_state import atomic_write_json, load_state, now_iso
 from runtime_truth import assignment_conflicts, runtime_identity_errors
 
 
@@ -27,7 +27,6 @@ def main() -> int:
             if not isinstance(snapshots, list):
                 raise ValueError("snapshot must be a normalized array")
             changed = []
-            events = []
             for item in snapshots:
                 if not isinstance(item, dict):
                     raise ValueError("each snapshot item must be an object")
@@ -70,20 +69,6 @@ def main() -> int:
                     # the legal running -> completed transition.
                     pass
                 task["updated_at"] = now_iso()
-                events.append(
-                    event(
-                        actor="coordinator",
-                        entity=f"task:{task_id}",
-                        previous=previous,
-                        current=task["status"],
-                        reason="thread snapshot reconciled",
-                        evidence={
-                            "thread_status": status,
-                            "cursor": item.get("cursor"),
-                            "runtime_evidence": item.get("runtime_evidence"),
-                        },
-                    )
-                )
                 changed.append(task_id)
             for task_id, task in state["tasks"].items():
                 if task["status"] in {"running", "completed"}:
@@ -94,16 +79,6 @@ def main() -> int:
             if conflicts:
                 raise ValueError("; ".join(conflicts))
             atomic_write_json(run_dir / "run-state.json", state)
-            for item in events:
-                append_event_locked(
-                    run_dir,
-                    actor=item["actor"],
-                    entity=item["entity"],
-                    previous=item["previous"],
-                    current=item["current"],
-                    reason=item["reason"],
-                    evidence=item["evidence"],
-                )
             output = {
                 "ok": True,
                 "updated_tasks": changed,

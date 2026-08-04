@@ -20,19 +20,11 @@ from codex_app_adapter import (
     monitoring_action,
     owner_target,
     project_resolution_action,
-    send_message_action,
 )
 from dispatcher_lease import DispatcherLeaseError, dispatcher_session, make_owner_identity
 from render_control_plane_brief import render as render_control_brief
 from render_task_brief import render
-from workflow_state import (
-    append_event,
-    atomic_write_json,
-    counterpilot_trigger,
-    event,
-    load_state,
-    now_iso,
-)
+from workflow_state import atomic_write_json, load_state, now_iso
 
 
 def effective_slots(state: dict) -> int:
@@ -104,61 +96,6 @@ def _control_action(
     )
     if record_intents:
         child["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso(), lease=lease)
-    return action
-
-
-def counterpilot_creation_action(
-    state: dict,
-    run_dir: Path,
-    trigger: str | None,
-    write_briefs: bool,
-    record_intents: bool,
-    lease: dict | None,
-) -> dict:
-    counterpilot = state["control_plane"]["counterpilot"]
-    if counterpilot.get("dispatch_intent"):
-        return await_dispatch_receipt("counterpilot", counterpilot["dispatch_intent"], lease=lease)
-    resolved = counterpilot.get("resolved", {})
-    resolved_model = resolved.get("model")
-    if _unresolved(resolved_model):
-        return {
-            "kind": "resolve-control-plane-resources",
-            "role": "counterpilot",
-            "trigger": trigger,
-            "instruction": "resolve the CounterPilot model before creating the deferred task",
-        }
-    brief_path = run_dir / "briefs" / "counterpilot.md"
-    prompt = render_control_brief(state, "counterpilot")
-    if write_briefs:
-        brief_path.parent.mkdir(parents=True, exist_ok=True)
-        brief_path.write_text(prompt, encoding="utf-8")
-    action = create_thread_action(
-        kind="create-counterpilot",
-        entity_id=dispatch_id(state["run_id"], "counterpilot", epoch=(lease or {}).get("epoch")),
-        prompt=prompt,
-        target=control_target(state, "counterpilot"),
-        model=resolved_model,
-        thinking=resolved.get("reasoning"),
-        title=f"All in Luna counterpilot [{dispatch_id(state['run_id'], 'counterpilot', epoch=(lease or {}).get('epoch'))}]",
-        record_with="record_control_plane.py --role counterpilot",
-        metadata={
-            "role": "counterpilot",
-            "trigger": trigger,
-            "git_bootstrap_required": False,
-        },
-        task_id="counterpilot",
-        identity=dispatch_identity(
-            state,
-            task_id="counterpilot",
-            target=control_target(state, "counterpilot"),
-        ),
-        dispatcher_epoch=(lease or {}).get("epoch"),
-        state=state,
-    )
-    if trigger:
-        action["record_with"] += f" --trigger {trigger}"
-    if record_intents:
-        counterpilot["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso(), lease=lease)
     return action
 
 
@@ -307,31 +244,6 @@ def actions_for(
         slots = max(0, slots)
     dispatch = ready[:slots]
     actions: list[dict] = []
-
-    counterpilot = control["counterpilot"]
-    if coordinator_id == "primary":
-        trigger = counterpilot_trigger(state)
-        if trigger and counterpilot["status"] in {"deferred", "unassigned"}:
-            actions.append(
-                counterpilot_creation_action(
-                    state,
-                    run_dir,
-                    trigger if counterpilot["status"] == "deferred" else None,
-                    write_briefs,
-                    record_intents,
-                    lease,
-                )
-            )
-        elif trigger and counterpilot["status"] == "running":
-            message = send_message_action(
-                state,
-                thread_id=counterpilot["thread_id"],
-                host_id=counterpilot.get("host_id"),
-                prompt=f"Run one consolidated CounterPilot pass for trigger: {trigger}",
-                record_with="record_counterpilot_trigger.py --status requested",
-            )
-            message.update({"kind": "request-counterpilot-pass", "trigger": trigger})
-            actions.append(message)
 
     if coordinator_id == "primary":
         for child_id, child in control["subcoordinators"].items():
@@ -496,41 +408,6 @@ def main() -> int:
                 state["coordination"]["last_tick_at"] = now_iso()
                 state["updated_at"] = state["coordination"]["last_tick_at"]
                 atomic_write_json(run_dir / "run-state.json", state)
-                append_event(
-                    run_dir,
-                    event(
-                        actor="coordinator",
-                        entity=f"run:{state['run_id']}",
-                        previous=previous,
-                        current=state["coordination"]["last_tick_at"],
-                        reason="coordinator control tick",
-                        evidence={
-                            "actions": [item["kind"] for item in output["actions"]],
-                            "dispatch_ids": [
-                                item.get("dispatch_id")
-                                for item in output["actions"]
-                                if item.get("dispatch_id")
-                            ],
-                            "dispatcher": session.evidence(),
-                        },
-                    ),
-                )
-            for action in output["actions"]:
-                if action.get("duplicate_resolution"):
-                    append_event(
-                        run_dir,
-                        event(
-                            actor="coordinator",
-                            entity=f"dispatch:{action.get('dispatch_id') or action.get('entity_id')}",
-                            previous="dispatch-intent",
-                            current=action["duplicate_resolution"]["decision"],
-                            reason=action["duplicate_resolution"]["reason"],
-                            evidence={
-                                "duplicate": action["duplicate_resolution"],
-                                "dispatcher": session.evidence(),
-                            },
-                        ),
-                    )
         print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
         return 0
     except (OSError, KeyError, ValueError, DispatcherLeaseError) as exc:

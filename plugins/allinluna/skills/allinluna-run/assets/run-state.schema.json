@@ -1,37 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zenx0x/allinluna/schemas/run-state.schema.json",
-  "title": "All in Luna Run State",
+  "title": "All in Luna lean run state",
+  "description": "One atomic recovery snapshot; dispatch intents and receipts prevent duplicate work.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version",
-    "run_id",
-    "plan_id",
-    "plan_hash",
-    "execution_style",
-    "risk_level",
-    "topology",
-    "acceptance",
-    "run_dir",
-    "status",
-    "profile",
-    "goal_authorized",
-    "capabilities",
-    "resource_policy",
-    "usage",
-    "repository",
-    "authorizations",
-    "orchestration",
-    "control_plane",
-    "coordination",
-    "defects",
-    "challenges",
-    "completion_standard",
-    "tasks",
-    "milestones",
-    "created_at",
-    "updated_at"
+    "schema_version", "run_id", "plan_id", "plan_hash", "execution_style", "risk_level",
+    "topology", "run_dir", "status", "profile", "goal_authorized", "capabilities",
+    "resource_policy", "workflow_preset", "usage", "repository", "authorizations",
+    "orchestration", "control_plane", "coordination", "completion_standard", "tasks",
+    "milestones", "created_at", "updated_at"
   ],
   "properties": {
     "schema_version": { "const": "2.0" },
@@ -40,99 +19,29 @@
     "plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "execution_style": { "enum": ["managed", "parallel-only"] },
     "risk_level": { "enum": ["low", "medium", "high", "critical"] },
-    "topology": {
-      "type": "object",
-      "required": ["policy", "requested", "resolved"],
-      "properties": {
-        "policy": { "const": "risk-adaptive" },
-        "requested": { "type": "object" },
-        "resolved": { "type": "object" }
-      }
-    },
-    "acceptance": {
-      "type": "object",
-      "required": ["manifest_id", "schema_version", "risk_level", "read_only", "requested", "resolved", "actual"],
-      "properties": {
-        "manifest_id": { "type": "string", "minLength": 1 },
-        "schema_version": { "const": "1.0" },
-        "risk_level": { "enum": ["low", "medium", "high", "critical"] },
-        "read_only": { "const": true },
-        "requested": { "type": "object" },
-        "resolved": { "type": "object" },
-        "actual": { "type": "object" }
-      }
-    },
+    "topology": { "$ref": "#/$defs/topology" },
     "run_dir": { "type": "string", "minLength": 1 },
     "status": { "enum": ["planned", "running", "paused", "blocked", "completed", "failed"] },
-    "profile": { "enum": ["premium", "balanced", "economy", "speed", "fast", "ultra-fast", "all-luna", "mad-luna", "custom"] },
+    "profile": { "type": "string", "minLength": 1 },
     "goal_authorized": { "type": "boolean" },
-    "capabilities": {
-      "type": "object",
-      "required": ["requested_delegation", "actual_delegation", "host_concurrency", "fallback_reason", "thread_tools"],
-      "properties": {
-        "requested_delegation": { "enum": ["auto", "top-level-task", "subagent", "sequential"] },
-        "actual_delegation": { "enum": ["unavailable", "top-level-task", "subagent", "sequential"] },
-        "host_concurrency": { "type": ["integer", "string"] },
-        "fallback_reason": { "type": ["string", "null"] },
-        "thread_tools": { "type": "array", "items": { "type": "string" } },
-        "requested": { "type": "array" },
-        "resolved": { "type": "array" },
-        "actual": { "type": "array" },
-        "discovery": { "type": "array" },
-        "usage_evidence": { "type": "array", "items": { "type": "string" } }
-      }
-    },
+    "capabilities": { "type": "object" },
     "resource_policy": { "type": "object" },
     "workflow_preset": { "type": "object" },
-    "usage": {
-      "type": "object",
-      "required": ["tokens", "credits", "elapsed_seconds", "currency"],
-      "properties": {
-        "tokens": { "type": ["integer", "string"] },
-        "credits": { "type": ["number", "string"] },
-        "elapsed_seconds": { "type": ["number", "string"] },
-        "currency": { "type": ["number", "string"] }
-      }
-    },
+    "usage": { "type": "object" },
     "repository": { "type": "object" },
     "authorizations": { "type": "object" },
-    "orchestration": {
-      "type": "object",
-      "required": ["sponsor_role", "coordinator_role", "coordinator_product_implementation", "owner_delegation", "owner_subagents", "counterpilot", "coordination_strategy", "shard_size", "high_concurrency_review", "decomposition_model"],
-      "properties": {
-        "sponsor_role": { "const": "user-conversation" },
-        "coordinator_role": { "const": "separate-top-level-task" },
-        "coordinator_product_implementation": { "const": "forbidden" },
-        "owner_delegation": { "const": "top-level-task" },
-        "owner_subagents": { "const": "allowed-bounded" },
-        "counterpilot": { "enum": ["off", "auto", "risk-triggered", "milestone", "continuous"] },
-        "counterpilot_risk_waiver": {
-          "type": ["object", "null"],
-          "additionalProperties": false,
-          "required": ["acknowledged", "reason"],
-          "properties": {
-            "acknowledged": { "const": true },
-            "reason": { "type": "string", "minLength": 1 }
-          }
-        },
-        "coordination_strategy": { "type": "string" },
-        "shard_size": { "type": "integer" },
-        "high_concurrency_review": { "type": "string" },
-        "decomposition_model": { "type": ["string", "null"] }
-      }
-    },
+    "orchestration": { "$ref": "#/$defs/orchestration" },
     "control_plane": { "type": "object" },
     "coordination": {
       "type": "object",
-      "required": ["plan_revision", "last_tick_at", "stop_boundary"],
+      "required": ["plan_revision", "last_tick_at", "stop_boundary", "last_intervention_at"],
       "properties": {
         "plan_revision": { "type": "integer", "minimum": 0 },
         "last_tick_at": { "type": ["string", "null"] },
-        "stop_boundary": { "type": ["string", "null"] }
+        "stop_boundary": { "type": ["string", "null"] },
+        "last_intervention_at": { "type": ["string", "null"] }
       }
     },
-    "defects": { "type": "object" },
-    "challenges": { "type": "object" },
     "completion_standard": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "tasks": {
       "type": "object",
@@ -144,32 +53,41 @@
     "updated_at": { "type": "string", "format": "date-time" }
   },
   "$defs": {
+    "topology": {
+      "type": "object",
+      "required": ["policy", "requested", "resolved"],
+      "properties": {
+        "policy": { "const": "risk-adaptive" },
+        "requested": { "type": "object" },
+        "resolved": { "type": "object" }
+      }
+    },
+    "orchestration": {
+      "type": "object",
+      "required": [
+        "sponsor_role", "coordinator_role", "coordinator_product_implementation",
+        "owner_delegation", "owner_subagents", "coordination_strategy", "shard_size",
+        "high_concurrency_review", "decomposition_model"
+      ],
+      "properties": {
+        "sponsor_role": { "const": "user-conversation" },
+        "coordinator_role": { "const": "separate-top-level-task" },
+        "coordinator_product_implementation": { "const": "forbidden" },
+        "owner_delegation": { "const": "top-level-task" },
+        "owner_subagents": { "const": "allowed-bounded" },
+        "coordination_strategy": { "type": "string" },
+        "shard_size": { "type": "integer", "minimum": 1 },
+        "high_concurrency_review": { "type": "string" },
+        "decomposition_model": { "type": ["string", "null"] }
+      }
+    },
     "taskState": {
       "type": "object",
       "required": [
-        "id",
-        "title",
-        "description",
-        "phase",
-        "role",
-        "resource_class",
-        "status",
-        "dependencies",
-        "ownership",
-        "external_side_effects",
-        "acceptance_required",
-        "deliverables",
-        "verification",
-        "validation_level",
-        "capability_bindings",
-        "full_read_requirements",
-        "capability_usage",
-        "requested",
-        "actual",
-        "assignment",
-        "evidence",
-        "created_at",
-        "updated_at"
+        "id", "title", "description", "phase", "role", "resource_class", "status",
+        "dependencies", "ownership", "external_side_effects", "deliverables", "verification",
+        "validation_level", "capability_bindings", "full_read_requirements", "capability_usage",
+        "requested", "actual", "assignment", "evidence", "created_at", "updated_at"
       ],
       "properties": {
         "id": { "type": "string" },
@@ -182,54 +100,42 @@
         "dependencies": { "type": "array", "items": { "type": "string" } },
         "ownership": { "type": "object" },
         "external_side_effects": { "type": "array" },
-        "acceptance_required": { "type": "boolean" },
         "deliverables": { "type": "array", "items": { "type": "string" } },
         "verification": { "type": "array", "items": { "type": "string" } },
-        "validation_level": { "enum": ["focused", "cross-lane", "milestone", "full"] },
+        "validation_level": { "type": "string" },
         "capability_bindings": { "type": "array" },
         "full_read_requirements": { "type": "array", "items": { "type": "string" } },
         "capability_usage": { "type": "array", "items": { "$ref": "#/$defs/capabilityUsage" } },
-        "requested": { "$ref": "#/$defs/assignmentRequest" },
-        "actual": { "$ref": "#/$defs/assignmentActual" },
-        "assignment": {
-          "type": "object",
-          "properties": {
-            "thread_id": { "type": ["string", "null"] },
-            "host_id": { "type": ["string", "null"] },
-            "cursor": { "type": ["string", "null"] },
-            "last_activity_at": { "type": ["string", "null"] },
-            "worktree": { "type": ["string", "null"] },
-            "branch": { "type": ["string", "null"] },
-            "base_commit": { "type": ["string", "null"] },
-            "runtime_receipt": { "type": ["string", "null"] },
-            "requested": { "type": "object" },
-            "resolved": { "type": "object" },
-            "actual": { "type": "object" }
-          }
-        },
+        "requested": { "type": "object" },
+        "actual": { "type": "object" },
+        "assignment": { "$ref": "#/$defs/assignment" },
         "evidence": { "type": "object" },
         "created_at": { "type": "string", "format": "date-time" },
         "updated_at": { "type": "string", "format": "date-time" }
       }
     },
-    "assignmentRequest": {
+    "assignment": {
       "type": "object",
-      "required": ["role", "model", "reasoning", "delegation"],
+      "required": ["thread_id", "host_id", "cursor", "last_activity_at", "attempt", "worktree", "branch", "base_commit", "runtime_receipt", "coordinator_id"],
       "properties": {
-        "role": { "type": "string" },
-        "model": { "type": "string" },
-        "reasoning": { "type": "string" },
-        "delegation": { "type": "string" }
+        "thread_id": { "type": ["string", "null"] },
+        "host_id": { "type": ["string", "null"] },
+        "cursor": { "type": ["string", "null"] },
+        "last_activity_at": { "type": ["string", "null"] },
+        "last_output_at": { "type": ["string", "null"] },
+        "attempt": { "type": "integer", "minimum": 0 },
+        "resolved_model": { "type": ["string", "null"] },
+        "resolved_reasoning": { "type": ["string", "null"] },
+        "resource_resolution": { "type": ["string", "null"] },
+        "worktree": { "type": ["string", "null"] },
+        "branch": { "type": ["string", "null"] },
+        "base_commit": { "type": ["string", "null"] },
+        "runtime_receipt": { "type": ["string", "null"] },
+        "coordinator_id": { "type": "string" },
+        "dispatch_intent": { "type": ["object", "null"] },
+        "dispatch_receipt": { "type": ["object", "null"] },
+        "thread_receipt": { "type": ["object", "null"] }
       }
-    },
-    "assignmentActual": {
-      "type": "object",
-      "required": ["model", "reasoning", "delegation", "resolution"],
-      "properties": {
-        "model": { "type": "string" },
-        "reasoning": { "type": "string" },
-        "delegation": { "enum": ["top-level-task", "subagent", "sequential", "unavailable"] },
-        "resolution": { "enum": ["exact", "fallback", "unresolved", "unavailable"] }
     },
     "capabilityUsage": {
       "type": "object",
@@ -238,12 +144,11 @@
         "requested": { "type": ["string", "null"] },
         "resolved": { "type": ["string", "null"] },
         "actual": { "type": ["string", "null"] },
-        "status": { "enum": ["resolved", "fallback", "unavailable", "permission-denied", "permission-unknown", "not-applicable"] },
+        "status": { "type": "string" },
         "fallback": { "type": ["string", "null"] },
         "usage_evidence": { "type": "array", "items": { "type": "string" } },
-        "availability": { "enum": ["available", "unavailable", "unknown"] },
-        "live_permission": { "enum": ["granted", "denied", "unknown"] }
-      }
+        "availability": { "type": "string" },
+        "live_permission": { "type": "string" }
       }
     }
   }

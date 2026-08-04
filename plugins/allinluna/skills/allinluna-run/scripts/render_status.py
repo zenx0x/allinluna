@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a compact human status view from All in Luna run state."""
+"""Render a compact human status view from the lean All in Luna run state."""
 
 from __future__ import annotations
 
@@ -11,9 +11,48 @@ from pathlib import Path
 from workflow_state import load_state
 
 
-def render_markdown(state: dict) -> str:
+def _identity(value: dict) -> str:
+    return str(
+        value.get("thread_id")
+        or value.get("host_id")
+        or value.get("status")
+        or "-"
+    )
+
+
+def _summary(state: dict) -> dict:
     counts = Counter(task["status"] for task in state["tasks"].values())
-    counterpilot = state["control_plane"]["counterpilot"]
+    return {
+        "run_id": state["run_id"],
+        "status": state["status"],
+        "profile": state["profile"],
+        "execution_style": state["execution_style"],
+        "risk_level": state["risk_level"],
+        "requested_delegation": state["capabilities"].get("requested_delegation"),
+        "actual_delegation": state["capabilities"].get("actual_delegation"),
+        "host_concurrency": state["capabilities"].get("host_concurrency"),
+        "desired_concurrency": state["resource_policy"].get("concurrency", {}).get("desired"),
+        "primary_coordinator": _identity(state["control_plane"].get("primary_coordinator", {})),
+        "subcoordinators": len(state["control_plane"].get("subcoordinators", [])),
+        "plan_revision": state.get("coordination", {}).get("plan_revision", 0),
+        "stop_boundary": state.get("coordination", {}).get("stop_boundary"),
+        "last_intervention_at": state.get("coordination", {}).get("last_intervention_at"),
+        "budget": state["resource_policy"].get("budget", {}).get("metric", "none"),
+        "usage": state.get("usage", {}),
+        "task_counts": dict(counts),
+        "ready_tasks": [
+            task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"
+        ],
+        "blockers": {
+            task_id: list(task.get("evidence", {}).get("blockers", []))
+            for task_id, task in state["tasks"].items()
+            if task.get("evidence", {}).get("blockers")
+        },
+    }
+
+
+def render_markdown(state: dict) -> str:
+    summary = _summary(state)
     lines = [
         f"# All in Luna run: {state['run_id']}",
         "",
@@ -22,70 +61,43 @@ def render_markdown(state: dict) -> str:
         f"- Execution style: `{state['execution_style']}`",
         f"- Risk level: `{state['risk_level']}`",
         f"- Goal authorized: `{str(state['goal_authorized']).lower()}`",
-        f"- Requested delegation: `{state['capabilities']['requested_delegation']}`",
-        f"- Actual delegation: `{state['capabilities']['actual_delegation']}`",
-        f"- Host concurrency: `{state['capabilities']['host_concurrency']}`",
-        f"- Desired concurrency: `{state['resource_policy']['concurrency']['desired']}`",
-        f"- Primary coordinator: `{state['control_plane']['primary_coordinator']['thread_id'] or state['control_plane']['primary_coordinator']['status']}`",
-        f"- CounterPilot: requested=`{counterpilot.get('mode')}`, effective=`{counterpilot.get('effective_mode')}`, status=`{counterpilot.get('thread_id') or counterpilot.get('status')}`",
-        f"- Child coordinators: `{len(state['control_plane']['subcoordinators'])}`",
-        f"- Plan revision: `{state.get('coordination', {}).get('plan_revision', 0)}`",
-        f"- Stop boundary: `{state.get('coordination', {}).get('stop_boundary')}`",
-        f"- Budget: `{state['resource_policy'].get('budget', {}).get('metric', 'none')}`",
-        "- Usage: "
-        + ", ".join(f"{name}={value}" for name, value in state["usage"].items()),
-        "- Task counts: " + ", ".join(f"{name}={count}" for name, count in sorted(counts.items())),
+        f"- Requested delegation: `{summary['requested_delegation']}`",
+        f"- Actual delegation: `{summary['actual_delegation']}`",
+        f"- Host concurrency: `{summary['host_concurrency']}`",
+        f"- Desired concurrency: `{summary['desired_concurrency']}`",
+        f"- Primary coordinator: `{summary['primary_coordinator']}`",
+        f"- Child coordinators: `{summary['subcoordinators']}`",
+        f"- Plan revision: `{summary['plan_revision']}`",
+        f"- Stop boundary: `{summary['stop_boundary']}`",
+        f"- Budget: `{summary['budget']}`",
+        "- Usage: " + ", ".join(f"{name}={value}" for name, value in state.get("usage", {}).items()),
+        "- Task counts: " + ", ".join(f"{name}={count}" for name, count in sorted(summary["task_counts"].items())),
         "",
         "| Task | Phase | Status | Requested model | Actual model | Assignment |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-    if counterpilot.get("risk_waiver"):
-        lines.insert(
-            10,
-            f"- CounterPilot risk waiver: acknowledged — {counterpilot['risk_waiver']['reason']}",
-        )
     for task_id, task in state["tasks"].items():
-        assignment = task["assignment"].get("thread_id") or "-"
+        assignment = task.get("assignment", {})
         lines.append(
             "| "
             + " | ".join(
                 [
                     task_id,
-                    str(task["phase"]),
-                    str(task["status"]),
-                    str(task["requested"]["model"]),
-                    str(task["actual"]["model"]),
-                    str(assignment),
+                    str(task.get("phase", "-")),
+                    str(task.get("status", "-")),
+                    str(task.get("requested", {}).get("model", "-")),
+                    str(task.get("actual", {}).get("model", "-")),
+                    str(assignment.get("thread_id") or assignment.get("host_id") or "-"),
                 ]
             )
             + " |"
         )
-    blockers = [
-        (task_id, blocker)
-        for task_id, task in state["tasks"].items()
-        for blocker in task["evidence"].get("blockers", [])
-    ]
-    if blockers:
+    if summary["blockers"]:
         lines.extend(["", "## Blockers", ""])
-        lines.extend(f"- `{task_id}`: {blocker}" for task_id, blocker in blockers)
-    open_defects = [
-        defect for defect in state.get("defects", {}).values() if defect.get("status") != "resolved"
-    ]
-    if open_defects:
-        lines.extend(["", "## Open defects", ""])
         lines.extend(
-            f"- `{item['id']}` → `{item['owner_task']}`: {item['summary']}"
-            for item in open_defects
-        )
-    open_challenges = [
-        challenge for challenge in state.get("challenges", {}).values()
-        if challenge.get("status") == "open"
-    ]
-    if open_challenges:
-        lines.extend(["", "## Open CounterPilot challenges", ""])
-        lines.extend(
-            f"- `{item['challenge_id']}` [{item['severity']}] → `{item['target']}`: {item['question']}"
-            for item in open_challenges
+            f"- `{task_id}`: {blocker}"
+            for task_id, blockers in summary["blockers"].items()
+            for blocker in blockers
         )
     return "\n".join(lines) + "\n"
 
@@ -100,45 +112,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     _, state = load_state(args.run)
-    counterpilot = state["control_plane"]["counterpilot"]
-    if args.json:
-        counts = Counter(task["status"] for task in state["tasks"].values())
-        print(
-            json.dumps(
-                {
-                    "run_id": state["run_id"],
-                    "status": state["status"],
-                    "profile": state["profile"],
-                    "execution_style": state["execution_style"],
-                    "risk_level": state["risk_level"],
-                    "counterpilot": {
-                        "mode": counterpilot.get("mode"),
-                        "effective_mode": counterpilot.get("effective_mode"),
-                        "status": counterpilot.get("thread_id") or counterpilot.get("status"),
-                        "risk_waiver": counterpilot.get("risk_waiver"),
-                    },
-                    "task_counts": dict(counts),
-                    "ready_tasks": [
-                        task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"
-                    ],
-                    "desired_concurrency": state["resource_policy"]["concurrency"]["desired"],
-                    "plan_revision": state.get("coordination", {}).get("plan_revision", 0),
-                    "open_defects": [
-                        defect_id
-                        for defect_id, defect in state.get("defects", {}).items()
-                        if defect.get("status") != "resolved"
-                    ],
-                    "open_challenges": [
-                        challenge_id
-                        for challenge_id, challenge in state.get("challenges", {}).items()
-                        if challenge.get("status") == "open"
-                    ],
-                },
-                ensure_ascii=False,
-            )
-        )
-    else:
-        print(render_markdown(state), end="")
+    print(json.dumps(_summary(state), ensure_ascii=False) if args.json else render_markdown(state), end="" if args.json else "")
     return 0
 
 

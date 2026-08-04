@@ -20,10 +20,8 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from resolve_profile import DEFAULT_PROFILES, catalog_surface, read_json, resolve  # noqa: E402
 from validate_plan import validate as validate_plan  # noqa: E402
 from workflow_state import (  # noqa: E402
-    append_event,
     atomic_write_json,
     build_initial_state,
-    event,
     role_for_task,
 )
 from workflow_presets import deep_merge, normalize_preset, resolve_preset  # noqa: E402
@@ -143,8 +141,6 @@ def main(argv: list[str] | None = None) -> int:
         if profile_name == "custom":
             required_roles = {role_for_task(task) for task in plan["tasks"]}
             required_roles.add("coordinator")
-            if plan["orchestration"].get("counterpilot") != "off":
-                required_roles.add("counterpilot")
             missing_roles = sorted(required_roles - resolution["policy"].get("roles", {}).keys())
             if missing_roles:
                 raise ValueError(
@@ -191,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             task["assignment"]["resolved_model"] = resolved.get("actual_model")
             task["assignment"]["resolved_reasoning"] = resolved.get("actual_reasoning")
             task["assignment"]["resource_resolution"] = resolved.get("resolution")
-        for control_role, key in (("coordinator", "primary_coordinator"), ("counterpilot", "counterpilot")):
+        for control_role, key in (("coordinator", "primary_coordinator"),):
             role_policy = resolution["policy"].get("roles", {}).get(control_role, {})
             resolved = resolution["resolved_roles"].get(control_role, {})
             state["control_plane"][key]["requested"].update(
@@ -207,45 +203,12 @@ def main(argv: list[str] | None = None) -> int:
                     "resolution": resolved.get("resolution"),
                 }
             )
-        counterpilot_policy = resolution["policy"].get("roles", {}).get("counterpilot", {})
-        if (
-            counterpilot_policy.get("duplicate_high_risk_review")
-            and plan["risk_level"] in {"high", "critical"}
-            and state["control_plane"]["counterpilot"].get("effective_mode") != "off"
-        ):
-            secondary = state["control_plane"]["secondary_counterpilot"]
-            secondary["status"] = (
-                "unassigned"
-                if state["control_plane"]["counterpilot"].get("effective_mode") == "continuous"
-                else "deferred"
-            )
-            secondary["requested"] = dict(state["control_plane"]["counterpilot"]["requested"])
-            secondary["resolved"] = dict(state["control_plane"]["counterpilot"]["resolved"])
         if catalog is not None:
             state["capabilities"]["host_concurrency"] = resolution["concurrency"]["host_cap"]
             state["capabilities"]["thread_tools"] = catalog.get("thread_tools", [])
         state["capabilities"]["fallback_reason"] = delegation_fallback_reason
         atomic_write_json(run_dir / "plan.json", plan)
         atomic_write_json(run_dir / "run-state.json", state)
-        append_event(
-            run_dir,
-            event(
-                actor="allinluna",
-                entity=f"run:{run_id}",
-                previous=None,
-                current="planned",
-                reason="run initialized from validated plan",
-                evidence={
-                    "plan_hash": state["plan_hash"],
-                    "profile": profile_name,
-                    "runtime_tier": runtime_tier,
-                    "runtime_tier_requested": args.runtime_tier,
-                    "delegation_fallback_reason": delegation_fallback_reason,
-                    "catalog": str(args.catalog.resolve()) if args.catalog else None,
-                    "resource_warnings": resolution["warnings"],
-                },
-            ),
-        )
         output = {
             "ok": True,
             "run_id": run_id,

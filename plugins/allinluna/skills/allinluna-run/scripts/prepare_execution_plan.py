@@ -83,10 +83,6 @@ def main(argv: list[str] | None = None) -> int:
             "coordinator_product_implementation": "forbidden",
             "owner_delegation": "top-level-task",
             "owner_subagents": "allowed-bounded",
-            "counterpilot": previous_orchestration.get(
-                "counterpilot",
-                "risk-triggered" if revised["risk_level"] in {"high", "critical"} else "off",
-            ),
             "coordination_strategy": previous_orchestration.get("coordination_strategy", "auto"),
             "shard_size": previous_orchestration.get("shard_size", 8),
             "high_concurrency_review": review if desired >= 16 else "not-required",
@@ -102,7 +98,6 @@ def main(argv: list[str] | None = None) -> int:
             if "validation_level" not in task:
                 task["validation_level"] = {
                     "integration": "cross-lane",
-                    "acceptance": "milestone",
                 }.get(task.get("resource_class"), "focused")
                 changed.append(f"tasks.{task.get('id')}.validation_level")
 
@@ -110,14 +105,8 @@ def main(argv: list[str] | None = None) -> int:
         integration_tasks = [
             task for task in tasks if task.get("resource_class") == "integration"
         ]
-        acceptance_tasks = [
-            task for task in tasks if task.get("resource_class") == "acceptance"
-        ]
         require_integration = revised["execution_style"] == "managed" and revised["risk_level"] in {
             "medium", "high", "critical"
-        }
-        require_acceptance = revised["execution_style"] == "managed" and revised["risk_level"] in {
-            "high", "critical"
         }
         if require_integration and not integration_tasks:
             existing_ids = {task.get("id") for task in tasks}
@@ -148,7 +137,6 @@ def main(argv: list[str] | None = None) -> int:
                 "verification": ["Verify owner evidence and run cross-lane checks"],
                 "validation_level": "cross-lane",
                 "external_side_effects": [],
-                "acceptance_required": True,
                 "capability_bindings": [],
                 "full_read_requirements": [],
             }
@@ -156,42 +144,6 @@ def main(argv: list[str] | None = None) -> int:
             integration_tasks = [integration]
             changed.append("tasks.AIL-INTEGRATION")
         integration_ids = [task["id"] for task in integration_tasks]
-        if require_acceptance and not acceptance_tasks:
-            existing_ids = {task.get("id") for task in tasks}
-            acceptance_id = "AIL-ACCEPTANCE"
-            counter = 2
-            while acceptance_id in existing_ids:
-                acceptance_id = f"AIL-ACCEPTANCE-{counter}"
-                counter += 1
-            acceptance = {
-                "id": acceptance_id,
-                "title": "All in Luna independent acceptance",
-                "phase": "acceptance",
-                "description": "Independently verify the integrated completion standard without implementation writes.",
-                "dependencies": integration_ids,
-                "ownership": {
-                    "paths": [],
-                    "non_file_scope": "Read-only independent milestone acceptance",
-                    "exclusive": False,
-                },
-                "role": "acceptance-owner",
-                "resource_class": "acceptance",
-                "deliverables": ["Evidence-backed PASS, FAIL, or BLOCKED result"],
-                "verification": ["Exercise the completion standard and failure/recovery paths"],
-                "validation_level": "milestone",
-                "external_side_effects": [],
-                "acceptance_required": False,
-                "capability_bindings": [],
-                "full_read_requirements": [],
-            }
-            tasks.append(acceptance)
-            acceptance_tasks = [acceptance]
-            changed.append(f"tasks.{acceptance_id}")
-        for acceptance in acceptance_tasks:
-            for integration_id in integration_ids:
-                if integration_id not in acceptance["dependencies"]:
-                    acceptance["dependencies"].append(integration_id)
-                    changed.append(f"tasks.{acceptance['id']}.dependencies")
 
         if args.authorize_implementation_writes:
             revised["authorizations"]["implementation_writes"] = True

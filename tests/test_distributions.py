@@ -148,6 +148,34 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("docs/first-use-protocol.md", source_readmes["allinluna"][0])
         self.assertIn("first-use protocol", source_readmes["research-routes"][1])
 
+    def test_short_entries_route_deep_policy_on_demand(self) -> None:
+        run_entry = (ROOT / "plugins/allinluna/skills/allinluna-run/SKILL.md").read_text(encoding="utf-8")
+        plan_entry = (ROOT / "plugins/allinluna/skills/allinluna-plan/SKILL.md").read_text(encoding="utf-8")
+        self.assertLessEqual(len(run_entry.splitlines()), 100)
+        self.assertLessEqual(len(plan_entry.splitlines()), 100)
+        self.assertIn("references/user-flow.md", run_entry)
+        self.assertIn("references/user-flow.md", plan_entry)
+        self.assertNotIn("bootstrap_control_plane.py", run_entry)
+        self.assertFalse((ROOT / "plugins/allinluna/skills/allinluna-run/assets/task-brief-template.md").exists())
+
+    def test_both_distributions_publish_one_card_modes_and_user_promises(self) -> None:
+        readmes = (
+            ROOT / "README.md",
+            ROOT / "README.en.md",
+            ROOT / "distributions/overlays/research-routes/README.md",
+            ROOT / "distributions/overlays/research-routes/README.en.md",
+        )
+        for path in readmes:
+            content = path.read_text(encoding="utf-8")
+            for marker in ("quick", "standard", "full", "fast", "ultra-fast", "all-luna", "skills/plugins/MCP"):
+                self.assertIn(marker, content, f"{path} lost user-flow marker {marker}")
+            if path.name == "README.md":
+                self.assertIn("一次资源卡", content)
+                self.assertIn("不会默认多层治理、不会频繁打断、不会每次 real canary", content)
+            else:
+                self.assertIn("one resource confirmation card", content)
+                self.assertIn("does not default to multi-layer governance", content)
+
     def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "dist"

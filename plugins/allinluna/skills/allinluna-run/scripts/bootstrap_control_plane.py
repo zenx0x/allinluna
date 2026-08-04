@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Sponsor actions for independent Coordinator and CounterPilot tasks."""
+"""Generate the one real sidebar action for the independent Coordinator."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from codex_app_adapter import (
 )
 from dispatcher_lease import DispatcherLeaseError, dispatcher_session, lease_status, make_owner_identity
 from render_control_plane_brief import render
-from workflow_state import append_event, atomic_write_json, event, load_state, now_iso
+from workflow_state import atomic_write_json, load_state, now_iso
 
 
 def _is_unresolved(model: object) -> bool:
@@ -121,44 +121,9 @@ def actions_for(
     if primary_action:
         actions.append(primary_action)
 
-    counterpilot = state["control_plane"]["counterpilot"]
-    counterpilot_action = _action_for_role(
-        state,
-        counterpilot,
-        role="counterpilot",
-        kind="create-counterpilot",
-        prompt=render(state, "counterpilot"),
-        write_briefs=write_briefs,
-        brief_path=briefs / "counterpilot.md",
-        record_intents=record_intents,
-        lease=lease,
-    )
-    if counterpilot_action:
-        actions.append(counterpilot_action)
-
-    secondary = state["control_plane"].get("secondary_counterpilot", {})
-    if secondary.get("status") == "unassigned":
-        secondary_action = _action_for_role(
-            state,
-            secondary,
-            role="secondary-counterpilot",
-            kind="create-secondary-counterpilot",
-            prompt=render(state, "counterpilot") + "\nProvide a genuinely independent second view.\n",
-            write_briefs=write_briefs,
-            brief_path=briefs / "counterpilot-secondary.md",
-            record_intents=record_intents,
-            lease=lease,
-        )
-        if secondary_action:
-            actions.append(secondary_action)
     return {
         "ok": True,
         "sponsor_must_not_implement": True,
-        "counterpilot": {
-            "mode": state["control_plane"]["counterpilot"].get("mode", "off"),
-            "effective_mode": state["control_plane"]["counterpilot"].get("effective_mode", "off"),
-            "status": state["control_plane"]["counterpilot"].get("status", "disabled"),
-        },
         "actions": actions,
         "host_create_tool_declared": CREATE_THREAD_TOOL in state["capabilities"].get("thread_tools", []),
         "dispatcher_lease": lease,
@@ -223,36 +188,6 @@ def main() -> int:
             if emitted and not args.no_record:
                 state["updated_at"] = now_iso()
                 atomic_write_json(run_dir / "run-state.json", state)
-                append_event(
-                    run_dir,
-                    event(
-                        actor="sponsor",
-                        entity=f"run:{state['run_id']}",
-                        previous=None,
-                        current="dispatch-intent-emitted",
-                        reason="control-plane create_thread actions emitted",
-                        evidence={
-                            "dispatch_ids": emitted,
-                            "dispatcher": session.evidence(),
-                        },
-                    ),
-                )
-            for action in output["actions"]:
-                if action.get("duplicate_resolution"):
-                    append_event(
-                        run_dir,
-                        event(
-                            actor="sponsor",
-                            entity=f"dispatch:{action.get('dispatch_id') or action.get('entity_id')}",
-                            previous="dispatch-intent",
-                            current=action["duplicate_resolution"]["decision"],
-                            reason=action["duplicate_resolution"]["reason"],
-                            evidence={
-                                "duplicate": action["duplicate_resolution"],
-                                "dispatcher": session.evidence(),
-                            },
-                        ),
-                    )
         print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
         return 0
     except (OSError, KeyError, ValueError, DispatcherLeaseError) as exc:

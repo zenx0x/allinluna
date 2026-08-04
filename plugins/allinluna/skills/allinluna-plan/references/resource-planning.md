@@ -1,73 +1,52 @@
 # Resource planning
 
-## Separate the controls
-
-Do not collapse these into a single “quality” setting:
+Keep these controls separate:
 
 | Control | Governs |
 | --- | --- |
+| Delivery mode | `quick`, `standard`, or risk-reserved `full` topology |
 | Model | Capability family and runtime availability |
 | Reasoning | Deliberation depth for that role |
-| Delegation | Current task, subagent, or user-owned top-level task |
-| Concurrency | Simultaneous active owners within host and file limits |
+| Delegation | Current task, bounded subagent, or user-owned top-level task |
+| Concurrency | Simultaneous ready Owners within host and file limits |
 | Budget | Token, credit, time, money, or user-defined ceiling |
 
-Unknown telemetry is `unavailable`; do not estimate actual cost from model names alone.
+The delivery-mode definitions are canonical in
+[`allinluna-run/references/user-flow.md`](../../allinluna-run/references/user-flow.md).
+The one resource card records the selected mode and any retained profile such
+as `fast`, `ultra-fast`, or `all-luna`; Run must not ask for the same choice
+again.
 
-## Hierarchical delegation default
+## Delegation and lanes
 
-The user conversation is the Sponsor and creates a separate primary Coordinator plus a risk-triggered CounterPilot. The Coordinator prefers user-visible top-level Codex tasks for substantive owner lanes. At 16+ desired concurrency it may add one level of child Coordinators for disjoint shards. Do not create a task for every micro-fix. Within an owner, bounded subagents may work under the same paths, model policy, and verification contract.
+The user conversation is the Sponsor. Run creates a separate Coordinator, and
+the Coordinator dispatches substantive Owners with exclusive writable paths.
+Use dependency-ready, conflict-free lanes concurrently up to the requested
+target. Do not manufacture micro-tasks to fill a number. Within an Owner,
+bounded subagents inherit the Owner's paths, model lock, reasoning ceiling,
+budget, tests, and reporting contract.
 
-## Resource classes
+`full` is not a default planning mode. Use it only when high risk, large
+cross-contract scope, or scientific authority requires a stronger evidence
+boundary; the lean runtime does not materialize separate CounterPilot or
+Acceptance lanes, and mechanical Integration follows the actual shared-result
+boundary.
 
-- `authority`: irreversible scientific, security, migration, or canonical decisions.
-- `architecture`: cross-cutting contracts and dependency design.
-- `implementation-complex`: bounded but difficult engineering.
-- `implementation-clear`: well-specified coding with strong tests.
-- `mechanical`: scanning, formatting, generated updates, or repetitive fixtures.
-- `integration`: shared-file reconciliation and product-chain verification.
-- `acceptance`: independent journey and boundary validation.
+## Profiles and evidence
 
-Assign logical tiers such as `frontier`, `standard`, `fast`, or a user-requested model family. Resolve them against the runtime catalog later.
+`balanced` is the default resource profile when no profile is requested. Keep
+`fast`, `ultra-fast`, `all-luna`, and other profiles available; profiles change
+allocation and speed, never scope. Resolve logical roles against the actual
+delegation-specific host catalog. Record `requested`, `resolved`, and `actual`
+model/reasoning/delegation separately; missing telemetry is `unavailable`.
 
-## Profile intent
+At desired concurrency 16 or above, ask once whether a high-quality model should
+review dependencies, ownership, conflicts, and shard boundaries. Record
+accepted/declined and do not repeat the question during Run.
 
-- `premium`: prioritize decision quality. Use frontier reasoning for authority, architecture, and acceptance; do not use expensive independent duplicates for trivial work.
-- `balanced`: frontier/standard planning, efficient engineering, bounded concurrency.
-- `economy`: Luna or fast family for clear work, desired concurrency 4, decomposition before escalation, explicit approval when escalation crosses policy.
-- `speed`: desired concurrency 12 for independent owners; do not trade away tests or ownership.
-- `fast`: desired concurrency 24 with hierarchical coordination when useful.
-- `ultra-fast`: desired concurrency 48 with a one-time high-quality decomposition choice.
-- `all-luna`: hard Luna family lock, high reasoning, moderate concurrency.
-- `mad-luna`: hard Luna family lock, maximum supported reasoning, maximum safe concurrency, and independent Luna verification for high-risk milestones.
-- `custom`: every important field must be explicit; missing fields inherit from balanced only when the user permits inheritance.
+## Risk and stop boundary
 
-Profiles and velocity modifiers compose. `all-luna + fast` means Luna-only roles plus fast scheduling; it does not permit mixed-model fallback. Store the base lock and modifier separately.
-
-## Hard locks and fallbacks
-
-A hard model lock means every actual assignment must match the lock. Legal policies are:
-
-- `pause`: stop the affected lane if unavailable;
-- `ask`: request a user choice;
-- `fallback-list`: use only an explicit ordered list.
-
-“Use the best available model” is not a valid fallback under a hard lock.
-
-## Concurrency
-
-When the user has not chosen resource settings, offer one optional preset choice and otherwise default to `balanced` with desired concurrency 8. Accept explicit values from 1–64. The choice belongs in planning, not as a repeated Run-stage authorization.
-
-The planner automatically extracts independent owner lanes using the dependency DAG and exclusive writable ownership. All ready, conflict-free lanes may run together up to the desired target. Concurrency is therefore a scheduling target, not a request for artificial task fragmentation.
-
-The effective concurrency is the minimum of:
-
-- the user's requested concurrency, or the profile default when none was requested;
-- host limit;
-- number of dependency-ready tasks;
-- number of conflict-free writable ownership sets;
-- user budget cap.
-
-More agents do not help tightly coupled work. Plan those steps sequentially or give shared files to integration.
-
-Profile concurrency values are defaults rather than ceilings. At 16+, ask once whether a high-quality model should review dependencies, conflicts, ownership, and child-Coordinator shard boundaries. Record accepted plus its model, or declined. Do not encode current readiness as desired concurrency. Runtime capacity is capped independently by the host, ready work, ownership, machine, and budget.
+Use strongest reasoning for irreversible authority decisions and efficient
+models for clear bounded work. State a measurable stop boundary. Do not
+authorize destructive, credentialed, live, or publication actions through a
+plan alone.

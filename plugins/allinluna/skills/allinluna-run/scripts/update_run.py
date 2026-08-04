@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply a validated task or run transition to persistent All in Luna state."""
+"""Apply a task or run transition to the one persistent recovery snapshot."""
 
 from __future__ import annotations
 
@@ -8,20 +8,19 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dispatcher_lease import state_lock
+from runtime_truth import assignment_conflicts, runtime_identity_errors
 from workflow_state import (
     RUN_TRANSITIONS,
     TASK_TRANSITIONS,
-    append_event,
     atomic_write_json,
     dependencies_satisfied,
-    event,
     hard_lock_family,
     load_state,
     model_matches_lock,
     now_iso,
     promote_ready_tasks,
 )
-from runtime_truth import assignment_conflicts, runtime_identity_errors
 
 
 def unique_extend(target: list[Any], values: list[Any]) -> None:
@@ -40,10 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--actor", default="coordinator")
     parser.add_argument("--actual-model")
     parser.add_argument("--actual-reasoning")
-    parser.add_argument(
-        "--actual-delegation",
-        choices=["top-level-task", "subagent", "sequential", "unavailable"],
-    )
+    parser.add_argument("--actual-delegation", choices=["top-level-task", "subagent", "sequential", "unavailable"])
     parser.add_argument("--resolution", choices=["exact", "fallback", "unresolved", "unavailable"])
     parser.add_argument("--capability-requested")
     parser.add_argument("--capability-resolved")
@@ -57,6 +53,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host-id")
     parser.add_argument("--cursor")
     parser.add_argument("--last-activity-at")
+    parser.add_argument("--last-output-at")
     parser.add_argument("--worktree")
     parser.add_argument("--branch")
     parser.add_argument("--base-commit")
@@ -75,18 +72,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[str]]:
-    if args.task not in state["tasks"]:
+def _budget_value(state: dict[str, Any]) -> float | None:
+    budget = state.get("resource_policy", {}).get("budget", {})
+    usage = state.get("usage", {})
+    metric = budget.get("metric")
+    if metric == "tokens":
+        value = usage.get("tokens")
+    elif metric == "credits":
+        value = usage.get("credits")
+    elif metric == "time-minutes":
+        seconds = usage.get("elapsed_seconds")
+        value = seconds / 60 if isinstance(seconds, (int, float)) else None
+    elif metric == "currency":
+        value = usage.get("currency")
+    else:
+        value = None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def update_task(state: dict[str, Any], args: argparse.Namespace) -> list[str]:
+    if not args.task or args.task not in state["tasks"]:
         raise ValueError(f"unknown task: {args.task}")
     task = state["tasks"][args.task]
-    events: list[dict[str, Any]] = []
-    changed_fields: list[str] = []
-
+    changed: list[str] = []
     assignment_fields = {
         "thread_id": args.thread_id,
         "host_id": args.host_id,
         "cursor": args.cursor,
         "last_activity_at": args.last_activity_at,
+        "last_output_at": args.last_output_at,
         "worktree": args.worktree,
         "branch": args.branch,
         "base_commit": args.base_commit,
@@ -95,11 +109,7 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
     for field, value in assignment_fields.items():
         if value is not None:
             task["assignment"][field] = value
-            changed_fields.append(f"assignment.{field}")
-
-    conflicts = assignment_conflicts(state["tasks"])
-    if conflicts:
-        raise ValueError("; ".join(conflicts))
+            changed.append(f"assignment.{field}")
 
     actual_fields = {
         "model": args.actual_model,
@@ -111,52 +121,57 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
         lock = hard_lock_family(state)
         if lock and not model_matches_lock(args.actual_model, lock):
             raise ValueError(f"actual model {args.actual_model!r} violates hard model lock {lock!r}")
-    if (
-        args.actual_delegation == "top-level-task"
-        and not state.get("authorizations", {}).get("top_level_tasks")
-    ):
+    if args.actual_delegation == "top-level-task" and not state.get("authorizations", {}).get("top_level_tasks"):
         raise ValueError("actual top-level-task delegation lacks explicit plan authorization")
     for field, value in actual_fields.items():
         if value is not None:
             task["actual"][field] = value
-            changed_fields.append(f"actual.{field}")
+            changed.append(f"actual.{field}")
     if args.actual_delegation:
         state["capabilities"]["actual_delegation"] = args.actual_delegation
 
-    if any(value is not None for value in (args.capability_requested, args.capability_resolved, args.capability_actual, args.capability_status, args.capability_availability, args.capability_permission, args.capability_fallback)) or args.capability_evidence:
-        usage = {
-            "requested": args.capability_requested,
-            "resolved": args.capability_resolved,
-            "actual": args.capability_actual,
-            "status": args.capability_status or "unavailable",
-            "fallback": args.capability_fallback,
-            "usage_evidence": list(args.capability_evidence),
-            "availability": args.capability_availability or (
-                "unknown" if args.capability_status in {None, "unavailable"} else "available"
-            ),
-            "live_permission": args.capability_permission or (
-                "denied" if args.capability_status == "permission-denied" else "unknown"
-            ),
-        }
-        task["capability_usage"].append(usage)
-        state["capabilities"]["requested"].append(args.capability_requested)
-        state["capabilities"]["resolved"].append(args.capability_resolved)
-        state["capabilities"]["actual"].append(args.capability_actual)
+    capability_values = (
+        args.capability_requested,
+        args.capability_resolved,
+        args.capability_actual,
+        args.capability_status,
+        args.capability_availability,
+        args.capability_permission,
+        args.capability_fallback,
+    )
+    if any(value is not None for value in capability_values) or args.capability_evidence:
+        status = args.capability_status or "unavailable"
+        task["capability_usage"].append(
+            {
+                "requested": args.capability_requested,
+                "resolved": args.capability_resolved,
+                "actual": args.capability_actual,
+                "status": status,
+                "fallback": args.capability_fallback,
+                "usage_evidence": list(args.capability_evidence),
+                "availability": args.capability_availability or ("unknown" if status == "unavailable" else "available"),
+                "live_permission": args.capability_permission or ("denied" if status == "permission-denied" else "unknown"),
+            }
+        )
+        for field, value in (("requested", args.capability_requested), ("resolved", args.capability_resolved), ("actual", args.capability_actual)):
+            if value is not None:
+                state["capabilities"][field].append(value)
         state["capabilities"]["usage_evidence"].extend(args.capability_evidence)
-        changed_fields.append("capability_usage")
+        changed.append("capability_usage")
 
+    evidence = task["evidence"]
     if args.final_commit:
-        task["evidence"]["final_commit"] = args.final_commit
-        changed_fields.append("evidence.final_commit")
-    unique_extend(task["evidence"]["changed_files"], args.changed_file)
-    unique_extend(task["evidence"]["checks"], args.check)
-    unique_extend(task["evidence"]["blockers"], args.blocker)
+        evidence["final_commit"] = args.final_commit
+        changed.append("evidence.final_commit")
+    unique_extend(evidence["changed_files"], args.changed_file)
+    unique_extend(evidence["checks"], args.check)
+    unique_extend(evidence["blockers"], args.blocker)
     if args.changed_file:
-        changed_fields.append("evidence.changed_files")
+        changed.append("evidence.changed_files")
     if args.check:
-        changed_fields.append("evidence.checks")
+        changed.append("evidence.checks")
     if args.blocker:
-        changed_fields.append("evidence.blockers")
+        changed.append("evidence.blockers")
 
     if args.status:
         previous = task["status"]
@@ -170,230 +185,109 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
             identity_errors = runtime_identity_errors(task, state, require_started=True)
             if identity_errors:
                 raise ValueError("; ".join(identity_errors))
+            if task["assignment"].get("dispatch_intent") and not args.thread_id and not task["assignment"].get("thread_id"):
+                raise ValueError("a dispatched top-level task requires a real thread receipt before running")
         if args.status == "skipped":
             if not args.user_approved_skip:
                 raise ValueError("skipping a task requires --user-approved-skip")
-            task["evidence"]["skip_approved"] = True
+            evidence["skip_approved"] = True
         if args.status == "completed":
-            if not task["evidence"]["checks"]:
+            if not evidence["checks"]:
                 raise ValueError("completing a task requires at least one --check evidence entry")
-            owns_files = bool(task.get("ownership", {}).get("paths"))
-            git_authorized = bool(state.get("authorizations", {}).get("git_operations"))
-            if owns_files and git_authorized and task["resource_class"] != "acceptance" and not task["evidence"]["final_commit"]:
+            if task.get("ownership", {}).get("paths") and state.get("authorizations", {}).get("git_operations") and not evidence.get("final_commit"):
                 raise ValueError("completing a writable Git task requires --final-commit")
         if args.status == "running" and previous in {"ready", "blocked", "failed"}:
-            if task["assignment"].get("dispatch_intent") and not args.thread_id:
-                raise ValueError(
-                    "a dispatched top-level task requires a real thread receipt before running"
-                )
             task["assignment"]["attempt"] = int(task["assignment"].get("attempt", 0)) + 1
             task["assignment"]["last_activity_at"] = now_iso()
-            changed_fields.extend(["assignment.attempt", "assignment.last_activity_at"])
+            changed.extend(["assignment.attempt", "assignment.last_activity_at"])
         task["status"] = args.status
-        task["updated_at"] = now_iso()
-        events.append(
-            event(
-                actor=args.actor,
-                entity=f"task:{args.task}",
-                previous=previous,
-                current=args.status,
-                reason=args.reason,
-                evidence={"changed_fields": changed_fields},
-            )
-        )
+        changed.append("status")
         if args.status == "running" and state["status"] == "planned":
-            run_previous = state["status"]
             state["status"] = "running"
-            events.append(
-                event(
-                    actor=args.actor,
-                    entity=f"run:{state['run_id']}",
-                    previous=run_previous,
-                    current="running",
-                    reason=f"task {args.task} started",
-                )
-            )
         if args.status == "completed":
-            for promoted in promote_ready_tasks(state):
-                events.append(
-                    event(
-                        actor="allinluna",
-                        entity=f"task:{promoted}",
-                        previous="pending",
-                        current="ready",
-                        reason=f"dependencies satisfied after {args.task} completed",
-                    )
-                )
-    elif changed_fields:
-        task["updated_at"] = now_iso()
-        events.append(
-            event(
-                actor=args.actor,
-                entity=f"task:{args.task}",
-                previous=task["status"],
-                current=task["status"],
-                reason=args.reason,
-                evidence={"changed_fields": changed_fields},
-            )
-        )
-    else:
+            promote_ready_tasks(state)
+    if not changed:
         raise ValueError("no task update was provided")
-    return events, changed_fields
+    task["updated_at"] = now_iso()
+    return changed
 
 
-def update_run_status(state: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    previous = state["status"]
-    if args.run_status == previous:
-        raise ValueError(f"run is already {previous}")
-    if args.run_status not in RUN_TRANSITIONS[previous]:
-        raise ValueError(f"invalid run transition: {previous} -> {args.run_status}")
+def update_run_status(state: dict[str, Any], args: argparse.Namespace) -> None:
+    if args.run_status == state["status"]:
+        raise ValueError(f"run is already {state['status']}")
+    if args.run_status not in RUN_TRANSITIONS[state["status"]]:
+        raise ValueError(f"invalid run transition: {state['status']} -> {args.run_status}")
     if args.run_status == "completed":
-        incomplete = [
-            task_id
-            for task_id, task in state["tasks"].items()
-            if task["status"] not in {"completed", "skipped"}
-        ]
-        unapproved = [
-            task_id
-            for task_id, task in state["tasks"].items()
-            if task["status"] == "skipped" and not task["evidence"].get("skip_approved")
-        ]
+        incomplete = [task_id for task_id, task in state["tasks"].items() if task["status"] not in {"completed", "skipped"}]
         if incomplete:
             raise ValueError("cannot complete run; incomplete tasks: " + ", ".join(incomplete))
-        if unapproved:
-            raise ValueError("cannot complete run; unapproved skipped tasks: " + ", ".join(unapproved))
-        open_defects = [
-            defect_id
-            for defect_id, defect in state.get("defects", {}).items()
-            if defect.get("status") != "resolved"
-        ]
-        if open_defects:
-            raise ValueError("cannot complete run; unresolved defects: " + ", ".join(open_defects))
     state["status"] = args.run_status
-    return event(
-        actor=args.actor,
-        entity=f"run:{state['run_id']}",
-        previous=previous,
-        current=args.run_status,
-        reason=args.reason,
-    )
 
 
-def budget_value(state: dict[str, Any]) -> float | None:
-    budget = state.get("resource_policy", {}).get("budget", {})
-    metric = budget.get("metric")
-    usage = state.get("usage", {})
-    value: Any
-    if metric == "tokens":
-        value = usage.get("tokens")
-    elif metric == "credits":
-        value = usage.get("credits")
-    elif metric == "time-minutes":
-        seconds = usage.get("elapsed_seconds")
-        value = seconds / 60 if isinstance(seconds, (int, float)) else None
-    elif metric == "currency":
-        value = usage.get("currency")
-    else:
-        return None
-    return float(value) if isinstance(value, (int, float)) else None
-
-
-def update_global_metadata(state: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
-    changed: dict[str, Any] = {}
+def update_global_metadata(state: dict[str, Any], args: argparse.Namespace) -> list[str]:
+    changed: list[str] = []
     if args.host_concurrency is not None:
         if args.host_concurrency < 1:
             raise ValueError("host concurrency must be positive")
         state["capabilities"]["host_concurrency"] = args.host_concurrency
-        changed["host_concurrency"] = args.host_concurrency
+        changed.append("capabilities.host_concurrency")
     if args.actual_delegation and not args.task:
-        if (
-            args.actual_delegation == "top-level-task"
-            and not state.get("authorizations", {}).get("top_level_tasks")
-        ):
+        if args.actual_delegation == "top-level-task" and not state.get("authorizations", {}).get("top_level_tasks"):
             raise ValueError("actual top-level-task delegation lacks explicit plan authorization")
         state["capabilities"]["actual_delegation"] = args.actual_delegation
-        changed["actual_delegation"] = args.actual_delegation
-    usage_values = {
+        changed.append("capabilities.actual_delegation")
+    values = {
         "tokens": args.usage_tokens,
         "credits": args.usage_credits,
         "elapsed_seconds": args.usage_elapsed_seconds,
         "currency": args.usage_currency,
     }
-    for field, value in usage_values.items():
+    for field, value in values.items():
         if value is not None:
             if value < 0:
                 raise ValueError(f"usage {field} cannot be negative")
             state["usage"][field] = value
-            changed[f"usage.{field}"] = value
-    if not changed:
-        return []
-
-    events = [
-        event(
-            actor=args.actor,
-            entity=f"run:{state['run_id']}",
-            previous=state["status"],
-            current=state["status"],
-            reason=args.reason,
-            evidence={"changed_fields": changed},
-        )
-    ]
-    budget = state.get("resource_policy", {}).get("budget", {})
-    consumed = budget_value(state)
-    soft = budget.get("soft_limit")
-    hard = budget.get("hard_limit")
-    if consumed is not None and isinstance(soft, (int, float)) and consumed >= soft:
-        events[0]["evidence"]["soft_budget_reached"] = {"used": consumed, "limit": soft}
-    if (
-        consumed is not None
-        and isinstance(hard, (int, float))
-        and consumed >= hard
-        and state["status"] in {"planned", "running"}
-    ):
-        previous = state["status"]
+            changed.append(f"usage.{field}")
+    consumed = _budget_value(state)
+    hard = state.get("resource_policy", {}).get("budget", {}).get("hard_limit")
+    if consumed is not None and isinstance(hard, (int, float)) and consumed >= hard and state["status"] in {"planned", "running"}:
         state["status"] = "paused"
-        events.append(
-            event(
-                actor="allinluna",
-                entity=f"run:{state['run_id']}",
-                previous=previous,
-                current="paused",
-                reason=f"hard {budget.get('metric')} budget reached",
-                evidence={"used": consumed, "limit": hard},
-            )
-        )
-    return events
+        state["coordination"]["last_intervention_at"] = now_iso()
+        changed.append("status:hard-budget-paused")
+    return changed
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    output: dict[str, Any]
     try:
-        run_dir, state = load_state(args.run)
-        events: list[dict[str, Any]] = []
-        if args.task:
-            task_events, _ = update_task(state, args)
-            events.extend(task_events)
-        elif args.status:
-            raise ValueError("--status requires --task")
-        if args.run_status:
-            events.append(update_run_status(state, args))
-        events.extend(update_global_metadata(state, args))
-        if not events:
-            raise ValueError("provide a task, run transition, capability, or usage update")
-        state["updated_at"] = now_iso()
-        atomic_write_json(run_dir / "run-state.json", state)
-        for item in events:
-            append_event(run_dir, item)
-        output = {
-            "ok": True,
-            "run_id": state["run_id"],
-            "run_status": state["status"],
-            "task": args.task,
-            "task_status": state["tasks"][args.task]["status"] if args.task else None,
-            "ready_tasks": [task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"],
-            "events_appended": len(events),
-        }
+        run_dir, _ = load_state(args.run)
+        with state_lock(run_dir):
+            _, state = load_state(run_dir)
+            changed: list[str] = []
+            if args.task:
+                changed.extend(update_task(state, args))
+            elif args.status:
+                raise ValueError("--status requires --task")
+            if args.run_status:
+                update_run_status(state, args)
+                changed.append("run.status")
+            changed.extend(update_global_metadata(state, args))
+            conflicts = assignment_conflicts(state["tasks"])
+            if conflicts:
+                raise ValueError("; ".join(conflicts))
+            if not changed:
+                raise ValueError("provide a task, run transition, capability, or usage update")
+            state["updated_at"] = now_iso()
+            atomic_write_json(run_dir / "run-state.json", state)
+            output = {
+                "ok": True,
+                "run_id": state["run_id"],
+                "run_status": state["status"],
+                "task": args.task,
+                "task_status": state["tasks"][args.task]["status"] if args.task else None,
+                "changed": list(dict.fromkeys(changed)),
+                "ready_tasks": [task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"],
+            }
     except (OSError, json.JSONDecodeError, ValueError, KeyError) as exc:
         output = {"ok": False, "errors": [str(exc)]}
     print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))

@@ -10,13 +10,10 @@ from pathlib import Path
 
 from codex_app_adapter import normalize_thread_receipt
 from dispatcher_lease import (
-    DispatcherLeaseError,
-    append_event_locked,
-    load_lease,
     state_lock,
 )
 from runtime_truth import runtime_identity_errors
-from workflow_state import atomic_write_json, event, load_state, now_iso
+from workflow_state import atomic_write_json, load_state, now_iso
 
 
 def apply_receipt(state: dict, task_id: str, receipt: dict, reason: str) -> dict:
@@ -132,57 +129,17 @@ def main() -> int:
     try:
         run_dir, initial_state = load_state(args.run)
         with state_lock(run_dir):
-            lease = load_lease(run_dir)
-            if not lease or lease["owner_identity"].get("role") not in {
-                "primary-coordinator",
-                "subcoordinator",
-            }:
-                raise DispatcherLeaseError(
-                    "Owner receipt requires an active primary Coordinator dispatcher lease"
-                )
             _, state = load_state(run_dir)
             payload = json.loads(args.receipt.read_text(encoding="utf-8"))
             receipt = normalize_thread_receipt(payload)
             try:
                 result = apply_receipt(state, args.task, receipt, args.reason)
             except ValueError as exc:
-                append_event_locked(
-                    run_dir,
-                    actor="host-adapter",
-                    entity=f"task:{args.task}",
-                    previous="receipt-unaccepted",
-                    current="rejected",
-                    reason=str(exc),
-                    evidence={
-                        "receipt": receipt,
-                        "phase": "before-owner-receipt-acceptance",
-                        "dispatcher": {
-                            "epoch": lease.get("epoch"),
-                            "owner_identity": lease.get("owner_identity"),
-                        },
-                    },
-                )
                 raise
             state["updated_at"] = now_iso()
             atomic_write_json(run_dir / "run-state.json", state)
-            append_event_locked(
-                run_dir,
-                actor="host-adapter",
-                entity=f"task:{args.task}",
-                previous=None,
-                current=result["status"],
-                reason=args.reason,
-                evidence={
-                    "receipt": receipt,
-                    "result": result,
-                    "dispatcher": {
-                        "epoch": lease.get("epoch"),
-                        "owner_identity": lease.get("owner_identity"),
-                    },
-                },
-            )
             output = {"ok": True, "task": args.task, "receipt": receipt, **result}
-    except (OSError, KeyError, ValueError, json.JSONDecodeError, DispatcherLeaseError) as exc:
+    except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
         output = {"ok": False, "errors": [str(exc)]}
     print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
     return 0 if output["ok"] else 1

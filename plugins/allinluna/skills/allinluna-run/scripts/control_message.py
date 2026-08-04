@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record and route Sponsor/Coordinator/CounterPilot control-plane messages."""
+"""Build a routed control message without a second persistent message log."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from codex_app_adapter import SEND_MESSAGE_TOOL
-from workflow_state import append_event, event, load_state, now_iso
+from workflow_state import load_state, now_iso
 
 
 def target_thread(state: dict, target: str) -> str | None:
@@ -17,10 +17,6 @@ def target_thread(state: dict, target: str) -> str | None:
         return control["sponsor"].get("thread_id")
     if target == "primary":
         return control["primary_coordinator"].get("thread_id")
-    if target == "counterpilot":
-        return control["counterpilot"].get("thread_id")
-    if target == "secondary-counterpilot":
-        return control["secondary_counterpilot"].get("thread_id")
     return control["subcoordinators"].get(target, {}).get("thread_id")
 
 
@@ -30,10 +26,6 @@ def target_record(state: dict, target: str) -> dict:
         return control["sponsor"]
     if target == "primary":
         return control["primary_coordinator"]
-    if target == "counterpilot":
-        return control["counterpilot"]
-    if target == "secondary-counterpilot":
-        return control["secondary_counterpilot"]
     return control["subcoordinators"].get(target, {})
 
 
@@ -46,7 +38,7 @@ def main() -> int:
         "--type",
         choices=[
             "requirement-change", "authorization-request", "direction-choice", "status",
-            "challenge", "resource-change", "blocker", "decision",
+            "resource-change", "blocker", "decision",
         ],
         required=True,
     )
@@ -68,9 +60,6 @@ def main() -> int:
             "body": args.body,
             "target_thread_id": thread_id,
         }
-        with (run_dir / "control-messages.jsonl").open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
-        append_event(run_dir, event(args.from_role, f"message:{args.to_role}", None, args.type, args.body))
         output = {
             "ok": True,
             "message": payload,

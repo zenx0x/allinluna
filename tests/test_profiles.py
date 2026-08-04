@@ -42,15 +42,14 @@ class ResourceProfileTests(unittest.TestCase):
         self.assertTrue(result["valid"], result)
         self.assertEqual(result["policy"]["hard_model_lock"]["family"], "luna")
         self.assertTrue(
-            all(
-                role["reasoning"] == "max"
-                for name, role in result["policy"]["roles"].items()
-                if name != "acceptance"
-            )
+            all(role["reasoning"] == "max" for role in result["policy"]["roles"].values())
         )
-        self.assertEqual(result["policy"]["roles"]["acceptance"]["model_request"], "family:luna")
-        self.assertEqual(result["policy"]["roles"]["acceptance"]["reasoning"], "xhigh")
         self.assertIn("budget", result["policy"])
+
+    def test_legacy_governance_roles_are_not_materialized(self) -> None:
+        for profile in self.profiles["profiles"].values():
+            self.assertNotIn("counterpilot", profile.get("roles", {}))
+            self.assertNotIn("acceptance", profile.get("roles", {}))
 
     def test_runtime_catalog_caps_concurrency(self) -> None:
         result = resolve(self.profiles, "mad-luna", catalog=self.catalog)
@@ -168,7 +167,7 @@ class ResourceProfileTests(unittest.TestCase):
         self.assertTrue(result["valid"], result)
         self.assertEqual(result["resolved_roles"]["worker"]["actual_model"], "gpt-5.3-codex-spark")
         self.assertEqual(result["resolved_roles"]["engineer"]["actual_model"], "gpt-5.3-codex-spark")
-        for role in ("coordinator", "counterpilot", "architect", "integration", "acceptance"):
+        for role in ("coordinator", "architect", "integration"):
             self.assertNotEqual(
                 result["resolved_roles"][role]["actual_model"], "gpt-5.3-codex-spark", role
             )
@@ -230,43 +229,6 @@ class ResourceProfileTests(unittest.TestCase):
         self.assertTrue(
             all(role["actual_model"] == "unavailable" for role in result["resolved_roles"].values())
         )
-
-    def test_acceptance_defaults_to_luna_high_or_xhigh_and_records_three_views(self) -> None:
-        result = resolve(
-            self.profiles,
-            "balanced",
-            catalog=self.catalog,
-            delegation="top-level-task",
-        )
-        acceptance = result["resolved_roles"]["acceptance"]
-        self.assertEqual(acceptance["requested_model"], "family:luna")
-        self.assertEqual(acceptance["requested_reasoning"], "high")
-        self.assertEqual(acceptance["actual_model"], "gpt-5.6-luna")
-        self.assertEqual(acceptance["actual_reasoning"], "high")
-        self.assertEqual(acceptance["requested"]["model"], "family:luna")
-        self.assertEqual(acceptance["resolved"]["model"], "gpt-5.6-luna")
-        self.assertEqual(acceptance["actual"]["model"], "unavailable")
-
-        high = resolve(
-            self.profiles,
-            "balanced",
-            catalog=self.catalog,
-            delegation="top-level-task",
-            risk_level="high",
-        )
-        self.assertEqual(high["resolved_roles"]["acceptance"]["requested_reasoning"], "xhigh")
-
-    def test_explicit_plan_acceptance_max_is_not_normalized_away(self) -> None:
-        result = resolve(
-            self.profiles,
-            "mad-luna",
-            plan_policy={
-                "profile": "mad-luna",
-                "role_overrides": {"acceptance": {"reasoning": "max"}},
-            },
-        )
-        self.assertEqual(result["policy"]["roles"]["acceptance"]["reasoning"], "max")
-
 
 if __name__ == "__main__":
     unittest.main()

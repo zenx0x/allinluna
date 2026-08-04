@@ -149,6 +149,7 @@ class FirstUseProtocolTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+            timeout=8,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
@@ -162,6 +163,7 @@ class FirstUseProtocolTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=8,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(json.loads(result.stdout)["status"], "BLOCKED")

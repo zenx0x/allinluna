@@ -1,60 +1,45 @@
 # Planning contract
 
-Use this contract for every plan, regardless of project size.
+Use this contract for every plan, regardless of project size. The planning
+entry shares the ordinary user path with Run:
+
+```text
+one-sentence request or existing plan -> one resource card -> Coordinator -> dependency waves -> result
+```
 
 ## Required truths
 
-The plan must preserve:
+The plan preserves the user's objective and full completion standard, explicit
+inclusions/exclusions, repository instructions, protected/dirty paths,
+authority boundaries, and unknowns/assumptions. Implementation, mechanical
+Integration, and publication remain distinct states; the lean runtime keeps
+Acceptance/CounterPilot as legacy plan metadata rather than materializing extra
+lanes.
 
-- the user's objective and full completion standard;
-- explicit inclusions and exclusions;
-- repository instructions and protected/dirty paths;
-- authority boundaries for destructive, credentialed, live, or external actions;
-- unknowns and assumptions without presenting them as verified facts;
-- implementation, integration, acceptance, and publication as distinct states.
+Select `quick`, `standard`, or `full` using the risk-adaptive rules in
+[`allinluna-run`'s user-flow reference](../../allinluna-run/references/user-flow.md).
+Do not add extra governance merely because the plan is non-trivial; `full` is an
+explicit upgrade for high-risk, large cross-contract, or scientific-authority
+evidence, while the lean runtime still materializes only the required
+Coordinator, Owner, and mechanical Integration work.
 
-## Authorization states
+## Independent authorizations
 
-Record independent booleans for:
-
-- implementation writes;
-- Git branch/worktree/commit operations;
-- Goal creation;
-- user-owned top-level task creation;
-- destructive filesystem or Git operations;
-- live external mutation;
-- publication or deployment.
-
-Permission for one state never implies another. In particular, a request to plan does not authorize implementation, a request to implement does not authorize publication, and large scope does not authorize Goal creation.
-
-Goal creation and user-owned top-level task creation are separate authorizations. “Do not create a Goal” changes only the Goal field; it must never be interpreted as denying top-level tasks. Likewise, permission to create top-level tasks does not authorize a Goal.
-
-Every All in Luna plan records `top_level_tasks=true`. This authorization is invariant across plan-only, execute-ready, Git, non-Git, greenfield, small, and large projects. Runtime availability may reduce actual delegation, but never rewrites the plan authorization to false.
+Record separate booleans for implementation writes, Git branch/worktree/commit
+operations, Goal creation, user-owned top-level tasks, destructive filesystem or
+Git operations, live external mutation, and publication/deployment. Permission
+for one state never implies another. “Do not create a Goal” does not deny
+top-level tasks; every All in Luna plan still records `top_level_tasks=true`.
 
 ## Completeness
 
-A task's deliverables must represent the requested capability, not a demonstration substitute. A first vertical slice is useful when it proves the architecture across layers, but it is only a progress checkpoint.
+Task deliverables describe the requested capability, failure paths, recovery,
+permissions, isolation, tests, and artifacts—not a demo or first-slice
+substitute. A first vertical slice is a progress checkpoint only.
 
-Avoid indefinite terms such as “finish later,” “other cases,” or “as needed.” Name the owned behavior, failure paths, recovery, tests, and artifacts. When exact enumeration is impossible, state a measurable boundary.
+## Questions and handoff
 
-## Questions
-
-Ask the user only when:
-
-- two plausible answers produce materially different architectures;
-- a required external credential or live mutation lacks authority;
-- a destructive action cannot be made reversible;
-- scientific or legal authority cannot be derived from the sources in scope.
-
-Otherwise record a labeled assumption and proceed.
-
-## Plan quality test
-
-A different capable agent should be able to execute each task using only:
-
-- the plan;
-- the named repository and base revision;
-- the task brief and owned paths;
-- the sources explicitly referenced by the task.
-
-If it requires hidden chat context, the plan is incomplete.
+Ask only when two plausible answers materially change architecture,
+authorization, or scientific/legal authority. Otherwise record an assumption
+and proceed. A capable Owner must be able to execute from the plan, named
+repository/base, owned paths, sources, and checks without hidden chat context.

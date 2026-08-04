@@ -15,10 +15,8 @@ sys.path.insert(0, str(PLAN_SCRIPTS))
 
 from validate_plan import validate  # noqa: E402
 from workflow_state import (  # noqa: E402
-    append_event,
     atomic_write_json,
     build_initial_state,
-    event,
     json_sha256,
     load_state,
 )
@@ -148,21 +146,6 @@ def main() -> int:
         state["plan_hash"] = json_sha256(revised)
         atomic_write_json(plan_path, revised)
         atomic_write_json(run_dir / "run-state.json", state)
-        append_event(
-            run_dir,
-            event(
-                actor=args.actor,
-                entity=f"run:{state['run_id']}",
-                previous=f"plan-revision:{revision - 1}",
-                current=f"plan-revision:{revision}",
-                reason=args.reason,
-                evidence={
-                    "added_tasks": [task["id"] for task in additions],
-                    "added_milestones": [item["id"] for item in patch.get("add_milestones", [])],
-                    "patch": str(args.patch.resolve()),
-                },
-            ),
-        )
         output = {
             "ok": True,
             "run_id": state["run_id"],

@@ -160,14 +160,14 @@ class HostAdapterContractTests(unittest.TestCase):
                 thread_id="thread-1",
                 host_id="host-1",
                 prompt="ping",
-                record_with="record_counterpilot_trigger.py",
+                record_with="record_control_plane.py",
             )
         action = send_message_action(
             self.state([SEND_MESSAGE_TOOL]),
             thread_id="thread-1",
             host_id="host-1",
             prompt="ping",
-            record_with="record_counterpilot_trigger.py",
+            record_with="record_control_plane.py",
         )
         self.assertEqual(action["tool"], SEND_MESSAGE_TOOL)
         self.assertEqual(action["runtime_evidence"]["resolved"]["source"], "capability-receipt")

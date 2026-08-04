@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from resolve_profile import DEFAULT_PROFILES, parse_role_override, read_json, resolve
-from workflow_state import append_event, atomic_write_json, event, load_state, now_iso
+from workflow_state import atomic_write_json, load_state, now_iso
 
 
 def main() -> int:
@@ -79,7 +79,7 @@ def main() -> int:
             task["assignment"]["resource_resolution"] = resolved["resolution"]
             task["updated_at"] = now_iso()
             changed.append(task_id)
-        for role, key in (("coordinator", "primary_coordinator"), ("counterpilot", "counterpilot")):
+        for role, key in (("coordinator", "primary_coordinator"),):
             target = state["control_plane"][key]
             if target["status"] not in {"unassigned", "disabled"}:
                 continue
@@ -102,21 +102,6 @@ def main() -> int:
         state["capabilities"]["host_concurrency"] = result["concurrency"]["host_cap"]
         state["updated_at"] = now_iso()
         atomic_write_json(run_dir / "run-state.json", state)
-        append_event(
-            run_dir,
-            event(
-                actor="resource-control",
-                entity=f"run:{state['run_id']}:resources",
-                previous=None,
-                current=profile,
-                reason=args.reason,
-                evidence={
-                    "tasks": changed,
-                    "delegation": result["delegation"]["selected"],
-                    "warnings": result["warnings"],
-                },
-            ),
-        )
         output = {
             "ok": True,
             "profile": profile,

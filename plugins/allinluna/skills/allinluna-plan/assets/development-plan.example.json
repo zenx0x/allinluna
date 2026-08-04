@@ -9,9 +9,9 @@
   "completion_standard": [
     "The feature works end to end for two isolated projects.",
     "Failure, permission, empty, and recovery states are tested.",
-    "Integration and independent acceptance pass on the recorded baseline."
+    "One mechanical integration pass and cross-lane verification pass on the recorded baseline."
   ],
-  "stop_boundary": "Stop after independent acceptance and an accepted common baseline; do not publish or deploy.",
+  "stop_boundary": "Stop after one mechanical integration pass and an accepted common baseline; do not publish or deploy.",
   "repository": {
     "mode": "existing",
     "roots": [
@@ -42,7 +42,6 @@
     "coordinator_product_implementation": "forbidden",
     "owner_delegation": "top-level-task",
     "owner_subagents": "allowed-bounded",
-    "counterpilot": "risk-triggered",
     "coordination_strategy": "auto",
     "shard_size": 8,
     "high_concurrency_review": "not-required",
@@ -83,8 +82,7 @@
       "verification": ["Run the focused service/API/client test command recorded from the repository"],
       "validation_level": "focused",
       "external_side_effects": [],
-      "acceptance_required": true
-      ,"capability_bindings": []
+      "capability_bindings": []
       ,"full_read_requirements": ["AGENTS.md"]
     },
     {
@@ -104,8 +102,7 @@
       "verification": ["Run focused UI tests and production typecheck/build"],
       "validation_level": "focused",
       "external_side_effects": [],
-      "acceptance_required": true
-      ,"capability_bindings": []
+      "capability_bindings": []
       ,"full_read_requirements": ["AGENTS.md"]
     },
     {
@@ -125,29 +122,7 @@
       "verification": ["Verify owner commits and run focused cross-lane tests"],
       "validation_level": "cross-lane",
       "external_side_effects": [],
-      "acceptance_required": true
-      ,"capability_bindings": []
-      ,"full_read_requirements": ["AGENTS.md"]
-    },
-    {
-      "id": "T4-accept",
-      "title": "Independent milestone acceptance",
-      "phase": "acceptance",
-      "description": "Exercise the integrated real-data journey, isolation, failure, permission, and recovery behavior without modifying implementation.",
-      "dependencies": ["T3-integrate"],
-      "ownership": {
-        "paths": [],
-        "non_file_scope": "Read-only acceptance of the integrated baseline",
-        "exclusive": false
-      },
-      "role": "acceptance-owner",
-      "resource_class": "acceptance",
-      "deliverables": ["Evidence-backed PASS, FAIL, or BLOCKED result"],
-      "verification": ["Exercise required user journeys and inspect protected-path invariance"],
-      "validation_level": "milestone",
-      "external_side_effects": [],
-      "acceptance_required": false
-      ,"capability_bindings": []
+      "capability_bindings": []
       ,"full_read_requirements": ["AGENTS.md"]
     }
   ],
@@ -155,9 +130,9 @@
     {
       "id": "M1",
       "title": "Feature milestone",
-      "task_ids": ["T1-domain-api", "T2-ui", "T3-integrate", "T4-accept"],
+      "task_ids": ["T1-domain-api", "T2-ui", "T3-integrate"],
       "integration_evidence": ["Recorded integration commit and cross-layer tests"],
-      "acceptance_evidence": ["Independent real-data journey PASS"],
+      "acceptance_evidence": [],
       "unlocks": []
     }
   ],

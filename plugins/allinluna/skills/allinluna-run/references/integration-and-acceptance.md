@@ -1,56 +1,39 @@
-# Integration and acceptance
+# Integration and Acceptance
 
-## Risk-adaptive phase integration
+## Risk-adaptive integration boundary
 
-Managed medium/high/critical work normally uses one integration task. Low-risk or `parallel-only` work does not gain an integration layer unless shared contracts, explicit plan requirements, or actual conflicts require one.
+Mechanical Integration is not automatic ceremony:
 
-One integration owner should:
+- `quick` ends with focused Owner verification unless the actual result exposes
+  a shared-contract conflict or an explicit requirement demands reconciliation.
+- `standard` may use one Integration pass for a shared contract, actual
+  cross-owner conflict, or the plan's stated cross-lane check.
+- `full` is reserved for high-risk, large cross-contract, or scientific-
+  authority work. It may use one Integration pass and the stronger evidence
+  required by that risk; the lean runtime does not materialize Acceptance or
+  CounterPilot lanes.
 
-1. run `verify_task_evidence.py` for every expected owner commit and changed-path boundary;
-2. combine shared contracts deliberately;
-3. regenerate checked-in clients or artifacts when required;
-4. run focused cross-lane product-chain tests;
-5. verify no protected or unrelated source changed;
-6. publish an integration commit and evidence bundle.
+Do not add promotion, registry revision, meta-review, duplicate acceptance, or a
+second Integration layer unless the explicit completion contract requires it.
+All in Luna does not default to multi-layer governance, frequent interruptions,
+or a real canary on every run.
 
-Integration may fix mechanical conflicts, schema/client drift, imports, adapters, and shared test wiring within its assigned scope. It must return scientific, authority, or owner-specific behavioral defects to the original lane.
+## Integration
 
-## Independent acceptance
+The single Integration owner, when selected, verifies expected Owner commits and
+changed-path boundaries, combines shared contracts deliberately, regenerates
+checked-in artifacts when required, runs focused cross-lane checks, and proves
+that protected or unrelated sources did not change.
 
-High/critical, authority-sensitive, external-mutation, or explicitly requested work uses independent acceptance. Bounded low-risk work may finish with owner verification when its completion standard does not require an independent milestone.
+Integration may repair mechanical shared-file conflicts within its assigned
+scope. It returns product behavior, scientific meaning, authority, and
+Owner-specific defects to the original lane. A commit is evidence, not by
+itself acceptance.
 
-Acceptance evaluates the actual completion standard and user journeys against the integrated baseline. It should inspect:
+## Legacy acceptance metadata
 
-- happy paths and failure/recovery paths;
-- permissions, isolation, provenance, and fail-closed behavior;
-- real API/client/UI or equivalent end-to-end chains;
-- representative sparse, rich, empty, stale, conflict, and unknown states;
-- required accessibility, performance, and platform dimensions;
-- absence of unauthorized external mutation.
-
-Acceptance is read-only by default. A failure names the owner and exact reproduction. After repair, re-run the failed checks plus the smallest required regression set.
-
-Record a failure with `manage_defect.py --action create`. This reopens the original owner
-instead of allowing integration or acceptance to silently repair owner-owned science or behavior.
-After the owner supplies a repair commit, record it with `manage_defect.py --action resolve`,
-re-integrate once, and re-run the failed acceptance evidence.
-
-## Avoid governance inflation
-
-Do not add promotion, registry revision, meta-review, and duplicate acceptance layers unless a release contract explicitly requires them. The normal high-risk pattern is:
-
-```text
-owners → one integration → one independent acceptance → accepted baseline
-```
-
-For lower-risk independent lanes it may be `owners → focused verification → completed baseline`. Risk adaptation must not remove a user-requested acceptance journey or weaken the completion standard.
-
-## Acceptance result
-
-Use `PASS`, `FAIL`, or `BLOCKED`:
-
-- `PASS`: completion evidence exists and no required work remains.
-- `FAIL`: implementation does not meet a requirement; return it to an owner.
-- `BLOCKED`: an external condition prevents verification and cannot be substituted.
-
-Do not convert unverified behavior into a pass.
+Older plans may contain Acceptance fields, but the lean runtime does not create
+that lane. The required happy paths, failure/recovery, permissions, isolation,
+provenance, and fail-closed checks remain in Owner or mechanical Integration
+verification. Missing external evidence is reported as unavailable or blocked,
+never inferred as a pass.

@@ -66,11 +66,7 @@ class CapabilityRouter:
         permissions = permissions or {}
         discovery = discovery or {}
         context = context or {}
-        read_only = bool(
-            context.get("read_only")
-            or context.get("acceptance_read_only")
-            or context.get("role") == "acceptance"
-        )
+        read_only = bool(context.get("read_only"))
         requested = [_binding(item, index) for index, item in enumerate(bindings)]
         requested.sort(key=lambda item: (item["invocation_order"], item["capability"]["id"]))
         resolved: list[dict[str, Any]] = []
@@ -122,7 +118,7 @@ class CapabilityRouter:
                 "expected_evidence": item["expected_evidence"],
                 "read_only": read_only,
                 "read_only_violation": read_only_violation,
-                "reason": "acceptance-read-only" if read_only_violation else None,
+                "reason": "read-only" if read_only_violation else None,
             })
         blocking = [
             item for item, binding in zip(resolved, requested)

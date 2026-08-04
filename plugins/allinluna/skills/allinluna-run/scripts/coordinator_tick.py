@@ -12,13 +12,17 @@ from codex_app_adapter import (
     await_dispatch_receipt,
     control_target,
     create_thread_action,
+    default_repository_identity,
+    dispatch_identity,
     dispatch_id,
     dispatch_intent,
     LIST_PROJECTS_TOOL,
     monitoring_action,
     owner_target,
     project_resolution_action,
+    send_message_action,
 )
+from dispatcher_lease import DispatcherLeaseError, dispatcher_session, make_owner_identity
 from render_control_plane_brief import render as render_control_brief
 from render_task_brief import render
 from workflow_state import (
@@ -59,9 +63,10 @@ def _control_action(
     run_dir: Path,
     write_briefs: bool,
     record_intents: bool,
+    lease: dict | None,
 ) -> dict:
     if child.get("dispatch_intent"):
-        return await_dispatch_receipt(child_id, child["dispatch_intent"])
+        return await_dispatch_receipt(child_id, child["dispatch_intent"], lease=lease)
     brief_path = run_dir / "briefs" / f"{child_id}.md"
     prompt = render_control_brief(state, "subcoordinator", child_id)
     if write_briefs:
@@ -77,20 +82,28 @@ def _control_action(
         }
     action = create_thread_action(
         kind="dispatch-subcoordinator",
-        entity_id=dispatch_id(state["run_id"], child_id),
+        entity_id=dispatch_id(state["run_id"], child_id, epoch=(lease or {}).get("epoch")),
         prompt=prompt,
         target=control_target(state, child_id),
         model=model,
         thinking=resolved.get("reasoning"),
-        title=f"All in Luna {child_id} [{dispatch_id(state['run_id'], child_id)}]",
+        title=f"All in Luna {child_id} [{dispatch_id(state['run_id'], child_id, epoch=(lease or {}).get('epoch'))}]",
         record_with="record_control_plane.py --role subcoordinator",
         metadata={
             "coordinator_id": child_id,
             "git_bootstrap_required": False,
         },
+        task_id=child_id,
+        identity=dispatch_identity(
+            state,
+            task_id=child_id,
+            target=control_target(state, child_id),
+        ),
+        dispatcher_epoch=(lease or {}).get("epoch"),
+        state=state,
     )
     if record_intents:
-        child["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso())
+        child["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso(), lease=lease)
     return action
 
 
@@ -100,10 +113,11 @@ def counterpilot_creation_action(
     trigger: str | None,
     write_briefs: bool,
     record_intents: bool,
+    lease: dict | None,
 ) -> dict:
     counterpilot = state["control_plane"]["counterpilot"]
     if counterpilot.get("dispatch_intent"):
-        return await_dispatch_receipt("counterpilot", counterpilot["dispatch_intent"])
+        return await_dispatch_receipt("counterpilot", counterpilot["dispatch_intent"], lease=lease)
     resolved = counterpilot.get("resolved", {})
     resolved_model = resolved.get("model")
     if _unresolved(resolved_model):
@@ -120,23 +134,31 @@ def counterpilot_creation_action(
         brief_path.write_text(prompt, encoding="utf-8")
     action = create_thread_action(
         kind="create-counterpilot",
-        entity_id=dispatch_id(state["run_id"], "counterpilot"),
+        entity_id=dispatch_id(state["run_id"], "counterpilot", epoch=(lease or {}).get("epoch")),
         prompt=prompt,
         target=control_target(state, "counterpilot"),
         model=resolved_model,
         thinking=resolved.get("reasoning"),
-        title=f"All in Luna counterpilot [{dispatch_id(state['run_id'], 'counterpilot')}]",
+        title=f"All in Luna counterpilot [{dispatch_id(state['run_id'], 'counterpilot', epoch=(lease or {}).get('epoch'))}]",
         record_with="record_control_plane.py --role counterpilot",
         metadata={
             "role": "counterpilot",
             "trigger": trigger,
             "git_bootstrap_required": False,
         },
+        task_id="counterpilot",
+        identity=dispatch_identity(
+            state,
+            task_id="counterpilot",
+            target=control_target(state, "counterpilot"),
+        ),
+        dispatcher_epoch=(lease or {}).get("epoch"),
+        state=state,
     )
     if trigger:
         action["record_with"] += f" --trigger {trigger}"
     if record_intents:
-        counterpilot["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso())
+        counterpilot["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso(), lease=lease)
     return action
 
 
@@ -167,11 +189,12 @@ def _owner_action(
     *,
     write_briefs: bool,
     record_intents: bool,
+    lease: dict | None,
 ) -> dict:
     task = state["tasks"][task_id]
     assignment = task["assignment"]
     if assignment.get("dispatch_intent"):
-        action = await_dispatch_receipt(task_id, assignment["dispatch_intent"])
+        action = await_dispatch_receipt(task_id, assignment["dispatch_intent"], lease=lease)
         action["task_id"] = task_id
         return action
     resolved_model = assignment.get("resolved_model")
@@ -195,20 +218,28 @@ def _owner_action(
         brief_path.write_text(prompt, encoding="utf-8")
     action = create_thread_action(
         kind="dispatch-top-level-task",
-        entity_id=dispatch_id(state["run_id"], task_id),
+        entity_id=dispatch_id(state["run_id"], task_id, epoch=(lease or {}).get("epoch")),
         prompt=prompt,
         target=target,
         model=resolved_model,
         thinking=assignment.get("resolved_reasoning") or task["requested"]["reasoning"],
-        title=f"All in Luna {task_id} [{dispatch_id(state['run_id'], task_id)}]",
+        title=f"All in Luna {task_id} [{dispatch_id(state['run_id'], task_id, epoch=(lease or {}).get('epoch'))}]",
         record_with=f"record_thread_receipt.py --task {task_id} --receipt APP_RESPONSE.json",
         metadata={
             "task_id": task_id,
             "delegation": "top-level-task",
         },
+        task_id=task_id,
+        identity=dispatch_identity(
+            state,
+            task_id=task_id,
+            target=target,
+        ),
+        dispatcher_epoch=(lease or {}).get("epoch"),
+        state=state,
     )
     if record_intents:
-        assignment["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso())
+        assignment["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso(), lease=lease)
     return action
 
 
@@ -218,6 +249,7 @@ def actions_for(
     coordinator_id: str = "primary",
     write_briefs: bool = True,
     record_intents: bool = True,
+    lease: dict | None = None,
 ) -> dict:
     tasks = state["tasks"]
     control = state["control_plane"]
@@ -287,20 +319,19 @@ def actions_for(
                     trigger if counterpilot["status"] == "deferred" else None,
                     write_briefs,
                     record_intents,
+                    lease,
                 )
             )
         elif trigger and counterpilot["status"] == "running":
-            actions.append(
-                {
-                    "kind": "request-counterpilot-pass",
-                    "tool": "codex_app__send_message_to_thread",
-                    "threadId": counterpilot["thread_id"],
-                    "hostId": counterpilot.get("host_id"),
-                    "prompt": f"Run one consolidated CounterPilot pass for trigger: {trigger}",
-                    "trigger": trigger,
-                    "record_with": "record_counterpilot_trigger.py --status requested",
-                }
+            message = send_message_action(
+                state,
+                thread_id=counterpilot["thread_id"],
+                host_id=counterpilot.get("host_id"),
+                prompt=f"Run one consolidated CounterPilot pass for trigger: {trigger}",
+                record_with="record_counterpilot_trigger.py --status requested",
             )
+            message.update({"kind": "request-counterpilot-pass", "trigger": trigger})
+            actions.append(message)
 
     if coordinator_id == "primary":
         for child_id, child in control["subcoordinators"].items():
@@ -313,6 +344,7 @@ def actions_for(
                         run_dir=run_dir,
                         write_briefs=write_briefs,
                         record_intents=record_intents,
+                        lease=lease,
                     )
                 )
         active_children = [
@@ -354,6 +386,7 @@ def actions_for(
                     task_id,
                     write_briefs=write_briefs,
                     record_intents=record_intents,
+                    lease=lease,
                 )
             )
 
@@ -397,6 +430,28 @@ def actions_for(
     }
 
 
+def _coordinator_owner_identity(state: dict, coordinator_id: str) -> dict:
+    control = state["control_plane"]
+    # Child Coordinators are delegated scopes of the one primary Dispatcher.  They
+    # must not acquire a second global lease; their tick is serialized under the
+    # primary Coordinator's logical identity.
+    item = control["primary_coordinator"]
+    thread_id = item.get("thread_id")
+    if not thread_id:
+        raise DispatcherLeaseError(
+            f"{coordinator_id} cannot tick without a real primary Coordinator thread receipt"
+        )
+    return make_owner_identity(
+        role="primary-coordinator",
+        run_id=state.get("run_id"),
+        coordinator_id="primary",
+        thread_id=thread_id,
+        host_id=item.get("host_id"),
+        repository_identity=default_repository_identity(state),
+        worktree_identity=control_target(state, "primary-coordinator"),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
@@ -405,35 +460,83 @@ def main() -> int:
     parser.add_argument("--no-record", action="store_true")
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
-    run_dir, state = load_state(args.run)
-    output = actions_for(
-        state,
-        run_dir,
-        args.coordinator_id,
-        not args.no_write_briefs,
-        not args.no_record,
-    )
-    if not args.no_record:
-        previous = state.get("coordination", {}).get("last_tick_at")
-        state["coordination"]["last_tick_at"] = now_iso()
-        state["updated_at"] = state["coordination"]["last_tick_at"]
-        atomic_write_json(run_dir / "run-state.json", state)
-        append_event(
+    try:
+        run_dir, initial_state = load_state(args.run)
+        primary_running = initial_state["control_plane"]["primary_coordinator"].get("status") == "running"
+        if not primary_running:
+            output = actions_for(
+                initial_state,
+                run_dir,
+                args.coordinator_id,
+                not args.no_write_briefs,
+                not args.no_record,
+                None,
+            )
+            print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
+            return 0
+
+        owner_identity = _coordinator_owner_identity(initial_state, args.coordinator_id)
+        with dispatcher_session(
             run_dir,
-            event(
-                actor="coordinator",
-                entity=f"run:{state['run_id']}",
-                previous=previous,
-                current=state["coordination"]["last_tick_at"],
-                reason="coordinator control tick",
-                evidence={
-                    "actions": [item["kind"] for item in output["actions"]],
-                    "dispatch_ids": [item.get("dispatch_id") for item in output["actions"] if item.get("dispatch_id")],
-                },
-            ),
-        )
-    print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
-    return 0
+            owner_identity,
+            purpose=f"Coordinator tick: {args.coordinator_id}",
+        ) as session:
+            _, state = load_state(run_dir)
+            output = actions_for(
+                state,
+                run_dir,
+                args.coordinator_id,
+                not args.no_write_briefs,
+                not args.no_record,
+                session.lease,
+            )
+            output["dispatcher_lease"] = session.evidence()
+            if not args.no_record:
+                previous = state.get("coordination", {}).get("last_tick_at")
+                state["coordination"]["last_tick_at"] = now_iso()
+                state["updated_at"] = state["coordination"]["last_tick_at"]
+                atomic_write_json(run_dir / "run-state.json", state)
+                append_event(
+                    run_dir,
+                    event(
+                        actor="coordinator",
+                        entity=f"run:{state['run_id']}",
+                        previous=previous,
+                        current=state["coordination"]["last_tick_at"],
+                        reason="coordinator control tick",
+                        evidence={
+                            "actions": [item["kind"] for item in output["actions"]],
+                            "dispatch_ids": [
+                                item.get("dispatch_id")
+                                for item in output["actions"]
+                                if item.get("dispatch_id")
+                            ],
+                            "dispatcher": session.evidence(),
+                        },
+                    ),
+                )
+            for action in output["actions"]:
+                if action.get("duplicate_resolution"):
+                    append_event(
+                        run_dir,
+                        event(
+                            actor="coordinator",
+                            entity=f"dispatch:{action.get('dispatch_id') or action.get('entity_id')}",
+                            previous="dispatch-intent",
+                            current=action["duplicate_resolution"]["decision"],
+                            reason=action["duplicate_resolution"]["reason"],
+                            evidence={
+                                "duplicate": action["duplicate_resolution"],
+                                "dispatcher": session.evidence(),
+                            },
+                        ),
+                    )
+        print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
+        return 0
+    except (OSError, KeyError, ValueError, DispatcherLeaseError) as exc:
+        output = {"ok": False, "errors": [str(exc)]}
+        print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))
+        return 1
 
 
 if __name__ == "__main__":

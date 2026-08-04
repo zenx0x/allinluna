@@ -18,9 +18,11 @@ from workflow_state import (
     model_matches_lock,
     read_json,
     resolve_counterpilot_mode,
+    resolve_topology,
     valid_counterpilot_risk_waiver,
 )
-from runtime_truth import assignment_conflicts, runtime_identity_errors
+from acceptance_manifest import validate_acceptance_record
+from runtime_truth import assignment_conflicts, runtime_identity_errors, task_contract_errors
 
 
 def validate(target: Path) -> dict[str, Any]:
@@ -38,6 +40,8 @@ def validate(target: Path) -> dict[str, Any]:
         "plan_hash",
         "execution_style",
         "risk_level",
+        "topology",
+        "acceptance",
         "run_dir",
         "status",
         "profile",
@@ -90,7 +94,6 @@ def validate(target: Path) -> dict[str, Any]:
         errors.append("orchestration.counterpilot_risk_waiver is invalid")
     if (
         state.get("risk_level") in {"high", "critical"}
-        and state.get("execution_style") == "managed"
         and counterpilot_mode == "off"
         and not valid_counterpilot_risk_waiver(counterpilot_waiver)
     ):
@@ -150,6 +153,18 @@ def validate(target: Path) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError) as exc:
             errors.append(f"cannot read plan.json: {exc}")
             plan = None
+
+    if plan is not None:
+        expected_topology = resolve_topology(plan)
+        state_topology = state.get("topology")
+        if not isinstance(state_topology, dict):
+            errors.append("run topology projection is missing")
+        elif state_topology.get("resolved") != expected_topology.get("resolved"):
+            errors.append("run topology projection does not match the plan")
+        errors.extend(task_contract_errors(state, plan))
+    acceptance_result = validate_acceptance_record(state.get("acceptance"), state.get("risk_level", "low"))
+    errors.extend(acceptance_result["errors"])
+    warnings.extend(acceptance_result["warnings"])
 
     tasks = state.get("tasks")
     if not isinstance(tasks, dict) or not tasks:

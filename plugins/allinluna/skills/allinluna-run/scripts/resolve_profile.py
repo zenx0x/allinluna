@@ -200,6 +200,7 @@ def resolve(
     concurrency_override: int | None = None,
     resource_class: str | None = None,
     role_resource_classes: dict[str, str] | None = None,
+    risk_level: str | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -244,6 +245,16 @@ def resolve(
             policy["budget"] = deep_merge(policy.get("budget", {}), plan_budget)
     if role_overrides:
         policy["roles"] = deep_merge(policy.get("roles", {}), role_overrides)
+    explicit_acceptance_reasoning = bool(
+        isinstance(role_overrides, dict)
+        and isinstance(role_overrides.get("acceptance"), dict)
+        and "reasoning" in role_overrides["acceptance"]
+    )
+    if isinstance(plan_policy, dict) and isinstance(plan_policy.get("role_overrides"), dict):
+        plan_acceptance = plan_policy["role_overrides"].get("acceptance")
+        explicit_acceptance_reasoning = explicit_acceptance_reasoning or bool(
+            isinstance(plan_acceptance, dict) and "reasoning" in plan_acceptance
+        )
     if concurrency_override is not None:
         if concurrency_override < 1:
             errors.append("concurrency override must be positive")
@@ -251,6 +262,17 @@ def resolve(
             policy["concurrency"]["desired"] = concurrency_override
     if profile_name == "custom" and not policy.get("roles"):
         errors.append("custom profile requires at least one role override")
+    # Acceptance is an independent, read-only boundary.  Even mad-luna keeps
+    # its default at Luna xhigh rather than inheriting the implementation-wide
+    # max setting; an explicit role override may still request max.
+    acceptance_policy = policy.get("roles", {}).get("acceptance")
+    if (
+        isinstance(acceptance_policy, dict)
+        and acceptance_policy.get("model_request") == "family:luna"
+        and acceptance_policy.get("reasoning") == "max"
+        and not explicit_acceptance_reasoning
+    ):
+        acceptance_policy["reasoning"] = "xhigh"
 
     selected_delegation = delegation
     if catalog is not None and delegation == "auto":
@@ -276,6 +298,12 @@ def resolve(
     for role, request in policy.get("roles", {}).items():
         requested_model = request.get("model_request", "unavailable")
         requested_reasoning = request.get("reasoning", "unavailable")
+        if (
+            role == "acceptance"
+            and risk_level in {"high", "critical"}
+            and requested_reasoning == "high"
+        ):
+            requested_reasoning = "xhigh"
         role_resource_class = (
             role_resource_classes.get(role)
             if isinstance(role_resource_classes, dict) and role in role_resource_classes
@@ -288,6 +316,23 @@ def resolve(
             "actual_model": "unavailable",
             "actual_reasoning": "unavailable",
             "resolution": "runtime-required",
+            "requested": {
+                "model": requested_model,
+                "reasoning": requested_reasoning,
+                "delegation": delegation,
+            },
+            "resolved": {
+                "model": "unavailable",
+                "reasoning": "unavailable",
+                "delegation": selected_delegation,
+                "resolution": "runtime-required",
+            },
+            "actual": {
+                "model": "unavailable",
+                "reasoning": "unavailable",
+                "delegation": "unavailable",
+                "resolution": "unavailable",
+            },
         }
         if catalog is not None:
             request_chain = [requested_model]
@@ -335,6 +380,12 @@ def resolve(
                         ),
                     }
                 )
+                result["resolved"] = {
+                    "model": chosen.get("id", "unavailable"),
+                    "reasoning": actual_reasoning,
+                    "delegation": selected_delegation,
+                    "resolution": result["resolution"],
+                }
                 if reasoning_resolution == "fallback":
                     warnings.append(
                         f"{role}: reasoning {requested_reasoning} resolved to {actual_reasoning}"
@@ -345,6 +396,12 @@ def resolve(
                     )
             else:
                 result["resolution"] = "unavailable"
+                result["resolved"] = {
+                    "model": "unavailable",
+                    "reasoning": "unavailable",
+                    "delegation": selected_delegation,
+                    "resolution": "unavailable",
+                }
                 elsewhere = matching_surfaces(
                     requested_model,
                     catalog,
@@ -377,6 +434,21 @@ def resolve(
             "selected": selected_delegation,
             "available": selected_catalog.get("available", False),
         },
+        "requested": {
+            "profile": profile_name,
+            "delegation": delegation,
+            "concurrency": desired,
+        },
+        "resolved": {
+            "profile": profile_name,
+            "delegation": selected_delegation,
+            "concurrency": effective,
+        },
+        "actual": {
+            "model": "unavailable",
+            "reasoning": "unavailable",
+            "delegation": "unavailable",
+        },
         "policy": policy,
         "resolved_roles": resolved_roles,
         "concurrency": {
@@ -403,6 +475,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--role", action="append", default=[])
     parser.add_argument("--concurrency", type=int)
     parser.add_argument(
+        "--risk-level", choices=["low", "medium", "high", "critical"]
+    )
+    parser.add_argument(
         "--resource-class",
         choices=["authority", "architecture", "implementation-complex", "implementation-clear", "mechanical", "integration", "acceptance"],
     )
@@ -427,6 +502,7 @@ def main(argv: list[str] | None = None) -> int:
             delegation=args.delegation,
             concurrency_override=args.concurrency,
             resource_class=args.resource_class,
+            risk_level=args.risk_level,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         result = {"valid": False, "errors": [str(exc)], "warnings": []}

@@ -25,6 +25,22 @@ Research Routes 是可独立安装、也可与 All in Luna 共存的 Codex 研�
 
 预期侧边栏结果是多个 route Owner 并行整理路线与证据，CounterPilot 独立只读地挑战假设；最终得到 terrain map 和下一次可逆 probe，而不是一个未经授权的结论。
 
+## 第一次使用：你会先看到什么
+
+第一次使用仍然是 outcome-first：Sponsor 保持问题方向，独立 Coordinator 出现在侧边栏，随后出现多个 route Owner。重复 tick 只会对已知 dispatch 做 `no-op`、`reuse` 或 `wait`，不会重复创建 Owner。你会看到真实 thread receipt、host/worktree/repo 身份和 monitor cursor；最后的 integration 只做 `mechanical-only` 对账。
+
+### 资源确认卡与最短 prompt
+
+`requested` 是请求值，`resolved` 是主机解析值，`actual` 只能由真实 host receipt 证明；缺少 receipt 时必须是 BLOCKED/UNVERIFIED。第一次可直接复制：
+
+```text
+使用 Research Routes 比较这个问题的候选路线：
+[问题、约束和已知资料]
+保留 Claims、Evidence、未知、矛盾和 failure regimes；由独立 Coordinator 派发多个 route Owner，重复 tick 不得重复创建，持续到真实 receipt、monitor 和可逆 probe。不要把 terrain map 当成实验授权或产品实现计划。
+```
+
+成功运行会得到路线中立 terrain map、多个 Owner receipt、monitor cursor 和一次可逆 probe；失败时原 Owner 的 `product_failure` 走同一 dispatch 恢复，host/tool unavailable 与 checker error 分别停在 BLOCKED 或 CHECKER_ERROR。CI 的 `FIXTURE_PASS` 永远不等于 `REAL_PASS`。高级 protocol、schema 和只读 checker 见 [first-use protocol](https://github.com/zenx0x/allinluna/blob/main/docs/first-use-protocol.md)。
+
 ## 最短安装与首次使用
 
 如果你从源码仓库安装，在 Codex Plugins 中选择本地路径并选择仓库根目录；根目录 marketplace 会同时列出 All in Luna 和 Research Routes。若你拿到的是独立发行包，选择这个包的根目录；其中真正的插件根是 `plugins/research-routes/`，不需要在发行包里再次运行源仓库构建器。

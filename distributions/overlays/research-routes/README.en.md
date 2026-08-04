@@ -25,6 +25,22 @@ Preserve Claims, Evidence, unknowns, contradictory results, and failure regimes;
 
 The expected sidebar result is multiple route Owners comparing routes and evidence in parallel, with an independent read-only CounterPilot challenge. The output is a terrain map and a reversible next probe, not an unauthorized conclusion.
 
+## First use: what you will see
+
+First use remains outcome-first: the Sponsor keeps the question’s direction, an independent Coordinator appears in the sidebar, and multiple route Owners follow. Repeated ticks reconcile known dispatches with `no-op`, `reuse`, or `wait`, never by creating the same Owner twice. You see real thread receipts, host/worktree/repository identity, and a monitor cursor before the final `mechanical-only` integration boundary.
+
+### Resource confirmation card and shortest prompt
+
+`requested` is the request, `resolved` is the host resolution, and `actual` is proven only by a real host receipt; without one the result must be BLOCKED/UNVERIFIED. Copy this for a first run:
+
+```text
+Use Research Routes to compare the candidate routes for this question:
+[question, constraints, and known material]
+Preserve Claims, Evidence, unknowns, contradictions, and failure regimes; have an independent Coordinator dispatch multiple route Owners, keep repeated ticks idempotent, and continue through real receipts, monitoring, and one reversible probe. Do not turn a terrain map into experiment authorization or a product implementation plan.
+```
+
+A successful run produces a route-neutral terrain map, multiple Owner receipts, a monitor cursor, and one reversible probe. If an Owner has a `product_failure`, recovery returns to the same dispatch; host/tool unavailability and checker errors stop separately as BLOCKED or CHECKER_ERROR. CI `FIXTURE_PASS` never equals `REAL_PASS`. See the [first-use protocol](https://github.com/zenx0x/allinluna/blob/main/docs/first-use-protocol.md) for the advanced protocol, schema, and read-only checker.
+
 ## Shortest install and first use
 
 From the source repository, choose installation from a local path in Codex Plugins and select the repository root; its marketplace lists both All in Luna and Research Routes. If you received a standalone distribution, select that package root; its actual plugin root is `plugins/research-routes/`, and you do not need to run the source-repository builder again inside it.

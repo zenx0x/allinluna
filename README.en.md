@@ -113,6 +113,37 @@ The table describes request policy, not invented fixed model names: `tier:fronti
 
 `premium` is also available: target concurrency 12, with `frontier` and max reasoning prioritized for planning, authority, and acceptance. Resource modes change allocation and speed; they never turn complete execution into an MVP.
 
+## First use: what you will see
+
+The first run is outcome-first; you do not need to learn the internal protocol. Your Sponsor conversation keeps direction, an independent Coordinator appears in the sidebar, and then two or more named top-level Owners appear. Repeating a refresh or tick reconciles known dispatches with `no-op`, `reuse`, or `wait`; it does not create the same Owner twice.
+
+You then see each Owner’s real thread receipt, host/worktree/repository identity, and monitor cursor before the `mechanical-only` integration boundary. Without a real Codex App receipt, the result is explicitly BLOCKED/UNVERIFIED; a CI fixture is never presented as real success.
+
+### Resource confirmation card
+
+The run keeps three values separate: `requested` (the tool/capability you asked for), `resolved` (what the host resolved), and `actual` (what the host receipt proves was used). If the host does not expose telemetry, it must say `unavailable`; a request is not evidence of actual use.
+
+| Field | Evidence to expect |
+| --- | --- |
+| `thread` / `host` | Distinct Sponsor, Coordinator, and Owner identities |
+| `worktree` / `repo` | Real isolation and repository identity in each Owner receipt |
+| `duplicate` | `no-op` for a duplicate tick, `reuse` for completed work, `wait` for pending work |
+| `monitor` / `integration` | Cursor and receipts, with integration explicitly mechanical-only |
+
+### Shortest copyable prompt
+
+```text
+Use All in Luna to implement this outcome completely:
+[outcome, users, constraints, and definition of done]
+First receive the context I already supplied, then create an independent Coordinator and multiple sidebar top-level Owners; continue through real thread receipts, monitoring, integration, and acceptance. Do not create a Goal, push, or publish unless I explicitly authorize it.
+```
+
+### One successful run and one recovery
+
+A successful run shows Coordinator → multiple top-level Owners → no duplicate after a repeated tick → a real receipt for every Owner → monitor cursor → mechanical-only integration. If an Owner reports `product_failure`, recovery returns to the original dispatch identity; host/tool unavailability and checker errors stop separately as BLOCKED or CHECKER_ERROR with missing evidence reported.
+
+See [`docs/first-use-protocol.md`](docs/first-use-protocol.md) for the advanced protocol, schema, and read-only checker. CI may run fixture success/recovery, but `FIXTURE_PASS` never equals `REAL_PASS`.
+
 ## Shortest install and first use
 
 ### Install directly from this repository

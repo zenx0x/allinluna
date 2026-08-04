@@ -7,6 +7,16 @@ from typing import Any
 
 CAPABILITY_TYPES = {"skill", "mcp", "app", "script"}
 BINDING_KINDS = {"required", "applicable", "preferred", "optional"}
+READ_ONLY_FORBIDDEN_SCOPE = {
+    "write",
+    "writes",
+    "mutate",
+    "mutation",
+    "delete",
+    "publish",
+    "external-write",
+    "live-external-mutation",
+}
 
 
 def _capability(value: dict[str, Any]) -> dict[str, Any]:
@@ -56,6 +66,11 @@ class CapabilityRouter:
         permissions = permissions or {}
         discovery = discovery or {}
         context = context or {}
+        read_only = bool(
+            context.get("read_only")
+            or context.get("acceptance_read_only")
+            or context.get("role") == "acceptance"
+        )
         requested = [_binding(item, index) for index, item in enumerate(bindings)]
         requested.sort(key=lambda item: (item["invocation_order"], item["capability"]["id"]))
         resolved: list[dict[str, Any]] = []
@@ -67,6 +82,9 @@ class CapabilityRouter:
             )
             availability_state, discovery_evidence = self._discovery_state(cap_id, availability, discovery)
             permission_state = self._permission_state(cap_id, permissions)
+            read_only_violation = read_only and self._read_only_violation(cap, item)
+            if read_only_violation:
+                permission_state = "denied"
             status = "resolved" if is_applicable and availability_state == "available" and permission_state == "granted" else (
                 "not-applicable" if not is_applicable else
                 "unavailable" if availability_state != "available" else
@@ -79,7 +97,12 @@ class CapabilityRouter:
                 fallback_id = fallback["id"]
                 fallback_availability, _ = self._discovery_state(fallback_id, availability, discovery)
                 fallback_permission = self._permission_state(fallback_id, permissions)
-                if fallback_availability == "available" and fallback_permission == "granted":
+                fallback_read_only_violation = read_only and self._read_only_violation(fallback, item)
+                if (
+                    fallback_availability == "available"
+                    and fallback_permission == "granted"
+                    and not fallback_read_only_violation
+                ):
                     actual = fallback
                     fallback_used = fallback_id
                     status = "fallback"
@@ -97,6 +120,9 @@ class CapabilityRouter:
                 "invocation_order": item["invocation_order"],
                 "permission_scope": item["permission_scope"],
                 "expected_evidence": item["expected_evidence"],
+                "read_only": read_only,
+                "read_only_violation": read_only_violation,
+                "reason": "acceptance-read-only" if read_only_violation else None,
             })
         blocking = [
             item for item, binding in zip(resolved, requested)
@@ -108,7 +134,21 @@ class CapabilityRouter:
             "actual": [item["actual"] for item in resolved if item["actual"]],
             "blocking": blocking,
             "valid": not blocking,
+            "context": {
+                "read_only": read_only,
+                "risk_level": context.get("risk_level"),
+                "topology": deepcopy(context.get("topology")),
+            },
         }
+
+    @staticmethod
+    def _read_only_violation(capability: dict[str, Any], binding: dict[str, Any]) -> bool:
+        if capability.get("read_only") is False or capability.get("live_external_mutation") is True:
+            return True
+        scopes = list(capability.get("permission_scope", []))
+        scopes.extend(binding.get("permission_scope", []))
+        normalized = {str(scope).casefold().replace("_", "-") for scope in scopes}
+        return bool(normalized & READ_ONLY_FORBIDDEN_SCOPE)
 
     def _discovery_state(
         self,

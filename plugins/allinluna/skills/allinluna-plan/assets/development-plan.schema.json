@@ -137,8 +137,10 @@
       "items": { "$ref": "#/$defs/milestone" }
     },
     "assumptions": { "type": "array", "items": { "type": "string" } },
-    "unknowns": { "type": "array", "items": { "type": "string" } }
-    ,"workflow_preset": { "type": "object" }
+    "unknowns": { "type": "array", "items": { "type": "string" } },
+    "topology": { "$ref": "#/$defs/topology" },
+    "acceptance": { "$ref": "#/$defs/acceptancePolicy" },
+    "workflow_preset": { "type": "object" }
   },
   "$defs": {
     "resourcePolicy": {
@@ -186,6 +188,38 @@
           }
         },
         "role_overrides": { "type": "object" }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": { "const": "risk-adaptive" },
+        "size": { "enum": ["small", "medium", "large"] },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "shared_contract": { "type": "boolean" },
+            "scientific_safety": { "type": "boolean" },
+            "external_write": { "type": "boolean" }
+          }
+        },
+        "shared_contract": { "type": "boolean" },
+        "scientific_safety": { "type": "boolean" },
+        "external_write": { "type": "boolean" },
+        "integration": { "enum": ["auto", "none", "required"] },
+        "independent_acceptance": { "enum": ["auto", "none", "required"] }
+      }
+    },
+    "acceptancePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "manifest_id": { "type": "string", "minLength": 1 },
+        "read_only": { "const": true },
+        "reasoning": { "enum": ["auto", "high", "xhigh"] },
+        "time_budget_minutes": { "type": "integer", "minimum": 1 }
       }
     },
     "task": {

@@ -7,7 +7,8 @@ import argparse
 import json
 from pathlib import Path
 
-from workflow_state import append_event, atomic_write_json, event, load_state, now_iso
+from dispatcher_lease import append_event_locked, state_lock
+from workflow_state import atomic_write_json, event, load_state, now_iso
 from runtime_truth import assignment_conflicts, runtime_identity_errors
 
 
@@ -19,83 +20,103 @@ def main() -> int:
     args = parser.parse_args()
     output: dict
     try:
-        run_dir, state = load_state(args.run)
-        snapshots = json.loads(args.snapshot.read_text(encoding="utf-8"))
-        if not isinstance(snapshots, list):
-            raise ValueError("snapshot must be a normalized array")
-        changed = []
-        events = []
-        for item in snapshots:
-            if not isinstance(item, dict):
-                raise ValueError("each snapshot item must be an object")
-            source = str(item.get("source", "")).casefold()
-            if source in {"dispatch", "dispatch-json", "coordinator-dispatch"} or item.get("kind") in {
-                "dispatch-top-level-task",
-                "dispatch-subcoordinator",
-            }:
-                raise ValueError("dispatch output is not runtime startup evidence")
-            task_id = item.get("task_id")
-            if task_id not in state["tasks"]:
-                raise ValueError(f"snapshot references unknown task: {task_id}")
-            task = state["tasks"][task_id]
-            previous = task["status"]
-            for field in ("thread_id", "host_id", "worktree", "branch", "base_commit", "runtime_receipt"):
-                if item.get(field) is not None:
-                    task["assignment"][field] = item[field]
-            actual = item.get("actual")
-            if isinstance(actual, dict):
-                for field in ("model", "reasoning", "delegation", "resolution"):
-                    if actual.get(field) is not None:
-                        task["actual"][field] = actual[field]
-            task["assignment"]["cursor"] = item.get("cursor", task["assignment"].get("cursor"))
-            task["assignment"]["last_activity_at"] = item.get("last_activity_at") or now_iso()
-            status = item.get("status")
-            if status in {"needs_attention", "unavailable", "failed"} and previous == "running":
-                task["status"] = "blocked"
-                task["evidence"]["blockers"].append(
-                    item.get("summary") or f"thread status is {status}"
+        run_dir, _ = load_state(args.run)
+        with state_lock(run_dir):
+            _, state = load_state(run_dir)
+            snapshots = json.loads(args.snapshot.read_text(encoding="utf-8"))
+            if not isinstance(snapshots, list):
+                raise ValueError("snapshot must be a normalized array")
+            changed = []
+            events = []
+            for item in snapshots:
+                if not isinstance(item, dict):
+                    raise ValueError("each snapshot item must be an object")
+                source = str(item.get("source", "")).casefold()
+                if source in {"dispatch", "dispatch-json", "coordinator-dispatch"} or item.get("kind") in {
+                    "dispatch-top-level-task",
+                    "dispatch-subcoordinator",
+                }:
+                    raise ValueError("dispatch output is not runtime startup evidence")
+                task_id = item.get("task_id")
+                if task_id not in state["tasks"]:
+                    raise ValueError(f"snapshot references unknown task: {task_id}")
+                if item.get("client_thread_id") and not item.get("thread_id"):
+                    raise ValueError(
+                        "pending clientThreadId is dispatch evidence, not a thread startup receipt"
+                    )
+                task = state["tasks"][task_id]
+                previous = task["status"]
+                for field in ("thread_id", "host_id", "worktree", "branch", "base_commit", "runtime_receipt"):
+                    if item.get(field) is not None:
+                        task["assignment"][field] = item[field]
+                actual = item.get("actual")
+                if isinstance(actual, dict):
+                    for field in ("model", "reasoning", "delegation", "resolution"):
+                        if actual.get(field) is not None:
+                            task["actual"][field] = actual[field]
+                if isinstance(item.get("runtime_evidence"), dict):
+                    task["assignment"]["runtime_evidence"] = item["runtime_evidence"]
+                task["assignment"]["cursor"] = item.get("cursor", task["assignment"].get("cursor"))
+                task["assignment"]["last_activity_at"] = item.get("last_activity_at") or now_iso()
+                status = item.get("status")
+                if status in {"needs_attention", "unavailable", "failed"} and previous == "running":
+                    task["status"] = "blocked"
+                    task["evidence"]["blockers"].append(
+                        item.get("summary") or f"thread status is {status}"
+                    )
+                elif status == "completed" and previous == "running":
+                    # A host thread finishing is not task completion by itself. Keep the task in
+                    # running so update_run can atomically record commit/check evidence and perform
+                    # the legal running -> completed transition.
+                    pass
+                task["updated_at"] = now_iso()
+                events.append(
+                    event(
+                        actor="coordinator",
+                        entity=f"task:{task_id}",
+                        previous=previous,
+                        current=task["status"],
+                        reason="thread snapshot reconciled",
+                        evidence={
+                            "thread_status": status,
+                            "cursor": item.get("cursor"),
+                            "runtime_evidence": item.get("runtime_evidence"),
+                        },
+                    )
                 )
-            elif status == "completed" and previous == "running":
-                # A host thread finishing is not task completion by itself. Keep the task in
-                # running so update_run can atomically record commit/check evidence and perform
-                # the legal running -> completed transition.
-                pass
-            task["updated_at"] = now_iso()
-            events.append(
-                event(
-                    actor="coordinator",
-                    entity=f"task:{task_id}",
-                    previous=previous,
-                    current=task["status"],
-                    reason="thread snapshot reconciled",
-                    evidence={"thread_status": status, "cursor": item.get("cursor")},
+                changed.append(task_id)
+            for task_id, task in state["tasks"].items():
+                if task["status"] in {"running", "completed"}:
+                    identity_errors = runtime_identity_errors(task, state, require_started=True)
+                    if identity_errors:
+                        raise ValueError(f"task {task_id} cannot be reconciled: {'; '.join(identity_errors)}")
+            conflicts = assignment_conflicts(state["tasks"])
+            if conflicts:
+                raise ValueError("; ".join(conflicts))
+            atomic_write_json(run_dir / "run-state.json", state)
+            for item in events:
+                append_event_locked(
+                    run_dir,
+                    actor=item["actor"],
+                    entity=item["entity"],
+                    previous=item["previous"],
+                    current=item["current"],
+                    reason=item["reason"],
+                    evidence=item["evidence"],
                 )
-            )
-            changed.append(task_id)
-        for task_id, task in state["tasks"].items():
-            if task["status"] in {"running", "completed"}:
-                identity_errors = runtime_identity_errors(task, state, require_started=True)
-                if identity_errors:
-                    raise ValueError(f"task {task_id} cannot be reconciled: {'; '.join(identity_errors)}")
-        conflicts = assignment_conflicts(state["tasks"])
-        if conflicts:
-            raise ValueError("; ".join(conflicts))
-        atomic_write_json(run_dir / "run-state.json", state)
-        for item in events:
-            append_event(run_dir, item)
-        output = {
-            "ok": True,
-            "updated_tasks": changed,
-            "evidence_required": [
-                item["task_id"] for item in snapshots if item.get("status") == "completed"
-            ],
-            "startup_evidence_required": [
-                item["task_id"]
-                for item in snapshots
-                if item.get("status") in {"running", "completed"}
-                and state["tasks"][item["task_id"]]["status"] == "ready"
-            ],
-        }
+            output = {
+                "ok": True,
+                "updated_tasks": changed,
+                "evidence_required": [
+                    item["task_id"] for item in snapshots if item.get("status") == "completed"
+                ],
+                "startup_evidence_required": [
+                    item["task_id"]
+                    for item in snapshots
+                    if item.get("status") in {"running", "completed"}
+                    and state["tasks"][item["task_id"]]["status"] == "ready"
+                ],
+            }
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
         output = {"ok": False, "errors": [str(exc)]}
     print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))

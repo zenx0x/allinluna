@@ -8,6 +8,7 @@ from typing import Any
 
 
 TERMINAL_TASK_STATES = {"completed", "skipped", "cancelled"}
+READ_ONLY_RESOURCE_CLASS = "acceptance"
 PLACEHOLDER_VALUES = {
     "",
     "none",
@@ -40,6 +41,68 @@ def task_is_top_level(task: dict[str, Any], state: dict[str, Any]) -> bool:
         or requested.get("delegation") == "top-level-task"
         or state.get("capabilities", {}).get("actual_delegation") == "top-level-task"
     )
+
+
+def acceptance_read_only_errors(task: dict[str, Any]) -> list[str]:
+    """Reject acceptance records that claim ownership or external mutation."""
+    if task.get("resource_class") != READ_ONLY_RESOURCE_CLASS:
+        return []
+    errors: list[str] = []
+    ownership = task.get("ownership", {})
+    if not isinstance(ownership, dict):
+        errors.append("acceptance task ownership must be an object")
+        ownership = {}
+    if ownership.get("paths"):
+        errors.append("acceptance task must not own writable paths")
+    if task.get("external_side_effects"):
+        errors.append("acceptance task must not declare external side effects")
+    actual = task.get("actual", {})
+    if not isinstance(actual, dict):
+        errors.append("acceptance task actual runtime projection must be an object")
+        actual = {}
+    if actual.get("delegation") == "unavailable" and task.get("status") in {
+        "running",
+        "completed",
+    }:
+        errors.append("acceptance task requires an actual read-only runtime delegation")
+    return errors
+
+
+def task_contract_errors(state: dict[str, Any], plan: dict[str, Any]) -> list[str]:
+    """Ensure topology derivation did not rewrite task dependencies or ownership."""
+    raw_plan_tasks = plan.get("tasks", [])
+    if not isinstance(raw_plan_tasks, list):
+        return ["plan tasks must be an array"]
+    plan_tasks = {
+        task.get("id"): task
+        for task in raw_plan_tasks
+        if isinstance(task, dict) and task.get("id")
+    }
+    state_tasks = state.get("tasks", {})
+    if not isinstance(state_tasks, dict):
+        return ["run state tasks must be an object"]
+    errors: list[str] = []
+    if set(state_tasks) != set(plan_tasks):
+        missing = sorted(set(plan_tasks) - set(state_tasks))
+        extra = sorted(set(state_tasks) - set(plan_tasks))
+        if missing:
+            errors.append("run state is missing plan tasks: " + ", ".join(missing))
+        if extra:
+            errors.append("run state contains tasks absent from plan: " + ", ".join(extra))
+    for task_id in sorted(set(state_tasks) & set(plan_tasks)):
+        state_task = state_tasks[task_id]
+        plan_task = plan_tasks[task_id]
+        if not isinstance(state_task, dict):
+            errors.append(f"task {task_id} state projection must be an object")
+            continue
+        if state_task.get("dependencies") != plan_task.get("dependencies"):
+            errors.append(f"task {task_id} dependencies differ from the plan")
+        if state_task.get("ownership") != plan_task.get("ownership"):
+            errors.append(f"task {task_id} ownership differs from the plan")
+        if state_task.get("resource_class") != plan_task.get("resource_class"):
+            errors.append(f"task {task_id} resource class differs from the plan")
+        errors.extend(f"task {task_id} {item}" for item in acceptance_read_only_errors(state_task))
+    return errors
 
 
 def _git_output(worktree: Path, *args: str) -> str:
@@ -92,6 +155,7 @@ def runtime_identity_errors(
     if not require_started:
         return []
     errors: list[str] = []
+    errors.extend(acceptance_read_only_errors(task))
     if task_is_top_level(task, state):
         assignment = task.get("assignment", {})
         if not is_real_runtime_value(assignment.get("thread_id")):

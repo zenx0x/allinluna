@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/acceptance-manifest.schema.json",
+  "title": "All in Luna Bounded Acceptance Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_id", "read_only", "risk_levels"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "manifest_id": { "type": "string", "minLength": 1 },
+    "read_only": { "const": true },
+    "risk_levels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["low", "medium", "high", "critical"],
+      "properties": {
+        "low": { "$ref": "#/$defs/riskSelection" },
+        "medium": { "$ref": "#/$defs/riskSelection" },
+        "high": { "$ref": "#/$defs/riskSelection" },
+        "critical": { "$ref": "#/$defs/riskSelection" }
+      }
+    }
+  },
+  "$defs": {
+    "riskSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time_budget_minutes", "commands", "coverage", "stop"],
+      "properties": {
+        "time_budget_minutes": { "type": "integer", "minimum": 1 },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/command" }
+        },
+        "coverage": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "stop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "required_evidence", "checker_error_policy"],
+          "properties": {
+            "mode": { "const": "evidence-sufficient" },
+            "required_evidence": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "checker_error_policy": { "const": "block-evidence" }
+          }
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "argv", "coverage", "dedupe_key", "bounded", "max_seconds"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "coverage": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "dedupe_key": { "type": "string", "minLength": 1 },
+        "bounded": { "const": true },
+        "max_seconds": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

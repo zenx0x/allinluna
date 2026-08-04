@@ -26,6 +26,9 @@ PROFILE_CONCURRENCY = {
     "mad-luna": 24,
 }
 COUNTERPILOT_MODES = {"off", "auto", "risk-triggered", "milestone", "continuous"}
+TOPOLOGY_POLICIES = {"risk-adaptive"}
+TOPOLOGY_SIZES = {"small", "medium", "large"}
+TOPOLOGY_REQUIREMENTS = {"auto", "none", "required"}
 RESOURCE_CLASSES = {
     "authority",
     "architecture",
@@ -96,6 +99,190 @@ def valid_counterpilot_risk_waiver(value: Any) -> bool:
     )
 
 
+def _topology_signal(topology: dict[str, Any], name: str) -> bool:
+    signals = topology.get("signals")
+    if isinstance(signals, dict) and isinstance(signals.get(name), bool):
+        return signals[name]
+    return topology.get(name) is True
+
+
+def resolve_topology(data: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the risk-adaptive owner/integration/acceptance topology.
+
+    The resolver is intentionally additive: it never creates, removes, or
+    rewrites tasks.  It reports the topology implied by the plan so runtime
+    state can preserve task dependencies and ownership byte-for-byte.
+    """
+    raw = data.get("topology")
+    topology = raw if isinstance(raw, dict) else {}
+    raw_tasks = data.get("tasks", [])
+    tasks = [task for task in raw_tasks if isinstance(task, dict)] if isinstance(raw_tasks, list) else []
+    implementation = [
+        task for task in tasks if task.get("resource_class") not in {"integration", "acceptance"}
+    ]
+    implementation_ids = [str(task.get("id")) for task in implementation if task.get("id")]
+    owner_count = len(implementation_ids)
+    inferred_size = "small" if owner_count <= 1 else "medium" if owner_count <= 4 else "large"
+    requested_size = topology.get("size") if topology.get("size") in TOPOLOGY_SIZES else inferred_size
+    risk_level = data.get("risk_level", "low")
+    parallel_only = data.get("execution_style") == "parallel-only"
+    shared_contract = _topology_signal(topology, "shared_contract")
+    scientific_safety = _topology_signal(topology, "scientific_safety") or any(
+        task.get("resource_class") == "authority" for task in implementation
+    )
+    external_write = _topology_signal(topology, "external_write") or any(
+        bool(task.get("external_side_effects")) for task in tasks
+    )
+    multiple_owners = owner_count > 1
+    risk_requires_integration = risk_level in {"medium", "high", "critical"}
+    risk_requires_acceptance = risk_level in {"high", "critical"}
+    integration_required = bool(
+        risk_requires_integration
+        or (multiple_owners and not parallel_only)
+        or shared_contract
+        or scientific_safety
+        or external_write
+    )
+    acceptance_required = bool(
+        risk_requires_acceptance or shared_contract or scientific_safety or external_write
+    )
+    requested_integration = topology.get("integration", "auto")
+    requested_acceptance = topology.get("independent_acceptance", "auto")
+    if requested_integration == "required":
+        integration_required = True
+    if requested_acceptance == "required":
+        acceptance_required = True
+    drivers: list[str] = []
+    if risk_requires_integration:
+        drivers.append(f"risk:{risk_level}")
+    if multiple_owners:
+        drivers.append("multiple-owners")
+    if shared_contract:
+        drivers.append("shared-contract")
+    if scientific_safety:
+        drivers.append("scientific-safety")
+    if external_write:
+        drivers.append("external-write")
+    if requested_integration == "required":
+        drivers.append("explicit-integration")
+    if requested_acceptance == "required":
+        drivers.append("explicit-independent-acceptance")
+    return {
+        "policy": "risk-adaptive",
+        "requested": {
+            "size": topology.get("size", "auto"),
+            "integration": requested_integration,
+            "independent_acceptance": requested_acceptance,
+            "signals": {
+                "shared_contract": shared_contract,
+                "scientific_safety": scientific_safety,
+                "external_write": external_write,
+            },
+        },
+        "resolved": {
+            "size": requested_size,
+            "inferred_size": inferred_size,
+            "risk_level": risk_level,
+            "execution_style": data.get("execution_style"),
+            "owner_count": owner_count,
+            "implementation_owner_ids": implementation_ids,
+            "integration_required": integration_required,
+            "independent_acceptance_required": acceptance_required,
+            "signals": {
+                "shared_contract": shared_contract,
+                "scientific_safety": scientific_safety,
+                "external_write": external_write,
+            },
+            "drivers": drivers,
+            "integration_task_ids": [
+                str(task.get("id")) for task in tasks if task.get("resource_class") == "integration"
+            ],
+            "acceptance_task_ids": [
+                str(task.get("id")) for task in tasks if task.get("resource_class") == "acceptance"
+            ],
+        },
+    }
+
+
+def validate_topology_contract(
+    data: dict[str, Any],
+    topology: dict[str, Any],
+    tasks: dict[str, dict[str, Any]],
+    closure: dict[str, set[str]],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Validate topology decisions without deriving new task dependencies."""
+    declared = data.get("topology")
+    if declared is not None and not isinstance(declared, dict):
+        errors.append("topology must be an object")
+        return
+    if isinstance(declared, dict):
+        if declared.get("policy", "risk-adaptive") not in TOPOLOGY_POLICIES:
+            errors.append("topology.policy must be risk-adaptive")
+        if "size" in declared and declared.get("size") not in TOPOLOGY_SIZES:
+            errors.append("topology.size must be small, medium, or large")
+        for field in ("integration", "independent_acceptance"):
+            if field in declared and declared.get(field) not in TOPOLOGY_REQUIREMENTS:
+                errors.append(f"topology.{field} must be auto, none, or required")
+        signals = declared.get("signals")
+        if signals is not None and not isinstance(signals, dict):
+            errors.append("topology.signals must be an object")
+        elif isinstance(signals, dict):
+            for field in ("shared_contract", "scientific_safety", "external_write"):
+                if field in signals and not isinstance(signals[field], bool):
+                    errors.append(f"topology.signals.{field} must be boolean")
+        for field in ("shared_contract", "scientific_safety", "external_write"):
+            if field in declared and not isinstance(declared[field], bool):
+                errors.append(f"topology.{field} must be boolean")
+    resolved = topology["resolved"]
+    owner_count = resolved["owner_count"]
+    if resolved["size"] == "small" and owner_count > 1:
+        errors.append("small risk-adaptive topology may have only one implementation owner")
+    integration_ids = [
+        task_id for task_id, task in tasks.items() if task.get("resource_class") == "integration"
+    ]
+    acceptance_ids = [
+        task_id for task_id, task in tasks.items() if task.get("resource_class") == "acceptance"
+    ]
+    integration_required = resolved["integration_required"]
+    acceptance_required = resolved["independent_acceptance_required"]
+    if integration_required and len(integration_ids) != 1:
+        errors.append(
+            "risk-adaptive topology requires exactly one phase integration task; "
+            f"found {len(integration_ids)}"
+        )
+    if acceptance_required and len(acceptance_ids) != 1:
+        errors.append(
+            "risk-adaptive topology requires exactly one independent acceptance task; "
+            f"found {len(acceptance_ids)}"
+        )
+    if not integration_required and integration_ids:
+        warnings.append("integration task is present although the resolved topology does not require one")
+    if not acceptance_required and acceptance_ids:
+        warnings.append("acceptance task is present although the resolved topology does not require one")
+    if isinstance(declared, dict) and declared.get("integration") == "none" and integration_ids:
+        errors.append("topology.integration=none cannot include an integration task")
+    if isinstance(declared, dict) and declared.get("independent_acceptance") == "none" and acceptance_ids:
+        errors.append("topology.independent_acceptance=none cannot include an acceptance task")
+    for integration_id in integration_ids:
+        for implementation_id in resolved["implementation_owner_ids"]:
+            if implementation_id not in closure.get(integration_id, set()):
+                errors.append(
+                    f"implementation task {implementation_id} must feed phase integration {integration_id}"
+                )
+    for acceptance_id in acceptance_ids:
+        acceptance = tasks[acceptance_id]
+        if acceptance.get("ownership", {}).get("paths"):
+            errors.append(f"acceptance task {acceptance_id} must be read-only")
+        if acceptance.get("external_side_effects"):
+            errors.append(f"acceptance task {acceptance_id} cannot declare external side effects")
+        if integration_ids and not any(
+            integration_id in closure.get(acceptance_id, set()) for integration_id in integration_ids
+        ):
+            errors.append(f"acceptance task {acceptance_id} must depend on phase integration")
+
+
 def path_prefix(value: str) -> str:
     normalized = value.replace("\\", "/").lstrip("./")
     wildcard = min(
@@ -148,13 +335,32 @@ def validate(data: Any) -> dict[str, Any]:
         return {"valid": False, "errors": ["plan must be a JSON object"], "warnings": []}
 
     missing = sorted(REQUIRED_TOP - data.keys())
-    extra = sorted(data.keys() - REQUIRED_TOP - {"workflow_preset"})
+    extra = sorted(data.keys() - REQUIRED_TOP - {"workflow_preset", "topology", "acceptance"})
     if missing:
         errors.append(f"missing top-level fields: {', '.join(missing)}")
     if extra:
         errors.append(f"unknown top-level fields: {', '.join(extra)}")
     if "workflow_preset" in data and not isinstance(data["workflow_preset"], dict):
         errors.append("workflow_preset must be an object")
+    acceptance_policy = data.get("acceptance")
+    if acceptance_policy is not None:
+        if not isinstance(acceptance_policy, dict):
+            errors.append("acceptance must be an object")
+        else:
+            if "manifest_id" in acceptance_policy:
+                if not nonempty_string(acceptance_policy.get("manifest_id")):
+                    errors.append("acceptance.manifest_id must be a non-empty string")
+                elif acceptance_policy.get("manifest_id") != "allinluna-bounded-acceptance-v1":
+                    errors.append("acceptance.manifest_id must use the canonical bounded manifest")
+            if "read_only" in acceptance_policy and acceptance_policy.get("read_only") is not True:
+                errors.append("acceptance.read_only must be true")
+            if "reasoning" in acceptance_policy and acceptance_policy.get("reasoning") not in {"auto", "high", "xhigh"}:
+                errors.append("acceptance.reasoning must be auto, high, or xhigh")
+            if "time_budget_minutes" in acceptance_policy and (
+                not isinstance(acceptance_policy.get("time_budget_minutes"), int)
+                or acceptance_policy.get("time_budget_minutes") <= 0
+            ):
+                errors.append("acceptance.time_budget_minutes must be a positive integer")
     if data.get("schema_version") != "2.0":
         errors.append("schema_version must be 2.0")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,79}", str(data.get("plan_id", ""))):
@@ -406,55 +612,15 @@ def validate(data: Any) -> dict[str, Any]:
             if task_id not in tasks:
                 errors.append(f"milestone {milestone_id} unlocks missing task {task_id}")
 
-    integration_ids = [
-        task_id for task_id, task in tasks.items() if task.get("resource_class") == "integration"
-    ]
-    acceptance_ids = [
-        task_id for task_id, task in tasks.items() if task.get("resource_class") == "acceptance"
-    ]
-    authority_or_external = any(
-        task.get("resource_class") == "authority" or bool(task.get("external_side_effects"))
-        for task in tasks.values()
-    )
-    require_integration = execution_style == "managed" and (
-        risk_level in {"medium", "high", "critical"} or len(tasks) > 1
-    )
-    require_acceptance = execution_style == "managed" and (
-        risk_level in {"high", "critical"} or authority_or_external
-    )
-    require_counterpilot = execution_style == "managed" and risk_level in {"high", "critical"}
-    if require_integration and not integration_ids:
-        errors.append("this managed risk level requires one phase integration task")
-    if require_acceptance and not acceptance_ids:
-        errors.append("this managed risk level requires independent acceptance")
+    topology = resolve_topology(data)
+    validate_topology_contract(data, topology, tasks, closure, errors, warnings)
+    require_counterpilot = risk_level in {"high", "critical"}
     if require_counterpilot and isinstance(orchestration, dict) and orchestration.get("counterpilot") == "off":
         if not valid_counterpilot_risk_waiver(orchestration.get("counterpilot_risk_waiver")):
             errors.append(
-                "high and critical managed plans may select counterpilot=off only with an explicit "
+                "high and critical plans may select counterpilot=off only with an explicit "
                 "counterpilot_risk_waiver"
             )
-    implementation_ids = [
-        task_id
-        for task_id, task in tasks.items()
-        if task.get("resource_class") not in {"integration", "acceptance"}
-    ]
-    for implementation_id in implementation_ids if integration_ids else []:
-        if not any(
-            implementation_id in closure.get(integration_id, set())
-            for integration_id in integration_ids
-        ):
-            errors.append(
-                f"implementation task {implementation_id} must feed a phase integration task"
-            )
-    for acceptance_id in acceptance_ids:
-        if not any(
-            integration_id in closure.get(acceptance_id, set())
-            for integration_id in integration_ids
-        ):
-            errors.append(f"acceptance task {acceptance_id} must depend on phase integration")
-        acceptance = tasks[acceptance_id]
-        if acceptance.get("ownership", {}).get("paths"):
-            errors.append(f"acceptance task {acceptance_id} must be read-only")
 
     return {
         "valid": not errors,
@@ -465,6 +631,7 @@ def validate(data: Any) -> dict[str, Any]:
             "tasks": len(tasks),
             "milestones": len(milestones),
             "profile": profile,
+            "topology": topology,
         },
     }
 

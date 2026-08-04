@@ -13,7 +13,7 @@ PLAN = ROOT / "plugins" / "allinluna" / "skills" / "allinluna-plan"
 sys.path.insert(0, str(PLAN / "scripts"))
 
 from inspect_project import inspect  # noqa: E402
-from validate_plan import validate  # noqa: E402
+from validate_plan import resolve_topology, validate  # noqa: E402
 
 
 class PlanValidationTests(unittest.TestCase):
@@ -162,6 +162,49 @@ class PlanValidationTests(unittest.TestCase):
         plan["resource_policy"]["fallback_models"] = []
         plan["resource_policy"]["concurrency"]["desired"] = 8
         self.assertTrue(validate(plan)["valid"])
+
+    def test_risk_adaptive_topology_resolves_low_medium_high(self) -> None:
+        low = deepcopy(self.example)
+        low["risk_level"] = "low"
+        low["tasks"] = [low["tasks"][0]]
+        low["milestones"] = []
+        low["orchestration"]["counterpilot"] = "off"
+        self.assertTrue(validate(low)["valid"], validate(low))
+        low_topology = resolve_topology(low)["resolved"]
+        self.assertFalse(low_topology["integration_required"])
+        self.assertFalse(low_topology["independent_acceptance_required"])
+
+        medium = deepcopy(self.example)
+        medium["risk_level"] = "medium"
+        medium["tasks"] = [task for task in medium["tasks"] if task["resource_class"] != "acceptance"]
+        medium["milestones"][0]["task_ids"] = ["T1-domain-api", "T2-ui", "T3-integrate"]
+        self.assertTrue(validate(medium)["valid"], validate(medium))
+        medium_topology = resolve_topology(medium)["resolved"]
+        self.assertTrue(medium_topology["integration_required"])
+        self.assertFalse(medium_topology["independent_acceptance_required"])
+
+        high = deepcopy(self.example)
+        high_topology = resolve_topology(high)["resolved"]
+        self.assertTrue(high_topology["integration_required"])
+        self.assertTrue(high_topology["independent_acceptance_required"])
+
+    def test_shared_contract_requires_independent_acceptance_even_when_low(self) -> None:
+        plan = deepcopy(self.example)
+        plan["risk_level"] = "low"
+        plan["tasks"] = [plan["tasks"][0]]
+        plan["milestones"] = []
+        plan["orchestration"]["counterpilot"] = "off"
+        plan["topology"] = {
+            "policy": "risk-adaptive",
+            "size": "small",
+            "signals": {"shared_contract": True},
+            "integration": "required",
+            "independent_acceptance": "required",
+        }
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("integration task" in error for error in result["errors"]))
+        self.assertTrue(any("independent acceptance" in error for error in result["errors"]))
 
 
 class ProjectInspectionTests(unittest.TestCase):

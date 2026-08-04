@@ -14,7 +14,10 @@
     "permission_scope": {"type": "array", "items": {"type": "string"}},
     "expected_evidence": {"type": "array", "items": {"type": "string"}},
     "fallback": {"type": ["string", "object", "null"]},
-    "capability": {"$ref": "#/$defs/capability"}
+    "capability": {"$ref": "#/$defs/capability"},
+    "tool_schema": {"$ref": "#/$defs/tool_schema"},
+    "fallback_evidence": {"$ref": "#/$defs/evidence"},
+    "runtime_catalog": {"$ref": "#/$defs/runtime_catalog"}
   },
   "$defs": {
     "capability": {
@@ -28,6 +31,40 @@
         "version": {"type": ["string", "null"]},
         "available": {"type": "boolean"},
         "discovery_evidence": {"type": ["string", "object", "array", "boolean", "null"]}
+      }
+    },
+    "tool_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "parameters"],
+      "properties": {
+        "tool": {"type": "string", "minLength": 1},
+        "parameters": {"type": "object"},
+        "receipt": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "resolved", "actual", "fallback"],
+      "properties": {
+        "requested": {},
+        "resolved": {},
+        "actual": {},
+        "fallback": {"type": ["string", "null"]}
+      }
+    },
+    "runtime_catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "tool_catalog", "fallbacks"],
+      "properties": {
+        "schema_version": {"type": "string"},
+        "catalog_id": {"type": "string"},
+        "capability_receipt": {"type": "object"},
+        "thread_tools": {"type": "array", "items": {"type": "string"}},
+        "tool_catalog": {"type": "object"},
+        "fallbacks": {"type": "object"}
       }
     }
   }

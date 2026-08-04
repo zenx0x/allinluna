@@ -6,11 +6,21 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PLAN_SCRIPTS = SCRIPT_DIR.parent.parent / "allinluna-plan" / "scripts"
+if str(PLAN_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(PLAN_SCRIPTS))
+
+from acceptance_manifest import resolve_acceptance  # noqa: E402
+from validate_plan import resolve_topology  # noqa: E402
 
 
 RUN_TRANSITIONS = {
@@ -108,15 +118,23 @@ def role_for_task(task: dict[str, Any]) -> str:
     }.get(resource_class, "worker")
 
 
-def requested_assignment(task: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+def requested_assignment(
+    task: dict[str, Any], policy: dict[str, Any], risk_level: str | None = None
+) -> dict[str, Any]:
     role = role_for_task(task)
     role_policy = deepcopy(policy.get("roles", {}).get(role, {}))
-    return {
+    requested = {
         "role": role,
         "model": role_policy.get("model_request", "unavailable"),
         "reasoning": role_policy.get("reasoning", "unavailable"),
         "delegation": "runtime-select",
     }
+    if role == "acceptance":
+        requested["read_only"] = True
+        requested["reasoning_policy"] = "luna-high-or-xhigh"
+        if risk_level in {"high", "critical"} and requested["reasoning"] in {"high", "max"}:
+            requested["reasoning"] = "xhigh"
+    return requested
 
 
 def dependencies_satisfied(task: dict[str, Any], tasks: dict[str, dict[str, Any]]) -> bool:
@@ -207,6 +225,11 @@ def counterpilot_trigger(state: dict[str, Any]) -> str | None:
         counterpilot.get("completed_triggers", [])
     )
     tasks = state.get("tasks", {})
+    topology = state.get("topology", {}).get("resolved", {})
+    integration_required = topology.get(
+        "integration_required",
+        any(task.get("resource_class") == "integration" for task in tasks.values()),
+    )
     if mode == "milestone":
         return _milestone_trigger(state, seen)
 
@@ -214,7 +237,7 @@ def counterpilot_trigger(state: dict[str, Any]) -> str | None:
         if any(task.get("assignment", {}).get("attempt", 0) >= 2 for task in tasks.values()):
             if "repeated-failure" not in seen:
                 return "repeated-failure"
-        if any(
+        if integration_required and any(
             task.get("status") == "ready" and task.get("resource_class") == "integration"
             for task in tasks.values()
         ) and "before-integration" not in seen:
@@ -223,7 +246,7 @@ def counterpilot_trigger(state: dict[str, Any]) -> str | None:
 
     if mode == "continuous" and "plan-formed" not in seen:
         return "plan-formed"
-    if mode == "continuous" and any(
+    if mode == "continuous" and integration_required and any(
         task.get("status") == "ready" and task.get("resource_class") == "integration"
         for task in tasks.values()
     ) and "before-integration" not in seen:
@@ -246,6 +269,13 @@ def build_initial_state(
 ) -> dict[str, Any]:
     timestamp = now_iso()
     orchestration = plan["orchestration"]
+    topology = resolve_topology(plan)
+    acceptance_policy = plan.get("acceptance") if isinstance(plan.get("acceptance"), dict) else {}
+    acceptance = resolve_acceptance(
+        plan.get("risk_level", "low"),
+        requested_reasoning=acceptance_policy.get("reasoning"),
+        requested_time_budget=acceptance_policy.get("time_budget_minutes"),
+    )
     counterpilot_mode = orchestration.get("counterpilot", "off")
     effective_counterpilot_mode = resolve_counterpilot_mode(
         counterpilot_mode, plan.get("risk_level", "low")
@@ -291,7 +321,7 @@ def build_initial_state(
             "capability_bindings": deepcopy(source.get("capability_bindings", [])),
             "full_read_requirements": deepcopy(source.get("full_read_requirements", [])),
             "capability_usage": [],
-            "requested": requested_assignment(source, policy),
+            "requested": requested_assignment(source, policy, plan.get("risk_level")),
             "actual": {
                 "model": "unavailable",
                 "reasoning": "unavailable",
@@ -315,6 +345,19 @@ def build_initial_state(
                 "dispatch_intent": None,
                 "dispatch_receipt": None,
                 "thread_receipt": None,
+                "requested": requested_assignment(source, policy, plan.get("risk_level")),
+                "resolved": {
+                    "model": None,
+                    "reasoning": None,
+                    "delegation": None,
+                    "resolution": None,
+                },
+                "actual": {
+                    "model": "unavailable",
+                    "reasoning": "unavailable",
+                    "delegation": "unavailable",
+                    "resolution": "unavailable",
+                },
             },
             "evidence": {
                 "final_commit": None,
@@ -335,6 +378,8 @@ def build_initial_state(
         "plan_hash": json_sha256(plan),
         "execution_style": plan["execution_style"],
         "risk_level": plan["risk_level"],
+        "topology": topology,
+        "acceptance": acceptance,
         "run_dir": str(run_dir.resolve()),
         "status": "planned",
         "profile": profile,

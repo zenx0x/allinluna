@@ -20,7 +20,7 @@
         "engineer": { "model_request": "family:spark", "reasoning": "high" },
         "worker": { "model_request": "family:spark", "reasoning": "high" },
         "integration": { "model_request": "tier:standard", "reasoning": "xhigh" },
-        "acceptance": { "model_request": "tier:frontier", "reasoning": "max", "independent": true }
+        "acceptance": { "model_request": "family:luna", "reasoning": "high", "independent": true }
       }
     },
     "balanced": {
@@ -41,7 +41,7 @@
         "engineer": { "model_request": "family:spark", "reasoning": "high" },
         "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:standard", "reasoning": "high" },
-        "acceptance": { "model_request": "tier:frontier", "reasoning": "high", "independent": true }
+        "acceptance": { "model_request": "family:luna", "reasoning": "high", "independent": true }
       }
     },
     "economy": {
@@ -84,7 +84,7 @@
         "engineer": { "model_request": "family:spark", "reasoning": "high" },
         "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:standard", "reasoning": "high" },
-        "acceptance": { "model_request": "tier:frontier", "reasoning": "high", "independent": true }
+        "acceptance": { "model_request": "family:luna", "reasoning": "high", "independent": true }
       }
     },
     "fast": {
@@ -105,7 +105,7 @@
         "engineer": { "model_request": "family:spark", "reasoning": "high" },
         "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:standard", "reasoning": "high" },
-        "acceptance": { "model_request": "tier:frontier", "reasoning": "high", "independent": true }
+        "acceptance": { "model_request": "family:luna", "reasoning": "high", "independent": true }
       }
     },
     "ultra-fast": {
@@ -126,7 +126,7 @@
         "engineer": { "model_request": "family:spark", "reasoning": "high" },
         "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:frontier", "reasoning": "xhigh" },
-        "acceptance": { "model_request": "tier:frontier", "reasoning": "xhigh", "independent": true }
+        "acceptance": { "model_request": "family:luna", "reasoning": "xhigh", "independent": true }
       }
     },
     "all-luna": {

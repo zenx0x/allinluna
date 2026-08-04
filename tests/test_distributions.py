@@ -124,6 +124,30 @@ class DistributionTests(unittest.TestCase):
             self.assertIn("plugins/research-routes/shared/", research_readme)
             self.assertTrue((research / "plugins/research-routes/.codex-plugin/plugin.json").is_file())
 
+    def test_first_use_readmes_keep_real_receipt_boundary_across_both_distributions(self) -> None:
+        source_readmes = {
+            "allinluna": ((ROOT / "README.md").read_text(encoding="utf-8"), (ROOT / "README.en.md").read_text(encoding="utf-8")),
+            "research-routes": (
+                (ROOT / "distributions/overlays/research-routes/README.md").read_text(encoding="utf-8"),
+                (ROOT / "distributions/overlays/research-routes/README.en.md").read_text(encoding="utf-8"),
+            ),
+        }
+        required_markers = (
+            "requested",
+            "resolved",
+            "actual",
+            "REAL_PASS",
+            "FIXTURE_PASS",
+            "BLOCKED",
+            "mechanical-only",
+        )
+        for distribution, readmes in source_readmes.items():
+            for readme in readmes:
+                for marker in required_markers:
+                    self.assertIn(marker, readme, f"{distribution} README lost first-use marker {marker}")
+        self.assertIn("docs/first-use-protocol.md", source_readmes["allinluna"][0])
+        self.assertIn("first-use protocol", source_readmes["research-routes"][1])
+
     def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "dist"

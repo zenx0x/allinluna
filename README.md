@@ -113,6 +113,37 @@ CounterPilot 是只读的独立挑战者，用来检查范围、假设、依赖�
 
 `premium` 也可用：目标并发 12，规划/权威/验收优先 `frontier` 与 max 推理，适合高风险决策。资源模式只改变分配和速度，不会把“完整执行”降级成 MVP。
 
+## 第一次使用：你会先看到什么
+
+第一次运行的目标不是让你学习内部协议，而是让你看见一条真实、可追踪的执行链：Sponsor 对话保持你的方向，独立 Coordinator 出现在侧边栏，随后出现两个或更多有名字的顶层 Owner。重复刷新或 tick 只会对已知 dispatch 做 `no-op`、`reuse` 或 `wait`，不会重复创建同一个 Owner。
+
+接下来你会看到 Owner 的真实 thread receipt、host/worktree/repo 身份和 monitor cursor；最后到达 `mechanical-only` integration boundary。没有真实 Codex App receipt 时，结果会明确显示 BLOCKED/UNVERIFIED，不会把 CI fixture 当成真实成功。
+
+### 资源确认卡
+
+运行状态应把三件事分开显示：`requested`（你请求的工具/能力）、`resolved`（主机解析到的工具/能力）、`actual`（主机 receipt 证明实际使用的工具/能力）。主机没有暴露 telemetry 时显示 `unavailable`；不要把请求值当成实际值。
+
+| 你确认的字段 | 你应看到的证据 |
+| --- | --- |
+| `thread` / `host` | Sponsor、Coordinator、每个 Owner 的身份彼此可区分 |
+| `worktree` / `repo` | Owner receipt 中的真实隔离位置与仓库身份 |
+| `duplicate` | 重复 tick 为 `no-op`，已完成 Owner 为 `reuse`，未完成 Owner 为 `wait` |
+| `monitor` / `integration` | cursor 与 receipt 齐全，integration 明确只做机械对账 |
+
+### 最短可复制 prompt
+
+```text
+使用 All in Luna 完整实现这个目标：
+[目标、用户、约束和完成定义]
+先接收我已经提供的上下文，再创建独立 Coordinator 和多个侧边栏顶层 Owner；持续执行到真实 thread receipt、monitor、集成和验收。不要创建 Goal、不要 push 或发布，除非我明确授权。
+```
+
+### 一个成功运行与一次失败恢复
+
+成功运行会得到：Coordinator → 多个顶层 Owner → 重复 tick 无重复 → 每个 Owner 的真实 receipt → monitor cursor → mechanical-only integration。失败时，Owner 的 `product_failure` 会回到原 dispatch 身份恢复；host/tool 不可用与 checker error 会分别停在 BLOCKED 或 CHECKER_ERROR，并报告缺少的证据。
+
+高级 protocol、schema 和只读 checker 见 [`docs/first-use-protocol.md`](docs/first-use-protocol.md)。CI 可以运行 fixture success/recovery，但 fixture 的 `FIXTURE_PASS` 永远不等于 `REAL_PASS`。
+
 ## 最短安装与首次使用
 
 ### 直接从这个仓库安装

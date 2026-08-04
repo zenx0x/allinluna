@@ -11,6 +11,8 @@
     "plan_hash",
     "execution_style",
     "risk_level",
+    "topology",
+    "acceptance",
     "run_dir",
     "status",
     "profile",
@@ -38,6 +40,28 @@
     "plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "execution_style": { "enum": ["managed", "parallel-only"] },
     "risk_level": { "enum": ["low", "medium", "high", "critical"] },
+    "topology": {
+      "type": "object",
+      "required": ["policy", "requested", "resolved"],
+      "properties": {
+        "policy": { "const": "risk-adaptive" },
+        "requested": { "type": "object" },
+        "resolved": { "type": "object" }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "required": ["manifest_id", "schema_version", "risk_level", "read_only", "requested", "resolved", "actual"],
+      "properties": {
+        "manifest_id": { "type": "string", "minLength": 1 },
+        "schema_version": { "const": "1.0" },
+        "risk_level": { "enum": ["low", "medium", "high", "critical"] },
+        "read_only": { "const": true },
+        "requested": { "type": "object" },
+        "resolved": { "type": "object" },
+        "actual": { "type": "object" }
+      }
+    },
     "run_dir": { "type": "string", "minLength": 1 },
     "status": { "enum": ["planned", "running", "paused", "blocked", "completed", "failed"] },
     "profile": { "enum": ["premium", "balanced", "economy", "speed", "fast", "ultra-fast", "all-luna", "mad-luna", "custom"] },
@@ -177,7 +201,10 @@
             "worktree": { "type": ["string", "null"] },
             "branch": { "type": ["string", "null"] },
             "base_commit": { "type": ["string", "null"] },
-            "runtime_receipt": { "type": ["string", "null"] }
+            "runtime_receipt": { "type": ["string", "null"] },
+            "requested": { "type": "object" },
+            "resolved": { "type": "object" },
+            "actual": { "type": "object" }
           }
         },
         "evidence": { "type": "object" },

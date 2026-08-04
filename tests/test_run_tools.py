@@ -373,6 +373,24 @@ class RunLifecycleTests(unittest.TestCase):
                 for field in ("environment", "reasoning", "brief_path"):
                     self.assertNotIn(field, action)
 
+    def test_sponsor_bootstrap_is_noop_after_real_coordinator_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(
+                Path(temporary) / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "coordinator",
+                "--host-id", "host-1", "--reason", "real receipt",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            repeated = command(str(SCRIPTS / "bootstrap_control_plane.py"), str(run), "--pretty")
+            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+            payload = json.loads(repeated.stdout)
+            self.assertFalse(any(item["kind"] == "create-primary-coordinator" for item in payload["actions"]))
+            self.assertEqual(payload["dispatcher_lease"]["lease_decision"], "sponsor-no-op")
+
     def test_delayed_owner_dispatch_is_idempotent_until_real_thread_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             temp = Path(temporary)
@@ -410,8 +428,23 @@ class RunLifecycleTests(unittest.TestCase):
                 [item["kind"] for item in second_payload["actions"] if item.get("task_id") == "T1-domain-api"],
                 ["await-thread-receipt"],
             )
+            duplicate = next(
+                item["duplicate_resolution"]
+                for item in second_payload["actions"]
+                if item.get("task_id") == "T1-domain-api"
+            )
+            self.assertEqual(duplicate["decision"], "wait")
+            self.assertEqual(duplicate["original_intent"]["dispatch_id"], owner_action["dispatch_id"])
+            self.assertIsInstance(duplicate["epoch"], int)
+            self.assertIsInstance(duplicate["identity"], dict)
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "ready")
+            events = [json.loads(line) for line in (run / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(any(
+                item["current"] == "wait"
+                and item["evidence"].get("duplicate", {}).get("original_intent", {}).get("dispatch_id") == owner_action["dispatch_id"]
+                for item in events
+            ))
 
             receipt_path = temp / "thread-receipt.json"
             receipt_path.write_text(
@@ -419,6 +452,10 @@ class RunLifecycleTests(unittest.TestCase):
                     "threadId": "owner-thread",
                     "hostId": "local",
                     "dispatchId": owner_action["dispatch_id"],
+                    "worktree": str(self._runtime_worktree),
+                    "branch": self._runtime_branch,
+                    "baseCommit": self._runtime_base,
+                    "actual": {"delegation": "top-level-task"},
                 }),
                 encoding="utf-8",
             )
@@ -497,6 +534,72 @@ class RunLifecycleTests(unittest.TestCase):
                 next(item for item in repeated_payload["actions"] if item["role"] == "primary-coordinator")["kind"],
                 "await-thread-receipt",
             )
+
+    def test_owner_receipt_requires_worktree_readiness_before_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            state_path = run / "run-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["capabilities"]["project_id"] = "project-1"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            coordinator = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "coordinator",
+                "--reason", "created",
+            )
+            self.assertEqual(coordinator.returncode, 0, coordinator.stdout + coordinator.stderr)
+            tick = command(str(SCRIPTS / "coordinator_tick.py"), str(run))
+            self.assertEqual(tick.returncode, 0, tick.stdout + tick.stderr)
+            action = next(
+                item for item in json.loads(tick.stdout)["actions"]
+                if item["kind"] == "dispatch-top-level-task"
+            )
+            receipt_path = temp / "not-ready-receipt.json"
+            receipt_path.write_text(
+                json.dumps({
+                    "threadId": "owner-thread",
+                    "hostId": "local",
+                    "dispatchId": action["dispatch_id"],
+                    "actual": {"delegation": "top-level-task"},
+                }),
+                encoding="utf-8",
+            )
+            rejected = command(
+                str(SCRIPTS / "record_thread_receipt.py"), str(run),
+                "--task", "T1-domain-api", "--receipt", str(receipt_path),
+                "--reason", "receipt arrived before worktree readiness",
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("worktree readiness", rejected.stdout)
+            after_reject = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertIsNone(after_reject["tasks"]["T1-domain-api"]["assignment"]["thread_id"])
+            events = [json.loads(line) for line in (run / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(any(item["evidence"].get("phase") == "before-owner-receipt-acceptance" for item in events))
+
+            ready_path = temp / "ready-receipt.json"
+            ready_path.write_text(
+                json.dumps({
+                    "threadId": "owner-thread",
+                    "hostId": "local",
+                    "dispatchId": action["dispatch_id"],
+                    "worktree": str(self._runtime_worktree),
+                    "branch": self._runtime_branch,
+                    "baseCommit": self._runtime_base,
+                    "actual": {"delegation": "top-level-task"},
+                }),
+                encoding="utf-8",
+            )
+            accepted = command(
+                str(SCRIPTS / "record_thread_receipt.py"), str(run),
+                "--task", "T1-domain-api", "--receipt", str(ready_path),
+                "--reason", "worktree readiness established",
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+            self.assertTrue(json.loads(accepted.stdout)["readiness_verified"])
 
     def test_control_plane_roles_reject_thread_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

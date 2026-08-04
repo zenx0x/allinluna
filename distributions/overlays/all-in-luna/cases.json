@@ -1,0 +1,4 @@
+[
+  {"id": "complete-build", "prompt": "Use All in Luna to implement this feature completely.", "route": "plan-then-run"},
+  {"id": "existing-plan", "prompt": "Run my approved plan with parallel-only.", "route": "parallel-only"}
+]

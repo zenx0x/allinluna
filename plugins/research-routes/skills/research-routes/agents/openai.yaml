@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Routes — evidence exploration"
+  short_description: "Compare routes and preserve reversible research choices"
+  default_prompt: "使用 $research-routes 保持路线中立：分离 Claims、Evidence、未知和失败区间，比较多路线并提出可逆探针；不要把研究地图直接升级为实现或 canonical state。"

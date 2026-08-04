@@ -149,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
                 "validation_level": "cross-lane",
                 "external_side_effects": [],
                 "acceptance_required": True,
+                "capability_bindings": [],
+                "full_read_requirements": [],
             }
             tasks.append(integration)
             integration_tasks = [integration]
@@ -179,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
                 "validation_level": "milestone",
                 "external_side_effects": [],
                 "acceptance_required": False,
+                "capability_bindings": [],
+                "full_read_requirements": [],
             }
             tasks.append(acceptance)
             acceptance_tasks = [acceptance]

@@ -1,0 +1,1 @@
+Research Routes keeps multiple evidence-backed paths alive long enough to compare them. It is for multi-route research and reversible exploration; All in Luna is for turning an authorized route into concurrent development work.

@@ -1,0 +1,5 @@
+interface:
+  display_name: "All in Luna Launch"
+  short_description: "Confirm execution controls once before formal launch"
+  default_prompt: "Use $allinluna-launch to create the single concise launch confirmation for this intake before formal execution."
+

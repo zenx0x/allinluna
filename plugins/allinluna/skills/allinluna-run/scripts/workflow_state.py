@@ -192,6 +192,9 @@ def build_initial_state(
             "deliverables": deepcopy(source["deliverables"]),
             "verification": deepcopy(source["verification"]),
             "validation_level": source["validation_level"],
+            "capability_bindings": deepcopy(source.get("capability_bindings", [])),
+            "full_read_requirements": deepcopy(source.get("full_read_requirements", [])),
+            "capability_usage": [],
             "requested": requested_assignment(source, policy),
             "actual": {
                 "model": "unavailable",
@@ -242,7 +245,12 @@ def build_initial_state(
             "host_concurrency": "unavailable",
             "fallback_reason": None,
             "thread_tools": [],
+            "requested": [],
+            "resolved": [],
+            "actual": [],
+            "usage_evidence": [],
         },
+        "workflow_preset": deepcopy(plan.get("workflow_preset", {})),
         "resource_policy": deepcopy(policy),
         "usage": {
             "tokens": "unavailable",

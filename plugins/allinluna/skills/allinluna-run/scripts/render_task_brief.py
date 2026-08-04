@@ -20,6 +20,8 @@ def render(state: dict, task_id: str) -> str:
     roots = state["repository"]["roots"]
     protected = state["repository"].get("protected_paths", [])
     requested = task["requested"]
+    full_read = task.get("full_read_requirements", [])
+    capabilities = task.get("capability_bindings", [])
     return f"""# {task_id} — {task['title']}
 
 You are the top-level owner for this complete All in Luna lane. You may create bounded
@@ -29,6 +31,16 @@ the user's sponsor conversation does not implement product files.
 ## Objective
 
 {task.get('description', task['title'])}
+
+## Required full-read order
+
+Read these sources completely, in the listed order, before editing: {', '.join(f'`{item}`' for item in full_read) or 'None recorded'}.
+
+## Capability contract
+
+Resolve and record capabilities in invocation order. Availability is discovery evidence only;
+live permission must be checked separately. Required bindings fail closed when unavailable or
+denied, and may use only their declared fallback: {', '.join(str(item.get('capability', item).get('id', item.get('id', 'unknown'))) for item in capabilities) or 'None'}.
 
 ## Repository contract
 

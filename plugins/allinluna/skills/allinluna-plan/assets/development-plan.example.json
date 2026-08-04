@@ -84,6 +84,8 @@
       "validation_level": "focused",
       "external_side_effects": [],
       "acceptance_required": true
+      ,"capability_bindings": []
+      ,"full_read_requirements": ["AGENTS.md"]
     },
     {
       "id": "T2-ui",
@@ -103,6 +105,8 @@
       "validation_level": "focused",
       "external_side_effects": [],
       "acceptance_required": true
+      ,"capability_bindings": []
+      ,"full_read_requirements": ["AGENTS.md"]
     },
     {
       "id": "T3-integrate",
@@ -122,6 +126,8 @@
       "validation_level": "cross-lane",
       "external_side_effects": [],
       "acceptance_required": true
+      ,"capability_bindings": []
+      ,"full_read_requirements": ["AGENTS.md"]
     },
     {
       "id": "T4-accept",
@@ -141,6 +147,8 @@
       "validation_level": "milestone",
       "external_side_effects": [],
       "acceptance_required": false
+      ,"capability_bindings": []
+      ,"full_read_requirements": ["AGENTS.md"]
     }
   ],
   "milestones": [

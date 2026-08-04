@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "journeys": ["software", "research-exploration", "hybrid"],
+  "starting_points": ["repository", "question", "problem", "existing_frame", "arbitrary_context"],
+  "shared_with": ["allinluna", "research-routes"]
+}

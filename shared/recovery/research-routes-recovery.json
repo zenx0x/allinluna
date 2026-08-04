@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "lifecycle": ["Create", "Fork", "Park", "Reopen", "Revive", "Rewind", "Reject", "Supersede", "Historical Context", "Unresolved"],
+  "lineage_rules": {
+    "fork_creates_new_id": true,
+    "rewind_preserves_history": true,
+    "supersede_preserves_historical_context": true,
+    "reopen_does_not_promote_to_current": true
+  }
+}

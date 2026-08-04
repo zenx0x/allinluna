@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/launch-confirmation.schema.json",
+  "title": "All in Luna Launch Confirmation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "confirmation_id", "status", "intake_id", "plan_source", "adjustment_permission", "work_type", "profile", "model", "reasoning", "concurrency", "coordinator", "counterpilot", "goal", "git", "external_mutation", "toolchain", "budget", "decomposition_review", "confirmation_prompt"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "confirmation_id": {"type": "string", "minLength": 3},
+    "created_at": {"type": "string"},
+    "status": {"enum": ["pending", "confirmed"]},
+    "intake_id": {"type": ["string", "null"]},
+    "plan_source": {"type": "string"},
+    "adjustment_permission": {"enum": ["ask", "allowed", "forbidden"]},
+    "work_type": {"type": "string"},
+    "profile": {"type": "string"},
+    "model": {"type": "string"},
+    "reasoning": {"type": "string"},
+    "concurrency": {"type": "integer", "minimum": 1, "maximum": 64},
+    "coordinator": {"type": "string"},
+    "counterpilot": {"type": "string"},
+    "goal": {"type": "string"},
+    "git": {"type": "object"},
+    "external_mutation": {"type": "string"},
+    "toolchain": {"type": "string"},
+    "budget": {"type": "string"},
+    "decomposition_review": {"enum": ["not-required", "accepted", "declined"]},
+    "confirmation_prompt": {"type": "string", "minLength": 20}
+  }
+}
+

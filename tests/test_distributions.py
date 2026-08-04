@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts.validate_route_packet import validate as validate_route_packet
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class DistributionTests(unittest.TestCase):
+    def run_script(self, name: str, *args: str) -> dict:
+        result = subprocess.run(
+            [sys.executable, f"scripts/{name}", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_parity_validator_builds_both_distributions(self) -> None:
+        result = self.run_script("validate_distributions.py")
+        self.assertTrue(result["valid"], result)
+
+    def test_installation_validator_keeps_names_and_files_isolated(self) -> None:
+        result = self.run_script("validate_installations.py")
+        self.assertTrue(result["valid"], result)
+
+    def test_builder_records_required_commit_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            result = subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for distribution in ("all-in-luna", "research-routes"):
+                provenance = json.loads((output / distribution / ".source-provenance.json").read_text())
+                self.assertEqual(len(provenance["source_commit"]), 40)
+                self.assertEqual(len(provenance["source_tree"]), 40)
+
+    def test_research_route_boundary_is_runtime_fail_closed(self) -> None:
+        valid = json.loads((ROOT / "tests/fixtures/research-route-packet.valid.json").read_text())
+        invalid = json.loads((ROOT / "tests/fixtures/research-route-packet.invalid.json").read_text())
+        self.assertEqual(validate_route_packet(valid), [])
+        errors = validate_route_packet(invalid)
+        self.assertTrue(any("reversible" in error for error in errors))
+        self.assertTrue(any("cannot authorize experiment" in error for error in errors))
+
+    def test_both_artifacts_carry_the_same_route_boundary_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            for distribution in ("all-in-luna", "research-routes"):
+                runtime = output / distribution / "shared/core/validate_route_packet.py"
+                self.assertTrue(runtime.is_file(), runtime)
+
+
+if __name__ == "__main__":
+    unittest.main()

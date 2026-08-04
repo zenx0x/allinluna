@@ -44,6 +44,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["top-level-task", "subagent", "sequential", "unavailable"],
     )
     parser.add_argument("--resolution", choices=["exact", "fallback", "unresolved", "unavailable"])
+    parser.add_argument("--capability-requested")
+    parser.add_argument("--capability-resolved")
+    parser.add_argument("--capability-actual")
+    parser.add_argument("--capability-status", choices=["resolved", "fallback", "unavailable", "permission-denied", "not-applicable"])
+    parser.add_argument("--capability-evidence", action="append", default=[])
+    parser.add_argument("--capability-fallback")
     parser.add_argument("--thread-id")
     parser.add_argument("--host-id")
     parser.add_argument("--cursor")
@@ -107,6 +113,22 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
             changed_fields.append(f"actual.{field}")
     if args.actual_delegation:
         state["capabilities"]["actual_delegation"] = args.actual_delegation
+
+    if any(value is not None for value in (args.capability_requested, args.capability_resolved, args.capability_actual, args.capability_status, args.capability_fallback)) or args.capability_evidence:
+        usage = {
+            "requested": args.capability_requested,
+            "resolved": args.capability_resolved,
+            "actual": args.capability_actual,
+            "status": args.capability_status or "unavailable",
+            "fallback": args.capability_fallback,
+            "usage_evidence": list(args.capability_evidence),
+        }
+        task["capability_usage"].append(usage)
+        state["capabilities"]["requested"].append(args.capability_requested)
+        state["capabilities"]["resolved"].append(args.capability_resolved)
+        state["capabilities"]["actual"].append(args.capability_actual)
+        state["capabilities"]["usage_evidence"].extend(args.capability_evidence)
+        changed_fields.append("capability_usage")
 
     if args.final_commit:
         task["evidence"]["final_commit"] = args.final_commit

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "source_plugin": "plugins/allinluna",
+  "shared_paths": {
+    "core": ["plugins/allinluna/skills", "scripts/validate_route_packet.py"],
+    "schema": [
+      "plugins/allinluna/skills/allinluna-plan/assets/development-plan.schema.json",
+      "plugins/allinluna/skills/allinluna-run/assets/resource-profile.schema.json",
+      "plugins/allinluna/skills/allinluna-run/assets/run-state.schema.json"
+    ],
+    "control_plane": [
+      "plugins/allinluna/skills/allinluna-run/scripts",
+      "plugins/allinluna/skills/allinluna-run/references/orchestration-contract.md"
+    ],
+    "resources": [
+      "plugins/allinluna/skills/allinluna-run/assets/resource-profiles.json",
+      "plugins/allinluna/skills/allinluna-run/assets/runtime-catalog.example.json"
+    ],
+    "recovery": [
+      "plugins/allinluna/skills/allinluna-run/references/recovery.md",
+      "plugins/allinluna/skills/allinluna-run/scripts/control_run.py",
+      "plugins/allinluna/skills/allinluna-run/scripts/reconcile_threads.py"
+    ],
+    "router": [
+      "plugins/allinluna/skills/allinluna-plan/agents/openai.yaml",
+      "plugins/allinluna/skills/allinluna-run/agents/openai.yaml"
+    ],
+    "tests": ["tests", "evals"]
+  },
+  "overlay_allowlist": [
+    "brand",
+    "readme",
+    "default_entry",
+    "skill_metadata",
+    "cases",
+    "topics",
+    "social"
+  ],
+  "distributions": [
+    {
+      "id": "all-in-luna",
+      "plugin_name": "allinluna",
+      "display_name": "All in Luna",
+      "overlay": "distributions/overlays/all-in-luna"
+    },
+    {
+      "id": "research-routes",
+      "plugin_name": "research-routes",
+      "display_name": "Research Routes",
+      "overlay": "distributions/overlays/research-routes"
+    }
+  ]
+}

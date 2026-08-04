@@ -26,6 +26,7 @@ from workflow_state import (  # noqa: E402
     event,
     role_for_task,
 )
+from workflow_presets import deep_merge, normalize_preset, resolve_preset  # noqa: E402
 
 
 def slug(value: str) -> str:
@@ -39,6 +40,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--profile")
     parser.add_argument("--profiles", type=Path, default=DEFAULT_PROFILES)
     parser.add_argument("--catalog", type=Path)
+    parser.add_argument("--workflow-preset", type=Path)
+    parser.add_argument("--workflow-override", type=Path)
     parser.add_argument(
         "--state-root",
         type=Path,
@@ -79,7 +82,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.runtime_tier == "top-level-task" and not plan["authorizations"]["top_level_tasks"]:
             raise ValueError("top-level-task tier requires explicit top_level_tasks authorization")
 
-        profile_name = args.profile or plan["resource_policy"]["profile"]
+        workflow_preset = {}
+        if args.workflow_preset:
+            workflow_preset = normalize_preset(
+                resolve_preset(
+                    read_json(args.workflow_preset),
+                    overrides=read_json(args.workflow_override) if args.workflow_override else None,
+                )
+            )
+        preset_policy = workflow_preset.get("resource_policy", {})
+        if workflow_preset.get("profile"):
+            preset_policy = deep_merge(preset_policy, {"profile": workflow_preset["profile"]})
+        if isinstance(workflow_preset.get("concurrency"), dict):
+            preset_policy = deep_merge(preset_policy, {"concurrency": workflow_preset["concurrency"]})
+        effective_plan_policy = deep_merge(plan["resource_policy"], preset_policy)
+        profile_name = args.profile or effective_plan_policy["profile"]
         profiles = read_json(args.profiles)
         catalog = read_json(args.catalog) if args.catalog else None
         runtime_tier = args.runtime_tier
@@ -117,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         resolution = resolve(
             profiles,
             profile_name,
-            plan_policy=plan["resource_policy"],
+            plan_policy=effective_plan_policy,
             catalog=catalog,
             delegation=runtime_tier,
         )
@@ -150,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             goal_authorized=args.goal_authorized,
             runtime_tier=runtime_tier,
         )
+        state["workflow_preset"] = workflow_preset
         state["capabilities"]["requested_delegation"] = args.runtime_tier
         state["capabilities"]["actual_delegation"] = (
             runtime_tier if runtime_tier != "auto" else "unavailable"

@@ -15,3 +15,5 @@ Thumbs.db
 
 # Forward-test outputs are generated, not source.
 eval-workspace/
+/determinism-a-2/
+/determinism-b-2/

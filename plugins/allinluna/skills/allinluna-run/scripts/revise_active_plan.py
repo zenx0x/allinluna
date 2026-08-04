@@ -60,7 +60,13 @@ def main() -> int:
         duplicate = sorted(existing_task_ids & {task.get("id") for task in additions})
         if duplicate:
             raise ValueError("revision cannot replace existing tasks: " + ", ".join(duplicate))
-        revised["tasks"].extend(deepcopy(additions))
+        normalized_additions = []
+        for addition in additions:
+            item = deepcopy(addition)
+            item.setdefault("capability_bindings", [])
+            item.setdefault("full_read_requirements", [])
+            normalized_additions.append(item)
+        revised["tasks"].extend(normalized_additions)
         task_map = {task["id"]: task for task in revised["tasks"]}
         for task_id, dependencies in patch.get("add_dependencies", {}).items():
             if task_id not in task_map:

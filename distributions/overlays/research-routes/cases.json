@@ -1,0 +1,5 @@
+[
+  {"id": "route-map", "prompt": "Map the credible routes and evidence without choosing one yet.", "route": "terrain-map"},
+  {"id": "compare-probes", "prompt": "Compare two research routes and propose reversible probes.", "route": "evidence-comparison"},
+  {"id": "failure-regime", "prompt": "Preserve contradictory evidence and identify the failure regime.", "route": "failure-analysis"}
+]

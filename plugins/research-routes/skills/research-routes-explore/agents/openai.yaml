@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Routes Explore"
+  short_description: "Explore competing routes without collapsing unknowns"
+  default_prompt: "Use $research-routes-explore to investigate this question with concurrent branches, explicit probes, evidence polarity, failure regimes, and preserved unknowns."

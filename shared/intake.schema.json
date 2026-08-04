@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/intake.schema.json",
+  "title": "All in Luna Conversation Intake",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "intake_id", "sources", "action", "parallel_only", "normalized", "questions", "ready_for_launch"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "intake_id": {"type": "string", "minLength": 3},
+    "created_at": {"type": "string"},
+    "sources": {"type": "array", "items": {"type": "object"}},
+    "content_digest": {"type": "string"},
+    "action": {"enum": ["direct-execution", "lightweight-completion", "idea-to-plan", "external-plan-complete"]},
+    "parallel_only": {"type": "boolean"},
+    "normalized": {"type": "object"},
+    "questions": {"type": "array", "items": {"type": "string"}},
+    "prior_questions": {"type": "array", "items": {"type": "string"}},
+    "duplicate_question_count": {"type": "integer", "minimum": 0},
+    "ready_for_launch": {"type": "boolean"}
+  }
+}
+

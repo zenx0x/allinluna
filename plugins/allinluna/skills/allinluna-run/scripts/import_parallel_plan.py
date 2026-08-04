@@ -72,6 +72,8 @@ def main() -> int:
                     "validation_level": item.get("validation_level", "focused"),
                     "external_side_effects": item.get("external_side_effects", []),
                     "acceptance_required": item.get("acceptance_required", False),
+                    "capability_bindings": item.get("capability_bindings", []),
+                    "full_read_requirements": item.get("full_read_requirements", []),
                 }
             )
         hard_lock = "luna" if args.profile in {"all-luna", "mad-luna"} else None

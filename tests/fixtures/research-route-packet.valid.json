@@ -1,0 +1,10 @@
+{
+  "routes": [{"id": "route-a", "assumption": "bounded"}, {"id": "route-b", "assumption": "alternative"}],
+  "claims": [{"id": "claim-1", "text": "Both routes remain plausible", "evidence_refs": ["e-1", "e-2"]}],
+  "evidence": [
+    {"id": "e-1", "polarity": "positive", "source": "source-a"},
+    {"id": "e-2", "polarity": "negative", "source": "source-b"}
+  ],
+  "next_probe": {"id": "probe-1", "reversible": true},
+  "boundary_conditions": {"experiment": false, "implementation": false, "canonical_promotion": false, "human_decision": false}
+}

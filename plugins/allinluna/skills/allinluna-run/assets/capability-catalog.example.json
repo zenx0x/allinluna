@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "availability": {
+    "allinluna-run": true,
+    "codex_app__create_thread": true,
+    "filesystem-read": true,
+    "filesystem-write": false
+  },
+  "live_permissions": {
+    "allinluna-run": true,
+    "codex_app__create_thread": true,
+    "filesystem-read": true,
+    "filesystem-write": false
+  },
+  "capabilities": [
+    {"id": "allinluna-run", "type": "skill", "version": "0.1.1"},
+    {"id": "codex_app__create_thread", "type": "mcp", "version": null},
+    {"id": "filesystem-read", "type": "app", "version": null},
+    {"id": "filesystem-write", "type": "script", "version": null}
+  ]
+}

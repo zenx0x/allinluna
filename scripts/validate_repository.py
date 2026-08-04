@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / "plugins" / "allinluna"
 SKILLS = PLUGIN / "skills"
-EXPECTED_SKILLS = {"allinluna-plan", "allinluna-run"}
+EXPECTED_SKILLS = {"allinluna-plan", "allinluna-run", "allinluna-intake", "allinluna-launch"}
 STALE_TERMS = {
     "agent-development-orchestrator",
     "development-orchestrator",
@@ -90,15 +90,22 @@ def validate() -> tuple[list[str], list[str]]:
         if marketplace.get("name") != "allinluna":
             errors.append("marketplace name must be allinluna")
         entries = marketplace.get("plugins", [])
-        if len(entries) != 1 or entries[0].get("name") != "allinluna":
-            errors.append("marketplace must expose exactly the allinluna plugin")
-        source = entries[0].get("source", {}).get("path") if entries else None
-        if source != "./plugins/allinluna":
-            errors.append("marketplace source must be ./plugins/allinluna")
+        if {entry.get("name") for entry in entries} != {"allinluna", "research-routes"}:
+            errors.append("marketplace must expose allinluna and research-routes")
+        sources = {entry.get("name"): entry.get("source", {}).get("path") for entry in entries}
+        if sources.get("allinluna") != "./plugins/allinluna":
+            errors.append("allinluna marketplace source must be ./plugins/allinluna")
+        if sources.get("research-routes") != "./plugins/research-routes":
+            errors.append("research-routes marketplace source must be ./plugins/research-routes")
         if plugin.get("name") != "allinluna":
             errors.append("plugin name must be allinluna")
         if plugin.get("skills") != "./skills/":
             errors.append("plugin skills path must be ./skills/")
+        research_plugin_path = ROOT / "plugins" / "research-routes" / ".codex-plugin" / "plugin.json"
+        if not research_plugin_path.is_file():
+            errors.append("missing research-routes plugin metadata")
+        elif json.loads(research_plugin_path.read_text(encoding="utf-8")).get("name") != "research-routes":
+            errors.append("research-routes plugin name must be research-routes")
     except (OSError, json.JSONDecodeError, IndexError) as exc:
         errors.append(f"invalid plugin metadata: {exc}")
 

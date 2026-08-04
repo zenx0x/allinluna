@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/capability.schema.json",
+  "title": "All in Luna Capability Binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "purpose", "phase", "invocation_order", "host_requirement", "permission_scope", "expected_evidence", "fallback", "capability"],
+  "properties": {
+    "kind": {"enum": ["required", "applicable", "preferred", "optional"]},
+    "purpose": {"type": "string"},
+    "phase": {"type": "string"},
+    "invocation_order": {"type": "integer", "minimum": 0},
+    "host_requirement": {"type": ["string", "null"]},
+    "permission_scope": {"type": "array", "items": {"type": "string"}},
+    "expected_evidence": {"type": "array", "items": {"type": "string"}},
+    "fallback": {"type": ["string", "object", "null"]},
+    "capability": {"$ref": "#/$defs/capability"}
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "type": {"enum": ["skill", "mcp", "app", "script", "plugin"]},
+        "plugin_type": {"enum": ["skill", "mcp", "app", "script"]},
+        "version": {"type": ["string", "null"]},
+        "available": {"type": "boolean"}
+      }
+    }
+  }
+}

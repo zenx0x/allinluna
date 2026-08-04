@@ -1,0 +1,7 @@
+{
+  "routes": [{"id": "route-a"}],
+  "claims": [{"id": "claim-1", "evidence_refs": ["missing"]}],
+  "evidence": [{"id": "e-1", "polarity": "positive"}],
+  "next_probe": {"reversible": false},
+  "boundary_conditions": {"experiment": true, "implementation": false, "canonical_promotion": false, "human_decision": false}
+}

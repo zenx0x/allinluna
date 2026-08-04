@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Routes Run"
+  short_description: "Execute routes with evidence and recovery"
+  default_prompt: "Use $research-routes-run to execute the approved route graph with concurrent owners, read-only CounterPilot boundaries, and explicit HumanDecision before canonical continuation."

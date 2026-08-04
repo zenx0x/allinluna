@@ -129,6 +129,7 @@
     },
     "assumptions": { "type": "array", "items": { "type": "string" } },
     "unknowns": { "type": "array", "items": { "type": "string" } }
+    ,"workflow_preset": { "type": "object" }
   },
   "$defs": {
     "resourcePolicy": {
@@ -194,7 +195,9 @@
         "verification",
         "validation_level",
         "external_side_effects",
-        "acceptance_required"
+        "acceptance_required",
+        "capability_bindings",
+        "full_read_requirements"
       ],
       "properties": {
         "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
@@ -220,7 +223,9 @@
         "verification": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 3 } },
         "validation_level": { "enum": ["focused", "cross-lane", "milestone", "full"] },
         "external_side_effects": { "type": "array", "items": { "type": "string" } },
-        "acceptance_required": { "type": "boolean" }
+      "acceptance_required": { "type": "boolean" },
+      "capability_bindings": { "type": "array", "items": { "type": "object" } },
+      "full_read_requirements": { "type": "array", "items": { "type": "string" } }
       }
     },
     "milestone": {

@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "roles": ["sponsor", "coordinator", "counterpilot", "owner", "acceptance"],
+  "rules": {
+    "sponsor_is_not_owner": true,
+    "counterpilot_read_only": true,
+    "human_decision_required_for_canonical_or_continuation": true,
+    "candidate_inference_is_not_fact": true,
+    "concurrent_routes": true
+  }
+}

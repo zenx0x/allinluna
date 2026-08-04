@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Routes Plan"
+  short_description: "Plan explicit concurrent research routes"
+  default_prompt: "Use $research-routes-plan to map this question, problem, frame, or repository into evidence-aware concurrent routes without promoting inference to fact."

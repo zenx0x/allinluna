@@ -1,0 +1,5 @@
+{
+  "source": "../../../shared",
+  "generated_by": "scripts/sync_distribution_runtime.py",
+  "contract": "shared source is canonical; bundled runtime makes this plugin independently installable"
+}

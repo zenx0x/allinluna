@@ -50,6 +50,13 @@ Read [references/orchestration-contract.md](references/orchestration-contract.md
 
 ## 2. Resolve runtime capabilities honestly
 
+Resolve task capability bindings in their declared invocation order. A binding is `required`,
+`applicable`, `preferred`, or `optional` and carries purpose, phase, host requirement, permission
+scope, expected evidence, and an explicit fallback. Discovery availability and live permission are
+separate facts: record both, fail closed for required denied/unavailable capabilities, and record
+requested, resolved, actual, fallback, and usage evidence in run state. Runtime capabilities are
+typed as Skill, MCP, App, or Script; `Plugin` is accepted only as a compatibility input alias.
+
 Determine which execution tier the host actually exposes:
 
 1. **User-owned top-level tasks:** every All in Luna plan authorizes this tier; use it whenever the host exposes the capability.
@@ -96,6 +103,11 @@ Resolve models against the current host catalog. Keep requested and actual model
 Read [references/resource-profiles.md](references/resource-profiles.md) and [references/delegation-and-models.md](references/delegation-and-models.md).
 
 ## 3. Initialize persistent state
+
+Workflow presets may be layered at user, repository, research-project, and run scope, with a final
+per-run override. Use `scripts/resolve_workflow_preset.py` or `init_run.py --workflow-preset ...
+--workflow-override ...`; the most specific scope wins. Presets change resource selection only and
+must preserve the requested completion scope.
 
 State defaults outside the repository under `~/.codex/allinluna/runs`:
 

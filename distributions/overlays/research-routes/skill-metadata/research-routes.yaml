@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Routes — evidence exploration"
+  short_description: "Compare research routes, evidence, unknowns, and reversible probes"
+  default_prompt: "使用 $research-routes：保持路线中立，分离 Claims 与 Evidence，比较多条证据路线，保留矛盾与失败区间，提出可逆探针；不要把地形图当作实现授权或 canonical promotion。"

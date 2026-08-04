@@ -50,10 +50,15 @@
         "actual_delegation": { "enum": ["unavailable", "top-level-task", "subagent", "sequential"] },
         "host_concurrency": { "type": ["integer", "string"] },
         "fallback_reason": { "type": ["string", "null"] },
-        "thread_tools": { "type": "array", "items": { "type": "string" } }
+        "thread_tools": { "type": "array", "items": { "type": "string" } },
+        "requested": { "type": "array" },
+        "resolved": { "type": "array" },
+        "actual": { "type": "array" },
+        "usage_evidence": { "type": "array", "items": { "type": "string" } }
       }
     },
     "resource_policy": { "type": "object" },
+    "workflow_preset": { "type": "object" },
     "usage": {
       "type": "object",
       "required": ["tokens", "credits", "elapsed_seconds", "currency"],
@@ -122,6 +127,9 @@
         "deliverables",
         "verification",
         "validation_level",
+        "capability_bindings",
+        "full_read_requirements",
+        "capability_usage",
         "requested",
         "actual",
         "assignment",
@@ -144,6 +152,9 @@
         "deliverables": { "type": "array", "items": { "type": "string" } },
         "verification": { "type": "array", "items": { "type": "string" } },
         "validation_level": { "enum": ["focused", "cross-lane", "milestone", "full"] },
+        "capability_bindings": { "type": "array" },
+        "full_read_requirements": { "type": "array", "items": { "type": "string" } },
+        "capability_usage": { "type": "array" },
         "requested": { "$ref": "#/$defs/assignmentRequest" },
         "actual": { "$ref": "#/$defs/assignmentActual" },
         "assignment": { "type": "object" },

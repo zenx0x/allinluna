@@ -78,6 +78,8 @@ REQUIRED_TASK = {
     "validation_level",
     "external_side_effects",
     "acceptance_required",
+    "capability_bindings",
+    "full_read_requirements",
 }
 
 
@@ -137,11 +139,13 @@ def validate(data: Any) -> dict[str, Any]:
         return {"valid": False, "errors": ["plan must be a JSON object"], "warnings": []}
 
     missing = sorted(REQUIRED_TOP - data.keys())
-    extra = sorted(data.keys() - REQUIRED_TOP)
+    extra = sorted(data.keys() - REQUIRED_TOP - {"workflow_preset"})
     if missing:
         errors.append(f"missing top-level fields: {', '.join(missing)}")
     if extra:
         errors.append(f"unknown top-level fields: {', '.join(extra)}")
+    if "workflow_preset" in data and not isinstance(data["workflow_preset"], dict):
+        errors.append("workflow_preset must be an object")
     if data.get("schema_version") != "2.0":
         errors.append("schema_version must be 2.0")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,79}", str(data.get("plan_id", ""))):
@@ -326,6 +330,10 @@ def validate(data: Any) -> dict[str, Any]:
             errors.append(f"{prefix}.external_side_effects must be an array")
         if not isinstance(task.get("acceptance_required"), bool):
             errors.append(f"{prefix}.acceptance_required must be boolean")
+        if not isinstance(task.get("capability_bindings"), list):
+            errors.append(f"{prefix}.capability_bindings must be an array")
+        if not isinstance(task.get("full_read_requirements"), list) or not all(map(nonempty_string, task.get("full_read_requirements", []))):
+            errors.append(f"{prefix}.full_read_requirements must be an array of non-empty strings")
 
     for task_id, task in tasks.items():
         for dependency in task.get("dependencies", []) if isinstance(task.get("dependencies"), list) else []:

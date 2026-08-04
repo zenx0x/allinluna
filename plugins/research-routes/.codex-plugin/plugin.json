@@ -1,0 +1,37 @@
+{
+  "name": "research-routes",
+  "version": "0.1.0",
+  "description": "Evidence-backed, route-neutral research planning, exploration, and execution with explicit Claims, Evidence, lifecycle, and reversible-probe semantics.",
+  "author": {
+    "name": "zenx0x",
+    "url": "https://github.com/zenx0x"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "research",
+    "research-routes",
+    "routes",
+    "evidence",
+    "claims",
+    "experiments",
+    "reversible-exploration",
+    "failure-regimes",
+    "software"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Research Routes",
+    "shortDescription": "Compare evidence-backed routes and explore reversibly",
+    "longDescription": "A co-installable research overlay for arbitrary starting points and concurrent routes that keeps Claims, Evidence, contradictions, unknowns, failure regimes, provenance, lifecycle recovery, reversible probes, and human-controlled canonical decisions distinct from implementation authorization and promotion.",
+    "developerName": "zenx0x",
+    "category": "Research",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "Use Research Routes to map a question, problem, or repository into concurrent research routes.",
+      "Use Research Routes to explore hypotheses and probes while preserving unknowns and evidence polarity.",
+      "Use Research Routes to run an approved route with explicit HumanDecision and recovery semantics.",
+      "使用 Research Routes 保持路线中立，分离 Claims、Evidence、未知和失败区间，比较多条路线并提出可逆探针。",
+      "Use Research Routes to compare evidence-backed routes without turning a terrain map into implementation authorization or canonical-state promotion."
+    ]
+  }
+}

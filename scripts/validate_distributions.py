@@ -57,7 +57,7 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             entries = marketplace.get("plugins", [])
             if marketplace.get("name") != spec["plugin_name"] or len(entries) != 1:
                 errors.append(f"{spec['id']} standalone marketplace identity is invalid")
-            elif entries[0].get("name") != plugin.get("name") or entries[0].get("source", {}).get("path") != "./":
+            elif entries[0].get("name") != plugin.get("name") or entries[0].get("source", {}).get("path") != "./.":
                 errors.append(f"{spec['id']} standalone marketplace entry does not match plugin root")
             provenance = read_json(artifact / ".source-provenance.json")
             if provenance != expected_provenance:

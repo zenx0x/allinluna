@@ -46,7 +46,10 @@ only product direction, scientific authority, destructive/live action, or unreso
 conflicts go to the sponsor. Do not block work with unsupported objections and do not generate more
 than one consolidated challenge pass per trigger.
 
-Run state: `{run_dir}/run-state.json`. Mode: `{state['control_plane']['counterpilot']['mode']}`.
+Run state: `{run_dir}/run-state.json`. Requested mode: `{state['control_plane']['counterpilot'].get('mode')}`;
+effective mode: `{state['control_plane']['counterpilot'].get('effective_mode')}`;
+creation status: `{state['control_plane']['counterpilot'].get('status')}`.
+If a risk waiver is present, show it as an explicit user choice; never replace it with a default mode.
 """
     raise ValueError(f"unsupported control-plane role: {role}")
 

@@ -35,7 +35,7 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int)
     parser.add_argument("--high-concurrency-review", choices=["accepted", "declined"])
     parser.add_argument("--decomposition-model")
-    parser.add_argument("--counterpilot", choices=["off", "risk-triggered", "milestone", "continuous"], default="off")
+    parser.add_argument("--counterpilot", choices=["off", "auto", "risk-triggered", "milestone", "continuous"], default="off")
     parser.add_argument("--authorize-git-operations", action="store_true")
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()

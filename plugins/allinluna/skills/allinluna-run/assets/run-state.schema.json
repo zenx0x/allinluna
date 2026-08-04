@@ -54,6 +54,7 @@
         "requested": { "type": "array" },
         "resolved": { "type": "array" },
         "actual": { "type": "array" },
+        "discovery": { "type": "array" },
         "usage_evidence": { "type": "array", "items": { "type": "string" } }
       }
     },
@@ -80,7 +81,16 @@
         "coordinator_product_implementation": { "const": "forbidden" },
         "owner_delegation": { "const": "top-level-task" },
         "owner_subagents": { "const": "allowed-bounded" },
-        "counterpilot": { "type": "string" },
+        "counterpilot": { "enum": ["off", "auto", "risk-triggered", "milestone", "continuous"] },
+        "counterpilot_risk_waiver": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["acknowledged", "reason"],
+          "properties": {
+            "acknowledged": { "const": true },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
         "coordination_strategy": { "type": "string" },
         "shard_size": { "type": "integer" },
         "high_concurrency_review": { "type": "string" },
@@ -154,10 +164,22 @@
         "validation_level": { "enum": ["focused", "cross-lane", "milestone", "full"] },
         "capability_bindings": { "type": "array" },
         "full_read_requirements": { "type": "array", "items": { "type": "string" } },
-        "capability_usage": { "type": "array" },
+        "capability_usage": { "type": "array", "items": { "$ref": "#/$defs/capabilityUsage" } },
         "requested": { "$ref": "#/$defs/assignmentRequest" },
         "actual": { "$ref": "#/$defs/assignmentActual" },
-        "assignment": { "type": "object" },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "thread_id": { "type": ["string", "null"] },
+            "host_id": { "type": ["string", "null"] },
+            "cursor": { "type": ["string", "null"] },
+            "last_activity_at": { "type": ["string", "null"] },
+            "worktree": { "type": ["string", "null"] },
+            "branch": { "type": ["string", "null"] },
+            "base_commit": { "type": ["string", "null"] },
+            "runtime_receipt": { "type": ["string", "null"] }
+          }
+        },
         "evidence": { "type": "object" },
         "created_at": { "type": "string", "format": "date-time" },
         "updated_at": { "type": "string", "format": "date-time" }
@@ -179,8 +201,22 @@
       "properties": {
         "model": { "type": "string" },
         "reasoning": { "type": "string" },
-        "delegation": { "type": "string" },
-        "resolution": { "type": "string" }
+        "delegation": { "enum": ["top-level-task", "subagent", "sequential", "unavailable"] },
+        "resolution": { "enum": ["exact", "fallback", "unresolved", "unavailable"] }
+    },
+    "capabilityUsage": {
+      "type": "object",
+      "required": ["requested", "resolved", "actual", "status", "fallback", "usage_evidence"],
+      "properties": {
+        "requested": { "type": ["string", "null"] },
+        "resolved": { "type": ["string", "null"] },
+        "actual": { "type": ["string", "null"] },
+        "status": { "enum": ["resolved", "fallback", "unavailable", "permission-denied", "permission-unknown", "not-applicable"] },
+        "fallback": { "type": ["string", "null"] },
+        "usage_evidence": { "type": "array", "items": { "type": "string" } },
+        "availability": { "enum": ["available", "unavailable", "unknown"] },
+        "live_permission": { "enum": ["granted", "denied", "unknown"] }
+      }
       }
     }
   }

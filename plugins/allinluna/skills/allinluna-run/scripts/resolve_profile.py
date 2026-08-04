@@ -14,6 +14,11 @@ from typing import Any
 DEFAULT_PROFILES = Path(__file__).resolve().parent.parent / "assets" / "resource-profiles.json"
 REASONING_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"]
 DELEGATION_ORDER = ["top-level-task", "subagent", "sequential"]
+SPARK_MODEL_ID = "gpt-5.3-codex-spark"
+ROLE_RESOURCE_CLASS = {
+    "worker": "mechanical",
+    "engineer": "implementation-clear",
+}
 
 
 def read_json(path: Path) -> Any:
@@ -56,6 +61,62 @@ def model_candidates(request: str, models: list[dict[str, Any]]) -> list[dict[st
     return [model for model in models if str(model.get("id", "")) == request]
 
 
+def model_qualifies(
+    model: dict[str, Any], *, role: str, resource_class: str | None = None
+) -> bool:
+    """Return whether a catalog model is eligible for this role and task class.
+
+    Spark carries an explicit qualification boundary in the catalog. The ID-based
+    default keeps that boundary fail-closed for a reduced or older catalog that
+    names Spark but omits the optional metadata.
+    """
+    model_id = str(model.get("id", ""))
+    qualification = model.get("qualification")
+    if not isinstance(qualification, dict):
+        qualification = {}
+
+    allowed_roles = model.get("allowed_roles", qualification.get("allowed_roles"))
+    if isinstance(allowed_roles, list) and role not in allowed_roles:
+        return False
+    forbidden_roles = model.get("forbidden_roles", qualification.get("forbidden_roles", []))
+    if isinstance(forbidden_roles, list) and role in forbidden_roles:
+        return False
+
+    allowed_classes = model.get(
+        "resource_classes",
+        qualification.get("resource_classes", qualification.get("allowed_resource_classes")),
+    )
+    if isinstance(allowed_classes, list) and resource_class and resource_class not in allowed_classes:
+        return False
+    forbidden_classes = model.get(
+        "forbidden_resource_classes",
+        qualification.get("forbidden_resource_classes", []),
+    )
+    if isinstance(forbidden_classes, list) and resource_class in forbidden_classes:
+        return False
+
+    if SPARK_MODEL_ID.casefold() in model_id.casefold():
+        if role not in {"engineer", "worker"}:
+            return False
+        if resource_class not in {"mechanical", "implementation-clear"}:
+            return False
+    return True
+
+
+def qualified_model_candidates(
+    request: str,
+    models: list[dict[str, Any]],
+    *,
+    role: str,
+    resource_class: str | None = None,
+) -> list[dict[str, Any]]:
+    return [
+        model
+        for model in model_candidates(request, models)
+        if model_qualifies(model, role=role, resource_class=resource_class)
+    ]
+
+
 def rank_candidates(
     candidates: list[dict[str, Any]], weights: dict[str, float]
 ) -> list[dict[str, Any]]:
@@ -92,14 +153,27 @@ def catalog_surface(catalog: dict[str, Any], delegation: str) -> dict[str, Any]:
     }
 
 
-def matching_surfaces(request: str, catalog: dict[str, Any]) -> list[str]:
+def matching_surfaces(
+    request: str,
+    catalog: dict[str, Any],
+    *,
+    role: str | None = None,
+    resource_class: str | None = None,
+) -> list[str]:
     surfaces = catalog.get("surfaces")
     if not isinstance(surfaces, dict):
         return []
     matches: list[str] = []
     for name in DELEGATION_ORDER:
         surface = catalog_surface(catalog, name)
-        if surface["available"] and model_candidates(request, surface["models"]):
+        candidates = model_candidates(request, surface["models"])
+        if role is not None:
+            candidates = [
+                model
+                for model in candidates
+                if model_qualifies(model, role=role, resource_class=resource_class)
+            ]
+        if surface["available"] and candidates:
             matches.append(name)
     return matches
 
@@ -124,6 +198,8 @@ def resolve(
     catalog: dict[str, Any] | None = None,
     delegation: str = "auto",
     concurrency_override: int | None = None,
+    resource_class: str | None = None,
+    role_resource_classes: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -200,9 +276,15 @@ def resolve(
     for role, request in policy.get("roles", {}).items():
         requested_model = request.get("model_request", "unavailable")
         requested_reasoning = request.get("reasoning", "unavailable")
+        role_resource_class = (
+            role_resource_classes.get(role)
+            if isinstance(role_resource_classes, dict) and role in role_resource_classes
+            else resource_class or ROLE_RESOURCE_CLASS.get(role)
+        )
         result = {
             "requested_model": requested_model,
             "requested_reasoning": requested_reasoning,
+            "resource_class": role_resource_class,
             "actual_model": "unavailable",
             "actual_reasoning": "unavailable",
             "resolution": "runtime-required",
@@ -217,7 +299,12 @@ def resolve(
             candidates: list[dict[str, Any]] = []
             selected_request = requested_model
             for candidate_request in request_chain:
-                possible = model_candidates(candidate_request, catalog_models)
+                possible = qualified_model_candidates(
+                    candidate_request,
+                    catalog_models,
+                    role=role,
+                    resource_class=role_resource_class,
+                )
                 if isinstance(lock, dict) and lock.get("family"):
                     family = str(lock["family"]).casefold()
                     possible = [
@@ -258,7 +345,12 @@ def resolve(
                     )
             else:
                 result["resolution"] = "unavailable"
-                elsewhere = matching_surfaces(requested_model, catalog)
+                elsewhere = matching_surfaces(
+                    requested_model,
+                    catalog,
+                    role=role,
+                    resource_class=role_resource_class,
+                )
                 suffix = (
                     f"; matching model is exposed on {', '.join(elsewhere)}"
                     if elsewhere and selected_delegation not in elsewhere
@@ -310,6 +402,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--role", action="append", default=[])
     parser.add_argument("--concurrency", type=int)
+    parser.add_argument(
+        "--resource-class",
+        choices=["authority", "architecture", "implementation-complex", "implementation-clear", "mechanical", "integration", "acceptance"],
+    )
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args(argv)
 
@@ -330,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             catalog=catalog,
             delegation=args.delegation,
             concurrency_override=args.concurrency,
+            resource_class=args.resource_class,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         result = {"valid": False, "errors": [str(exc)], "warnings": []}

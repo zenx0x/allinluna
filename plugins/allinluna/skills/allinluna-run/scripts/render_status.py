@@ -13,6 +13,7 @@ from workflow_state import load_state
 
 def render_markdown(state: dict) -> str:
     counts = Counter(task["status"] for task in state["tasks"].values())
+    counterpilot = state["control_plane"]["counterpilot"]
     lines = [
         f"# All in Luna run: {state['run_id']}",
         "",
@@ -26,7 +27,7 @@ def render_markdown(state: dict) -> str:
         f"- Host concurrency: `{state['capabilities']['host_concurrency']}`",
         f"- Desired concurrency: `{state['resource_policy']['concurrency']['desired']}`",
         f"- Primary coordinator: `{state['control_plane']['primary_coordinator']['thread_id'] or state['control_plane']['primary_coordinator']['status']}`",
-        f"- CounterPilot: `{state['control_plane']['counterpilot']['thread_id'] or state['control_plane']['counterpilot']['status']}`",
+        f"- CounterPilot: requested=`{counterpilot.get('mode')}`, effective=`{counterpilot.get('effective_mode')}`, status=`{counterpilot.get('thread_id') or counterpilot.get('status')}`",
         f"- Child coordinators: `{len(state['control_plane']['subcoordinators'])}`",
         f"- Plan revision: `{state.get('coordination', {}).get('plan_revision', 0)}`",
         f"- Stop boundary: `{state.get('coordination', {}).get('stop_boundary')}`",
@@ -38,6 +39,11 @@ def render_markdown(state: dict) -> str:
         "| Task | Phase | Status | Requested model | Actual model | Assignment |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
+    if counterpilot.get("risk_waiver"):
+        lines.insert(
+            10,
+            f"- CounterPilot risk waiver: acknowledged — {counterpilot['risk_waiver']['reason']}",
+        )
     for task_id, task in state["tasks"].items():
         assignment = task["assignment"].get("thread_id") or "-"
         lines.append(
@@ -94,6 +100,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     _, state = load_state(args.run)
+    counterpilot = state["control_plane"]["counterpilot"]
     if args.json:
         counts = Counter(task["status"] for task in state["tasks"].values())
         print(
@@ -104,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
                     "profile": state["profile"],
                     "execution_style": state["execution_style"],
                     "risk_level": state["risk_level"],
+                    "counterpilot": {
+                        "mode": counterpilot.get("mode"),
+                        "effective_mode": counterpilot.get("effective_mode"),
+                        "status": counterpilot.get("thread_id") or counterpilot.get("status"),
+                        "risk_waiver": counterpilot.get("risk_waiver"),
+                    },
                     "task_counts": dict(counts),
                     "ready_tasks": [
                         task_id for task_id, task in state["tasks"].items() if task["status"] == "ready"

@@ -174,7 +174,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         for task in state["tasks"].values():
             role = task["requested"]["role"]
-            resolved = resolution["resolved_roles"].get(role, {})
+            task_resolution = resolve(
+                profiles,
+                profile_name,
+                plan_policy=effective_plan_policy,
+                catalog=catalog,
+                delegation=runtime_tier,
+                role_resource_classes={role: task["resource_class"]},
+            )
+            if not task_resolution["valid"]:
+                raise ValueError(
+                    f"invalid resource policy for task {task['id']}: "
+                    + "; ".join(task_resolution["errors"])
+                )
+            resolved = task_resolution["resolved_roles"].get(role, {})
             task["assignment"]["resolved_model"] = resolved.get("actual_model")
             task["assignment"]["resolved_reasoning"] = resolved.get("actual_reasoning")
             task["assignment"]["resource_resolution"] = resolved.get("resolution")
@@ -195,9 +208,17 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
         counterpilot_policy = resolution["policy"].get("roles", {}).get("counterpilot", {})
-        if counterpilot_policy.get("duplicate_high_risk_review") and plan["risk_level"] in {"high", "critical"}:
+        if (
+            counterpilot_policy.get("duplicate_high_risk_review")
+            and plan["risk_level"] in {"high", "critical"}
+            and state["control_plane"]["counterpilot"].get("effective_mode") != "off"
+        ):
             secondary = state["control_plane"]["secondary_counterpilot"]
-            secondary["status"] = "unassigned"
+            secondary["status"] = (
+                "unassigned"
+                if state["control_plane"]["counterpilot"].get("effective_mode") == "continuous"
+                else "deferred"
+            )
             secondary["requested"] = dict(state["control_plane"]["counterpilot"]["requested"])
             secondary["resolved"] = dict(state["control_plane"]["counterpilot"]["resolved"])
         if catalog is not None:

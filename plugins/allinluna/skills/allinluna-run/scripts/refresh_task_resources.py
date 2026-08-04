@@ -45,11 +45,31 @@ def main() -> int:
         if not result["valid"]:
             raise ValueError("resource resolution failed: " + "; ".join(result["errors"]))
         changed: list[str] = []
+        task_resolutions: dict[tuple[str, str], dict] = {}
         for task_id, task in state["tasks"].items():
             if task["status"] not in {"pending", "ready", "blocked", "failed"}:
                 continue
             role = task["requested"]["role"]
-            resolved = result["resolved_roles"].get(role)
+            key = (role, task["resource_class"])
+            task_result = task_resolutions.get(key)
+            if task_result is None:
+                task_result = resolve(
+                    profiles,
+                    profile,
+                    plan_policy=state["resource_policy"],
+                    role_overrides=overrides,
+                    catalog=catalog,
+                    delegation=delegation,
+                    concurrency_override=args.concurrency,
+                    role_resource_classes={role: task["resource_class"]},
+                )
+                if not task_result["valid"]:
+                    raise ValueError(
+                        f"resource resolution failed for task {task_id}: "
+                        + "; ".join(task_result["errors"])
+                    )
+                task_resolutions[key] = task_result
+            resolved = task_result["resolved_roles"].get(role)
             if not resolved:
                 raise ValueError(f"profile {profile} does not define role {role}")
             task["requested"]["model"] = resolved["requested_model"]

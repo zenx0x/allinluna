@@ -26,7 +26,8 @@
         "type": {"enum": ["skill", "mcp", "app", "script", "plugin"]},
         "plugin_type": {"enum": ["skill", "mcp", "app", "script"]},
         "version": {"type": ["string", "null"]},
-        "available": {"type": "boolean"}
+        "available": {"type": "boolean"},
+        "discovery_evidence": {"type": ["string", "object", "array", "boolean", "null"]}
       }
     }
   }

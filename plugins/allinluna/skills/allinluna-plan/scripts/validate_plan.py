@@ -25,6 +25,7 @@ PROFILE_CONCURRENCY = {
     "all-luna": 8,
     "mad-luna": 24,
 }
+COUNTERPILOT_MODES = {"off", "auto", "risk-triggered", "milestone", "continuous"}
 RESOURCE_CLASSES = {
     "authority",
     "architecture",
@@ -85,6 +86,14 @@ REQUIRED_TASK = {
 
 def nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def valid_counterpilot_risk_waiver(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("acknowledged") is True
+        and nonempty_string(value.get("reason"))
+    )
 
 
 def path_prefix(value: str) -> str:
@@ -216,10 +225,18 @@ def validate(data: Any) -> dict[str, Any]:
         for field, expected in required_orchestration.items():
             if orchestration.get(field) != expected:
                 errors.append(f"orchestration.{field} must be {expected}")
-        if orchestration.get("counterpilot") not in {
-            "off", "risk-triggered", "milestone", "continuous"
-        }:
+        counterpilot_mode = orchestration.get("counterpilot")
+        if counterpilot_mode not in COUNTERPILOT_MODES:
             errors.append("orchestration.counterpilot is invalid")
+        waiver = orchestration.get("counterpilot_risk_waiver")
+        if waiver is not None and not valid_counterpilot_risk_waiver(waiver):
+            errors.append(
+                "orchestration.counterpilot_risk_waiver must acknowledge the choice and include a reason"
+            )
+        if waiver is not None and counterpilot_mode != "off":
+            errors.append(
+                "orchestration.counterpilot_risk_waiver is only valid when counterpilot=off"
+            )
         if orchestration.get("coordination_strategy") not in {"auto", "flat", "hierarchical"}:
             errors.append("orchestration.coordination_strategy is invalid")
         shard_size = orchestration.get("shard_size")
@@ -411,7 +428,11 @@ def validate(data: Any) -> dict[str, Any]:
     if require_acceptance and not acceptance_ids:
         errors.append("this managed risk level requires independent acceptance")
     if require_counterpilot and isinstance(orchestration, dict) and orchestration.get("counterpilot") == "off":
-        errors.append("high and critical managed plans require CounterPilot")
+        if not valid_counterpilot_risk_waiver(orchestration.get("counterpilot_risk_waiver")):
+            errors.append(
+                "high and critical managed plans may select counterpilot=off only with an explicit "
+                "counterpilot_risk_waiver"
+            )
     implementation_ids = [
         task_id
         for task_id, task in tasks.items()

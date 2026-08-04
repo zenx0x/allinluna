@@ -24,6 +24,7 @@ def main() -> int:
             bindings,
             availability=catalog.get("availability", {}),
             permissions=catalog.get("live_permissions", {}),
+            discovery=catalog.get("discovery_evidence", {}),
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(json.dumps({"valid": False, "errors": [str(exc)]}, ensure_ascii=False))

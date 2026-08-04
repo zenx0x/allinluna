@@ -77,3 +77,21 @@ class IntakeLaunchTests(unittest.TestCase):
                                     cwd=ROOT, text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("decomposition choice", result.stdout)
+
+    def test_launch_exposes_five_counterpilot_modes_and_requires_high_risk_waiver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            intake_path = Path(temporary) / "intake.json"
+            intake_path.write_text(json.dumps({"intake_id": "intake-x", "action": "idea-to-plan"}), encoding="utf-8")
+            for mode in ("off", "auto", "risk-triggered", "milestone", "continuous"):
+                args = [str(LAUNCH), str(intake_path), "--counterpilot", mode]
+                if mode == "off":
+                    args.extend(["--risk-level", "high", "--risk-waiver-reason", "user accepts the review tradeoff"])
+                launch = self.command(*args)
+                self.assertEqual(launch["counterpilot"]["mode"], mode)
+                self.assertEqual(launch["counterpilot_question"]["answer"], mode)
+            rejected = subprocess.run(
+                [sys.executable, str(LAUNCH), str(intake_path), "--counterpilot", "off", "--risk-level", "critical"],
+                cwd=ROOT, text=True, capture_output=True,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("risk waiver", rejected.stdout)

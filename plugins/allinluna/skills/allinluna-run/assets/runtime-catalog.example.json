@@ -29,6 +29,18 @@
           "families": ["sol"],
           "tiers": ["frontier"],
           "reasoning": ["low", "medium", "high", "xhigh", "max", "ultra"]
+        },
+        {
+          "id": "gpt-5.3-codex-spark",
+          "quality_score": 3,
+          "speed_score": 5,
+          "economy_score": 5,
+          "families": ["spark"],
+          "tiers": ["fast", "standard"],
+          "reasoning": ["low", "medium", "high", "xhigh"],
+          "allowed_roles": ["engineer", "worker"],
+          "resource_classes": ["mechanical", "implementation-clear"],
+          "forbidden_roles": ["planner", "coordinator", "counterpilot", "authority", "architect", "integration", "acceptance"]
         }
       ]
     },
@@ -53,6 +65,18 @@
           "families": ["terra"],
           "tiers": ["standard"],
           "reasoning": ["low", "medium", "high", "xhigh", "max", "ultra"]
+        },
+        {
+          "id": "gpt-5.3-codex-spark",
+          "quality_score": 3,
+          "speed_score": 5,
+          "economy_score": 5,
+          "families": ["spark"],
+          "tiers": ["fast", "standard"],
+          "reasoning": ["low", "medium", "high", "xhigh"],
+          "allowed_roles": ["engineer", "worker"],
+          "resource_classes": ["mechanical", "implementation-clear"],
+          "forbidden_roles": ["planner", "coordinator", "counterpilot", "authority", "architect", "integration", "acceptance"]
         }
       ]
     },

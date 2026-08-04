@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from workflow_state import append_event, atomic_write_json, event, load_state, now_iso
+from runtime_truth import assignment_conflicts, runtime_identity_errors
 
 
 def main() -> int:
@@ -25,11 +26,27 @@ def main() -> int:
         changed = []
         events = []
         for item in snapshots:
+            if not isinstance(item, dict):
+                raise ValueError("each snapshot item must be an object")
+            source = str(item.get("source", "")).casefold()
+            if source in {"dispatch", "dispatch-json", "coordinator-dispatch"} or item.get("kind") in {
+                "dispatch-top-level-task",
+                "dispatch-subcoordinator",
+            }:
+                raise ValueError("dispatch output is not runtime startup evidence")
             task_id = item.get("task_id")
             if task_id not in state["tasks"]:
                 raise ValueError(f"snapshot references unknown task: {task_id}")
             task = state["tasks"][task_id]
             previous = task["status"]
+            for field in ("thread_id", "host_id", "worktree", "branch", "base_commit", "runtime_receipt"):
+                if item.get(field) is not None:
+                    task["assignment"][field] = item[field]
+            actual = item.get("actual")
+            if isinstance(actual, dict):
+                for field in ("model", "reasoning", "delegation", "resolution"):
+                    if actual.get(field) is not None:
+                        task["actual"][field] = actual[field]
             task["assignment"]["cursor"] = item.get("cursor", task["assignment"].get("cursor"))
             task["assignment"]["last_activity_at"] = item.get("last_activity_at") or now_iso()
             status = item.get("status")
@@ -55,6 +72,14 @@ def main() -> int:
                 )
             )
             changed.append(task_id)
+        for task_id, task in state["tasks"].items():
+            if task["status"] in {"running", "completed"}:
+                identity_errors = runtime_identity_errors(task, state, require_started=True)
+                if identity_errors:
+                    raise ValueError(f"task {task_id} cannot be reconciled: {'; '.join(identity_errors)}")
+        conflicts = assignment_conflicts(state["tasks"])
+        if conflicts:
+            raise ValueError("; ".join(conflicts))
         atomic_write_json(run_dir / "run-state.json", state)
         for item in events:
             append_event(run_dir, item)
@@ -63,6 +88,12 @@ def main() -> int:
             "updated_tasks": changed,
             "evidence_required": [
                 item["task_id"] for item in snapshots if item.get("status") == "completed"
+            ],
+            "startup_evidence_required": [
+                item["task_id"]
+                for item in snapshots
+                if item.get("status") in {"running", "completed"}
+                and state["tasks"][item["task_id"]]["status"] == "ready"
             ],
         }
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:

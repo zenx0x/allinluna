@@ -21,6 +21,7 @@ from workflow_state import (
     now_iso,
     promote_ready_tasks,
 )
+from runtime_truth import assignment_conflicts, runtime_identity_errors
 
 
 def unique_extend(target: list[Any], values: list[Any]) -> None:
@@ -47,7 +48,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--capability-requested")
     parser.add_argument("--capability-resolved")
     parser.add_argument("--capability-actual")
-    parser.add_argument("--capability-status", choices=["resolved", "fallback", "unavailable", "permission-denied", "not-applicable"])
+    parser.add_argument("--capability-status", choices=["resolved", "fallback", "unavailable", "permission-denied", "permission-unknown", "not-applicable"])
+    parser.add_argument("--capability-availability", choices=["available", "unavailable", "unknown"])
+    parser.add_argument("--capability-permission", choices=["granted", "denied", "unknown"])
     parser.add_argument("--capability-evidence", action="append", default=[])
     parser.add_argument("--capability-fallback")
     parser.add_argument("--thread-id")
@@ -57,6 +60,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--worktree")
     parser.add_argument("--branch")
     parser.add_argument("--base-commit")
+    parser.add_argument("--runtime-receipt")
     parser.add_argument("--final-commit")
     parser.add_argument("--changed-file", action="append", default=[])
     parser.add_argument("--check", action="append", default=[])
@@ -86,11 +90,16 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
         "worktree": args.worktree,
         "branch": args.branch,
         "base_commit": args.base_commit,
+        "runtime_receipt": args.runtime_receipt,
     }
     for field, value in assignment_fields.items():
         if value is not None:
             task["assignment"][field] = value
             changed_fields.append(f"assignment.{field}")
+
+    conflicts = assignment_conflicts(state["tasks"])
+    if conflicts:
+        raise ValueError("; ".join(conflicts))
 
     actual_fields = {
         "model": args.actual_model,
@@ -114,7 +123,7 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
     if args.actual_delegation:
         state["capabilities"]["actual_delegation"] = args.actual_delegation
 
-    if any(value is not None for value in (args.capability_requested, args.capability_resolved, args.capability_actual, args.capability_status, args.capability_fallback)) or args.capability_evidence:
+    if any(value is not None for value in (args.capability_requested, args.capability_resolved, args.capability_actual, args.capability_status, args.capability_availability, args.capability_permission, args.capability_fallback)) or args.capability_evidence:
         usage = {
             "requested": args.capability_requested,
             "resolved": args.capability_resolved,
@@ -122,6 +131,12 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
             "status": args.capability_status or "unavailable",
             "fallback": args.capability_fallback,
             "usage_evidence": list(args.capability_evidence),
+            "availability": args.capability_availability or (
+                "unknown" if args.capability_status in {None, "unavailable"} else "available"
+            ),
+            "live_permission": args.capability_permission or (
+                "denied" if args.capability_status == "permission-denied" else "unknown"
+            ),
         }
         task["capability_usage"].append(usage)
         state["capabilities"]["requested"].append(args.capability_requested)
@@ -151,6 +166,10 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
             raise ValueError(f"invalid task transition: {previous} -> {args.status}")
         if args.status in {"ready", "running"} and not dependencies_satisfied(task, state["tasks"]):
             raise ValueError(f"task {args.task} has incomplete dependencies")
+        if args.status == "running":
+            identity_errors = runtime_identity_errors(task, state, require_started=True)
+            if identity_errors:
+                raise ValueError("; ".join(identity_errors))
         if args.status == "skipped":
             if not args.user_approved_skip:
                 raise ValueError("skipping a task requires --user-approved-skip")
@@ -163,6 +182,10 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> tuple[list[d
             if owns_files and git_authorized and task["resource_class"] != "acceptance" and not task["evidence"]["final_commit"]:
                 raise ValueError("completing a writable Git task requires --final-commit")
         if args.status == "running" and previous in {"ready", "blocked", "failed"}:
+            if task["assignment"].get("dispatch_intent") and not args.thread_id:
+                raise ValueError(
+                    "a dispatched top-level task requires a real thread receipt before running"
+                )
             task["assignment"]["attempt"] = int(task["assignment"].get("attempt", 0)) + 1
             task["assignment"]["last_activity_at"] = now_iso()
             changed_fields.extend(["assignment.attempt", "assignment.last_activity_at"])

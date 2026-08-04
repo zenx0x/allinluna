@@ -110,7 +110,16 @@
         "coordinator_product_implementation": { "const": "forbidden" },
         "owner_delegation": { "const": "top-level-task" },
         "owner_subagents": { "const": "allowed-bounded" },
-        "counterpilot": { "enum": ["off", "risk-triggered", "milestone", "continuous"] },
+        "counterpilot": { "enum": ["off", "auto", "risk-triggered", "milestone", "continuous"] },
+        "counterpilot_risk_waiver": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["acknowledged", "reason"],
+          "properties": {
+            "acknowledged": { "const": true },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
         "coordination_strategy": { "enum": ["auto", "flat", "hierarchical"] },
         "shard_size": { "type": "integer", "minimum": 2, "maximum": 12 },
         "high_concurrency_review": { "enum": ["not-required", "accepted", "declined"] },

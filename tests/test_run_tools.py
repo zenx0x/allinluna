@@ -17,6 +17,7 @@ EXAMPLE = PLAN / "assets" / "development-plan.example.json"
 sys.path.insert(0, str(SCRIPTS))
 
 from inspect_git_readiness import inspect as inspect_git_readiness  # noqa: E402
+from codex_app_adapter import monitoring_action  # noqa: E402
 
 
 def command(*args: str) -> subprocess.CompletedProcess[str]:
@@ -30,6 +31,25 @@ def command(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 class RunLifecycleTests(unittest.TestCase):
+    def runtime_assignment(self, root: Path) -> tuple[Path, str, str]:
+        worktree = root / "runtime-owner-worktree"
+        worktree.mkdir(parents=True, exist_ok=True)
+        for args in (
+            ("init",),
+            ("config", "user.email", "runtime-tests@example.com"),
+            ("config", "user.name", "Runtime Tests"),
+        ):
+            subprocess.run(["git", *args], cwd=worktree, check=True, capture_output=True)
+        (worktree / "base.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=worktree, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "runtime test base"], cwd=worktree, check=True, capture_output=True)
+        branch = "codex/runtime-test-owner"
+        subprocess.run(["git", "switch", "-c", branch], cwd=worktree, check=True, capture_output=True)
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=worktree, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        return worktree, branch, base
+
     def test_git_readiness_requests_bootstrap_for_non_git_project(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -45,6 +65,8 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertIn("initialize-repository", available_git["required_authorization"])
 
     def init(self, root: Path, profile: str = "balanced", plan: Path = EXAMPLE, *extra: str) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        self._runtime_worktree, self._runtime_branch, self._runtime_base = self.runtime_assignment(root)
         result = command(
             str(SCRIPTS / "init_run.py"),
             str(plan),
@@ -60,7 +82,23 @@ class RunLifecycleTests(unittest.TestCase):
         return root / "test-run"
 
     def update(self, run: Path, *args: str, expected: int = 0) -> dict:
-        result = command(str(SCRIPTS / "update_run.py"), str(run), *args)
+        mutable = list(args)
+        if "--status" in mutable:
+            status_index = mutable.index("--status")
+            if status_index + 1 < len(mutable) and mutable[status_index + 1] == "running":
+                task_id = mutable[mutable.index("--task") + 1]
+                defaults = {
+                    "--thread-id": f"thread-{task_id}",
+                    "--host-id": "host-runtime-tests",
+                    "--actual-delegation": "top-level-task",
+                    "--worktree": str(self._runtime_worktree),
+                    "--branch": self._runtime_branch,
+                    "--base-commit": self._runtime_base,
+                }
+                for flag, value in defaults.items():
+                    if flag not in mutable:
+                        mutable.extend([flag, value])
+        result = command(str(SCRIPTS / "update_run.py"), str(run), *mutable)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return json.loads(result.stdout)
 
@@ -173,6 +211,30 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(payload["delegation"]["selected"], "top-level-task")
         self.assertEqual(payload["resolved_roles"]["engineer"]["actual_model"], "gpt-5.6-luna")
 
+    def test_task_resource_class_keeps_spark_off_complex_implementation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            plan["tasks"][0]["resource_class"] = "implementation-complex"
+            plan_path = temp / "complex-implementation.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            run = self.init(
+                temp / "state",
+                "balanced",
+                plan_path,
+                "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["tasks"]["T1-domain-api"]["assignment"]["resolved_model"],
+                "gpt-5.6-luna",
+            )
+            self.assertEqual(
+                state["tasks"]["T2-ui"]["assignment"]["resolved_model"],
+                "gpt-5.3-codex-spark",
+            )
+
     def test_plan_selects_all_luna_speed_without_profile_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
@@ -255,6 +317,10 @@ class RunLifecycleTests(unittest.TestCase):
                 "--reason", "sponsor created independent coordinator",
             )
             self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            state_path = run / "run-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["capabilities"]["project_id"] = "project-1"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
             result = command(
                 str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty"
             )
@@ -264,9 +330,23 @@ class RunLifecycleTests(unittest.TestCase):
             action = payload["actions"][0]
             self.assertEqual(action["tool"], "codex_app__create_thread")
             self.assertEqual(action["model"], "gpt-5.6-luna")
-            brief = Path(action["brief_path"])
+            self.assertEqual(action["thinking"], "high")
+            self.assertEqual(action["target"]["environment"], {"type": "worktree"})
+            self.assertEqual(action["target"]["projectId"], "project-1")
+            self.assertIn(action["kind"], {"dispatch-top-level-task"})
+            self.assertIn("prompt", action)
+            for field in ("environment", "reasoning", "brief_path"):
+                self.assertNotIn(field, action)
+            brief = run / "briefs" / "T1-domain-api.md"
             self.assertTrue(brief.exists())
-            self.assertIn("independent primary Coordinator", brief.read_text(encoding="utf-8"))
+            self.assertIn("top-level owner", action["prompt"])
+            self.assertEqual(brief.read_text(encoding="utf-8"), action["prompt"])
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "ready")
+            self.assertEqual(
+                state["tasks"]["T1-domain-api"]["assignment"]["dispatch_intent"]["status"],
+                "emitted",
+            )
 
     def test_control_plane_bootstrap_separates_sponsor_coordinator_and_counterpilot(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -280,10 +360,143 @@ class RunLifecycleTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(
                 {action["kind"] for action in payload["actions"]},
-                {"create-primary-coordinator", "create-counterpilot"},
+                {"create-primary-coordinator"},
             )
+            self.assertEqual(payload["counterpilot"]["status"], "deferred")
             self.assertTrue(all(action.get("git_bootstrap_required") is False for action in payload["actions"]))
             self.assertTrue(payload["sponsor_must_not_implement"])
+            for action in payload["actions"]:
+                self.assertEqual(action["tool"], "codex_app__create_thread")
+                self.assertEqual(action["target"]["type"], "projectless")
+                self.assertIn("prompt", action)
+                self.assertIn("thinking", action)
+                for field in ("environment", "reasoning", "brief_path"):
+                    self.assertNotIn(field, action)
+
+    def test_delayed_owner_dispatch_is_idempotent_until_real_thread_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            state_path = run / "run-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["capabilities"]["project_id"] = "project-1"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "coordinator",
+                "--reason", "created",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+
+            first = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty")
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            first_payload = json.loads(first.stdout)
+            owner_action = next(item for item in first_payload["actions"] if item["kind"] == "dispatch-top-level-task")
+            premature = command(
+                str(SCRIPTS / "update_run.py"), str(run),
+                "--task", "T1-domain-api", "--status", "running",
+                "--reason", "dispatch output is not a thread receipt",
+            )
+            self.assertNotEqual(premature.returncode, 0)
+            self.assertIn("real thread receipt", premature.stdout)
+            second = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty")
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            second_payload = json.loads(second.stdout)
+            self.assertEqual(second_payload["dispatch_count"], 0)
+            self.assertEqual(
+                [item["kind"] for item in second_payload["actions"] if item.get("task_id") == "T1-domain-api"],
+                ["await-thread-receipt"],
+            )
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "ready")
+
+            receipt_path = temp / "thread-receipt.json"
+            receipt_path.write_text(
+                json.dumps({
+                    "threadId": "owner-thread",
+                    "hostId": "local",
+                    "dispatchId": owner_action["dispatch_id"],
+                }),
+                encoding="utf-8",
+            )
+            receipt = command(
+                str(SCRIPTS / "record_thread_receipt.py"), str(run),
+                "--task", "T1-domain-api", "--receipt", str(receipt_path),
+                "--reason", "Codex App returned the owner thread receipt",
+            )
+            self.assertEqual(receipt.returncode, 0, receipt.stdout + receipt.stderr)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "running")
+            self.assertEqual(state["tasks"]["T1-domain-api"]["assignment"]["thread_id"], "owner-thread")
+
+            third = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--no-record")
+            self.assertEqual(third.returncode, 0, third.stdout + third.stderr)
+            self.assertEqual(json.loads(third.stdout)["dispatch_count"], 0)
+
+    def test_project_discovery_is_a_real_idempotent_prerequisite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "coordinator",
+                "--reason", "created",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            first = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty")
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            first_action = next(item for item in json.loads(first.stdout)["actions"] if item["kind"] == "resolve-project")
+            self.assertEqual(first_action["tool"], "codex_app__list_projects")
+            self.assertNotIn("args", first_action)
+            second = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty")
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            self.assertEqual(
+                next(item for item in json.loads(second.stdout)["actions"] if item["kind"] == "await-project-receipt")["tool"],
+                "codex_app__list_projects",
+            )
+            selected = command(
+                str(SCRIPTS / "record_project_receipt.py"), str(run),
+                "--project-id", "project-1", "--reason", "list_projects selected the repository",
+            )
+            self.assertEqual(selected.returncode, 0, selected.stdout + selected.stderr)
+            third = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty")
+            self.assertEqual(third.returncode, 0, third.stdout + third.stderr)
+            owner = next(item for item in json.loads(third.stdout)["actions"] if item["kind"] == "dispatch-top-level-task")
+            self.assertEqual(owner["target"]["projectId"], "project-1")
+            self.assertEqual(owner["target"]["environment"], {"type": "worktree"})
+
+    def test_pending_client_thread_receipt_is_not_task_started(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                Path(temporary) / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            first = command(str(SCRIPTS / "bootstrap_control_plane.py"), str(run), "--pretty")
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            action = next(item for item in json.loads(first.stdout)["actions"] if item["role"] == "primary-coordinator")
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--client-thread-id", "pending-coordinator",
+                "--dispatch-id", action["dispatch_id"], "--reason", "setup pending",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["control_plane"]["primary_coordinator"]["status"], "unassigned")
+            self.assertIsNone(state["control_plane"]["primary_coordinator"]["thread_id"])
+            repeated = command(str(SCRIPTS / "bootstrap_control_plane.py"), str(run), "--pretty")
+            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+            repeated_payload = json.loads(repeated.stdout)
+            self.assertEqual(
+                next(item for item in repeated_payload["actions"] if item["role"] == "primary-coordinator")["kind"],
+                "await-thread-receipt",
+            )
 
     def test_control_plane_roles_reject_thread_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -377,7 +590,7 @@ class RunLifecycleTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(
                 {action["kind"] for action in payload["actions"]},
-                {"create-primary-coordinator", "create-counterpilot"},
+                {"create-primary-coordinator"},
             )
             command(
                 str(SCRIPTS / "record_control_plane.py"), str(run),
@@ -388,7 +601,83 @@ class RunLifecycleTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["sponsor_role"], "user-conversation")
             self.assertEqual(payload["actions"][0]["kind"], "poll-top-level-tasks")
-            self.assertEqual(payload["actions"][0]["targets"][0]["thread_id"], "primary")
+            self.assertEqual(payload["actions"][0]["targets"][0]["threadId"], "primary")
+
+    def test_counterpilot_modes_control_creation_timing(self) -> None:
+        for mode, expected_status, expected_effective in (
+            ("off", "disabled", "off"),
+            ("auto", "deferred", "risk-triggered"),
+            ("risk-triggered", "deferred", "risk-triggered"),
+            ("milestone", "deferred", "milestone"),
+            ("continuous", "unassigned", "continuous"),
+        ):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                temp = Path(temporary)
+                plan = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+                plan["orchestration"]["counterpilot"] = mode
+                if mode == "off":
+                    plan["orchestration"]["counterpilot_risk_waiver"] = {
+                        "acknowledged": True,
+                        "reason": "Sponsor accepts the high-risk review tradeoff.",
+                    }
+                plan_path = temp / f"{mode}.json"
+                plan_path.write_text(json.dumps(plan), encoding="utf-8")
+                run = self.init(
+                    temp / "state", "balanced", plan_path,
+                    "--catalog", str(RUN / "assets" / "runtime-catalog.example.json"),
+                )
+                state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+                counterpilot = state["control_plane"]["counterpilot"]
+                self.assertEqual(counterpilot["status"], expected_status)
+                self.assertEqual(counterpilot["effective_mode"], expected_effective)
+                validation = command(str(SCRIPTS / "validate_run.py"), str(run))
+                self.assertEqual(validation.returncode, 0, validation.stdout + validation.stderr)
+                result = command(str(SCRIPTS / "bootstrap_control_plane.py"), str(run))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                actions = json.loads(result.stdout)["actions"]
+                has_counterpilot = any(action["kind"] == "create-counterpilot" for action in actions)
+                self.assertEqual(has_counterpilot, mode == "continuous")
+
+    def test_risk_triggered_counterpilot_is_created_only_after_integration_is_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(
+                Path(temporary) / "state",
+                "balanced",
+                EXAMPLE,
+                "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            initial = command(str(SCRIPTS / "bootstrap_control_plane.py"), str(run))
+            self.assertNotIn("create-counterpilot", initial.stdout)
+            self.update(run, "--task", "T1-domain-api", "--status", "running", "--reason", "start")
+            self.update(
+                run, "--task", "T1-domain-api", "--status", "completed", "--reason", "done",
+                "--check", "focused API checks", "--final-commit", "a" * 40,
+            )
+            self.update(run, "--task", "T2-ui", "--status", "running", "--reason", "start")
+            self.update(
+                run, "--task", "T2-ui", "--status", "completed", "--reason", "done",
+                "--check", "focused UI checks", "--final-commit", "b" * 40,
+            )
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "primary", "--reason", "created",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            tick = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--no-record")
+            self.assertEqual(tick.returncode, 0, tick.stdout + tick.stderr)
+            actions = json.loads(tick.stdout)["actions"]
+            creation = next(action for action in actions if action["kind"] == "create-counterpilot")
+            self.assertEqual(creation["trigger"], "before-integration")
+            created = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "counterpilot", "--thread-id", "counterpilot", "--trigger", "before-integration",
+                "--reason", "real integration trigger",
+            )
+            self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["control_plane"]["counterpilot"]["status"], "running")
+            self.assertEqual(state["control_plane"]["counterpilot"]["creation_triggers"], ["before-integration"])
 
     def test_counterpilot_challenge_requires_evidence_and_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -554,6 +843,17 @@ class RunLifecycleTests(unittest.TestCase):
                 polling["tools"],
                 ["codex_app__list_threads", "codex_app__read_thread"],
             )
+
+    def test_wait_adapter_preserves_after_cursor_and_codex_argument_names(self) -> None:
+        action = monitoring_action(
+            {"capabilities": {"thread_tools": ["codex_app__wait_threads"]}},
+            [{"thread_id": "thread-1", "host_id": "host-1", "after_cursor": "cursor-1"}],
+        )
+        self.assertEqual(action["tool"], "codex_app__wait_threads")
+        self.assertEqual(
+            action["targets"],
+            [{"threadId": "thread-1", "hostId": "host-1", "afterCursor": "cursor-1"}],
+        )
 
     def test_human_control_changes_concurrency_without_replanning(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

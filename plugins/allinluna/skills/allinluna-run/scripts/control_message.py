@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
+from codex_app_adapter import SEND_MESSAGE_TOOL
 from workflow_state import append_event, event, load_state, now_iso
 
 
@@ -21,6 +22,19 @@ def target_thread(state: dict, target: str) -> str | None:
     if target == "secondary-counterpilot":
         return control["secondary_counterpilot"].get("thread_id")
     return control["subcoordinators"].get(target, {}).get("thread_id")
+
+
+def target_record(state: dict, target: str) -> dict:
+    control = state["control_plane"]
+    if target == "sponsor":
+        return control["sponsor"]
+    if target == "primary":
+        return control["primary_coordinator"]
+    if target == "counterpilot":
+        return control["counterpilot"]
+    if target == "secondary-counterpilot":
+        return control["secondary_counterpilot"]
+    return control["subcoordinators"].get(target, {})
 
 
 def main() -> int:
@@ -44,6 +58,8 @@ def main() -> int:
         thread_id = target_thread(state, args.to_role)
         if not thread_id:
             raise ValueError(f"target role has no assigned thread: {args.to_role}")
+        target = target_record(state, args.to_role)
+        prompt = f"[All in Luna {args.type}] {args.body}"
         payload = {
             "timestamp": now_iso(),
             "from": args.from_role,
@@ -60,11 +76,13 @@ def main() -> int:
             "message": payload,
             "action": {
                 "kind": "send-control-message",
-                "tool": "codex_app__send_message_to_thread",
-                "thread_id": thread_id,
-                "message": f"[All in Luna {args.type}] {args.body}",
+                "tool": SEND_MESSAGE_TOOL,
+                "threadId": thread_id,
+                "prompt": prompt,
             },
         }
+        if target.get("host_id"):
+            output["action"]["hostId"] = target["host_id"]
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
         output = {"ok": False, "errors": [str(exc)]}
     print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))

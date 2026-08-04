@@ -20,9 +20,14 @@ def main() -> int:
     try:
         run_dir, state = load_state(args.run)
         counterpilot = state["control_plane"]["counterpilot"]
+        if counterpilot.get("mode", "off") == "off":
+            raise ValueError("CounterPilot is disabled by the selected mode")
         field = "requested_triggers" if args.status == "requested" else "completed_triggers"
         if args.trigger not in counterpilot[field]:
             counterpilot[field].append(args.trigger)
+        counterpilot.setdefault("trigger_history", []).append(
+            {"trigger": args.trigger, "status": args.status, "recorded_at": now_iso()}
+        )
         state["updated_at"] = now_iso()
         atomic_write_json(run_dir / "run-state.json", state)
         append_event(run_dir, event("coordinator", f"counterpilot:{args.trigger}", None, args.status, args.reason))

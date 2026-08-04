@@ -4,9 +4,9 @@
   "title": "All in Luna Launch Confirmation",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "confirmation_id", "status", "intake_id", "plan_source", "adjustment_permission", "work_type", "profile", "model", "reasoning", "concurrency", "coordinator", "counterpilot", "goal", "git", "external_mutation", "toolchain", "budget", "decomposition_review", "confirmation_prompt"],
+  "required": ["schema_version", "confirmation_id", "status", "intake_id", "plan_source", "adjustment_permission", "work_type", "profile", "model", "reasoning", "concurrency", "coordinator", "risk_level", "counterpilot", "counterpilot_question", "questions", "goal", "git", "external_mutation", "toolchain", "budget", "decomposition_review", "confirmation_prompt"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"const": "1.1"},
     "confirmation_id": {"type": "string", "minLength": 3},
     "created_at": {"type": "string"},
     "status": {"enum": ["pending", "confirmed"]},
@@ -19,7 +19,26 @@
     "reasoning": {"type": "string"},
     "concurrency": {"type": "integer", "minimum": 1, "maximum": 64},
     "coordinator": {"type": "string"},
-    "counterpilot": {"type": "string"},
+    "risk_level": {"enum": ["unknown", "low", "medium", "high", "critical"]},
+    "counterpilot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "risk_waiver"],
+      "properties": {
+        "mode": {"enum": ["off", "auto", "risk-triggered", "milestone", "continuous"]},
+        "risk_waiver": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["acknowledged", "reason"],
+          "properties": {
+            "acknowledged": {"const": true},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "counterpilot_question": {"$ref": "#/$defs/counterpilotQuestion"},
+    "questions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/counterpilotQuestion"}},
     "goal": {"type": "string"},
     "git": {"type": "object"},
     "external_mutation": {"type": "string"},
@@ -27,5 +46,23 @@
     "budget": {"type": "string"},
     "decomposition_review": {"enum": ["not-required", "accepted", "declined"]},
     "confirmation_prompt": {"type": "string", "minLength": 20}
+  },
+  "$defs": {
+    "counterpilotQuestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "prompt", "options", "answer", "risk_waiver_required", "risk_waiver"],
+      "properties": {
+        "id": {"const": "counterpilot.mode"},
+        "prompt": {"type": "string", "minLength": 1},
+        "options": {
+          "type": "array",
+          "const": ["off", "auto", "risk-triggered", "milestone", "continuous"]
+        },
+        "answer": {"enum": ["off", "auto", "risk-triggered", "milestone", "continuous"]},
+        "risk_waiver_required": {"type": "boolean"},
+        "risk_waiver": {"$ref": "#/properties/counterpilot/properties/risk_waiver"}
+      }
+    }
   }
 }

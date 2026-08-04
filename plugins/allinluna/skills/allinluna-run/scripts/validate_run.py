@@ -17,7 +17,10 @@ from workflow_state import (
     load_state,
     model_matches_lock,
     read_json,
+    resolve_counterpilot_mode,
+    valid_counterpilot_risk_waiver,
 )
+from runtime_truth import assignment_conflicts, runtime_identity_errors
 
 
 def validate(target: Path) -> dict[str, Any]:
@@ -79,11 +82,48 @@ def validate(target: Path) -> dict[str, Any]:
         errors.append("primary coordinator must remain a separate top-level task")
     if orchestration.get("coordinator_product_implementation") != "forbidden":
         errors.append("coordinator product implementation must remain forbidden")
+    counterpilot_mode = orchestration.get("counterpilot")
+    if counterpilot_mode not in {"off", "auto", "risk-triggered", "milestone", "continuous"}:
+        errors.append("orchestration.counterpilot is invalid")
+    counterpilot_waiver = orchestration.get("counterpilot_risk_waiver")
+    if counterpilot_waiver is not None and not valid_counterpilot_risk_waiver(counterpilot_waiver):
+        errors.append("orchestration.counterpilot_risk_waiver is invalid")
+    if (
+        state.get("risk_level") in {"high", "critical"}
+        and state.get("execution_style") == "managed"
+        and counterpilot_mode == "off"
+        and not valid_counterpilot_risk_waiver(counterpilot_waiver)
+    ):
+        errors.append("high and critical risk require an explicit CounterPilot risk waiver when off")
     control = state.get("control_plane", {})
     sponsor_thread = control.get("sponsor", {}).get("thread_id")
     coordinator_thread = control.get("primary_coordinator", {}).get("thread_id")
     counterpilot_thread = control.get("counterpilot", {}).get("thread_id")
     secondary_counterpilot_thread = control.get("secondary_counterpilot", {}).get("thread_id")
+    counterpilot = control.get("counterpilot", {})
+    if counterpilot.get("risk_waiver") != counterpilot_waiver:
+        errors.append("run state must preserve the selected CounterPilot risk waiver")
+    effective_mode = counterpilot.get("effective_mode")
+    if counterpilot_mode in {"off", "auto", "risk-triggered", "milestone", "continuous"}:
+        try:
+            expected_mode = resolve_counterpilot_mode(counterpilot_mode, state.get("risk_level", "low"))
+            if effective_mode != expected_mode:
+                errors.append(
+                    f"CounterPilot effective mode {effective_mode!r} does not match requested mode {counterpilot_mode!r}"
+                )
+        except ValueError as exc:
+            errors.append(str(exc))
+    if counterpilot_mode == "off":
+        if counterpilot.get("status") != "disabled":
+            errors.append("CounterPilot off must remain disabled")
+        if counterpilot.get("thread_id"):
+            errors.append("disabled CounterPilot must not have a thread")
+    elif effective_mode == "continuous":
+        if counterpilot.get("status") not in {"unassigned", "running"}:
+            errors.append("continuous CounterPilot must be immediately creatable or running")
+    elif effective_mode in {"risk-triggered", "milestone"}:
+        if counterpilot.get("status") not in {"deferred", "running"}:
+            errors.append("deferred CounterPilot must remain deferred until a real trigger")
     if sponsor_thread and coordinator_thread and sponsor_thread == coordinator_thread:
         errors.append("sponsor and primary coordinator must use different threads")
     if counterpilot_thread and counterpilot_thread in {sponsor_thread, coordinator_thread}:
@@ -154,8 +194,11 @@ def validate(target: Path) -> dict[str, Any]:
             errors.append(f"{prefix} actual model {actual_model!r} violates hard lock {lock!r}")
         if status == "completed" and actual_model == "unavailable":
             warnings.append(f"{prefix} completed but actual model was not exposed by the host")
-        if status == "running" and not task.get("assignment", {}).get("thread_id"):
-            warnings.append(f"{prefix} is running without a recorded thread/task identifier")
+        if status in {"running", "completed"}:
+            errors.extend(
+                f"{prefix} {item}"
+                for item in runtime_identity_errors(task, state, require_started=True)
+            )
         if actual.get("delegation") == "top-level-task" and not state.get("authorizations", {}).get(
             "top_level_tasks"
         ):
@@ -179,6 +222,8 @@ def validate(target: Path) -> dict[str, Any]:
                 warnings.append(f"task {task_id} acceptance independence is not runtime-verifiable")
             elif thread_id in implementation_threads:
                 errors.append(f"task {task_id} acceptance reused an implementation thread")
+
+    errors.extend(assignment_conflicts(tasks))
 
     budget = state.get("resource_policy", {}).get("budget", {})
     metric = budget.get("metric")

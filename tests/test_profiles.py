@@ -132,6 +132,99 @@ class ResourceProfileTests(unittest.TestCase):
         self.assertEqual(ultra["concurrency"]["desired"], 48)
         self.assertEqual(ultra["policy"]["concurrency"]["strategy"], "hierarchical-maximum-safe")
 
+    def test_spark_catalog_qualification_and_reasoning(self) -> None:
+        spark = next(
+            model
+            for model in self.catalog["surfaces"]["top-level-task"]["models"]
+            if model["id"] == "gpt-5.3-codex-spark"
+        )
+        self.assertEqual(spark["reasoning"], ["low", "medium", "high", "xhigh"])
+        self.assertEqual(set(spark["resource_classes"]), {"mechanical", "implementation-clear"})
+        self.assertEqual(set(spark["allowed_roles"]), {"engineer", "worker"})
+        result = resolve(
+            self.profiles,
+            "balanced",
+            role_overrides={"engineer": {"model_request": "family:spark", "reasoning": "xhigh"}},
+            catalog=self.catalog,
+            delegation="top-level-task",
+        )
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["resolved_roles"]["engineer"]["actual_model"], "gpt-5.3-codex-spark")
+        self.assertEqual(result["resolved_roles"]["engineer"]["actual_reasoning"], "xhigh")
+
+    def test_mechanical_prefers_spark_but_forbidden_roles_do_not(self) -> None:
+        result = resolve(
+            self.profiles,
+            "balanced",
+            catalog=self.catalog,
+            delegation="top-level-task",
+        )
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["resolved_roles"]["worker"]["actual_model"], "gpt-5.3-codex-spark")
+        self.assertEqual(result["resolved_roles"]["engineer"]["actual_model"], "gpt-5.3-codex-spark")
+        for role in ("coordinator", "counterpilot", "architect", "integration", "acceptance"):
+            self.assertNotEqual(
+                result["resolved_roles"][role]["actual_model"], "gpt-5.3-codex-spark", role
+            )
+
+    def test_spark_is_rejected_for_forbidden_custom_role(self) -> None:
+        result = resolve(
+            self.profiles,
+            "custom",
+            role_overrides={"coordinator": {"model_request": "family:spark", "reasoning": "high"}},
+            catalog=self.catalog,
+            delegation="top-level-task",
+        )
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["resolved_roles"]["coordinator"]["actual_model"], "unavailable")
+
+    def test_spark_unavailability_is_explicit_fallback(self) -> None:
+        catalog = json.loads(json.dumps(self.catalog))
+        for surface in catalog["surfaces"].values():
+            surface["models"] = [
+                model for model in surface["models"] if model["id"] != "gpt-5.3-codex-spark"
+            ]
+        result = resolve(
+            self.profiles,
+            "balanced",
+            catalog=catalog,
+            delegation="top-level-task",
+        )
+        self.assertTrue(result["valid"], result)
+        worker = result["resolved_roles"]["worker"]
+        self.assertEqual(worker["actual_model"], "gpt-5.6-luna")
+        self.assertEqual(worker["resolution"], "fallback")
+        self.assertTrue(any("model request family:spark" in warning for warning in result["warnings"]))
+
+    def test_implementation_complex_never_uses_spark(self) -> None:
+        result = resolve(
+            self.profiles,
+            "balanced",
+            catalog=self.catalog,
+            delegation="top-level-task",
+            resource_class="implementation-complex",
+        )
+        self.assertTrue(result["valid"], result)
+        self.assertNotEqual(result["resolved_roles"]["engineer"]["actual_model"], "gpt-5.3-codex-spark")
+        self.assertEqual(result["resolved_roles"]["engineer"]["actual_model"], "gpt-5.6-luna")
+
+    def test_luna_hard_lock_excludes_spark_when_luna_is_unavailable(self) -> None:
+        catalog = json.loads(json.dumps(self.catalog))
+        for surface in catalog["surfaces"].values():
+            surface["models"] = [
+                model for model in surface["models"] if model["id"] == "gpt-5.3-codex-spark"
+            ]
+        result = resolve(
+            self.profiles,
+            "all-luna",
+            catalog=catalog,
+            delegation="top-level-task",
+        )
+        self.assertFalse(result["valid"])
+        self.assertTrue(
+            all(role["actual_model"] == "unavailable" for role in result["resolved_roles"].values())
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

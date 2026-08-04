@@ -35,6 +35,11 @@ TASK_TRANSITIONS = {
 
 TERMINAL_TASK_STATES = {"completed", "skipped", "cancelled"}
 
+COUNTERPILOT_MODES = frozenset(
+    {"off", "auto", "risk-triggered", "milestone", "continuous"}
+)
+COUNTERPILOT_DEFERRED_MODES = frozenset({"auto", "risk-triggered", "milestone"})
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -144,6 +149,92 @@ def model_matches_lock(model: str, family: str) -> bool:
     return family.casefold() in model.casefold()
 
 
+def resolve_counterpilot_mode(mode: str, risk_level: str) -> str:
+    """Resolve auto without hiding the user's requested mode."""
+    if mode not in COUNTERPILOT_MODES:
+        raise ValueError(f"invalid CounterPilot mode: {mode}")
+    if mode != "auto":
+        return mode
+    return "risk-triggered" if risk_level in {"high", "critical"} else "milestone"
+
+
+def valid_counterpilot_risk_waiver(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("acknowledged") is True
+        and isinstance(value.get("reason"), str)
+        and bool(value["reason"].strip())
+    )
+
+
+def counterpilot_initial_status(effective_mode: str) -> str:
+    if effective_mode == "off":
+        return "disabled"
+    if effective_mode == "continuous":
+        return "unassigned"
+    return "deferred"
+
+
+def _milestone_trigger(state: dict[str, Any], seen: set[str]) -> str | None:
+    tasks = state.get("tasks", {})
+    for milestone in state.get("milestones", []):
+        if not isinstance(milestone, dict):
+            continue
+        milestone_id = milestone.get("id")
+        if not isinstance(milestone_id, str) or not milestone_id:
+            continue
+        trigger = f"milestone:{milestone_id}"
+        if trigger in seen:
+            continue
+        if milestone.get("status") in {"reached", "completed"}:
+            return trigger
+        task_ids = milestone.get("task_ids")
+        if isinstance(task_ids, list) and task_ids and all(
+            tasks.get(task_id, {}).get("status") in TERMINAL_TASK_STATES
+            for task_id in task_ids
+        ):
+            return trigger
+    return None
+
+
+def counterpilot_trigger(state: dict[str, Any]) -> str | None:
+    """Return one evidence-bearing trigger, or None when creation must remain deferred."""
+    counterpilot = state.get("control_plane", {}).get("counterpilot", {})
+    mode = counterpilot.get("effective_mode") or counterpilot.get("mode", "off")
+    if mode == "off":
+        return None
+    seen = set(counterpilot.get("requested_triggers", [])) | set(
+        counterpilot.get("completed_triggers", [])
+    )
+    tasks = state.get("tasks", {})
+    if mode == "milestone":
+        return _milestone_trigger(state, seen)
+
+    if mode == "risk-triggered":
+        if any(task.get("assignment", {}).get("attempt", 0) >= 2 for task in tasks.values()):
+            if "repeated-failure" not in seen:
+                return "repeated-failure"
+        if any(
+            task.get("status") == "ready" and task.get("resource_class") == "integration"
+            for task in tasks.values()
+        ) and "before-integration" not in seen:
+            return "before-integration"
+        return None
+
+    if mode == "continuous" and "plan-formed" not in seen:
+        return "plan-formed"
+    if mode == "continuous" and any(
+        task.get("status") == "ready" and task.get("resource_class") == "integration"
+        for task in tasks.values()
+    ) and "before-integration" not in seen:
+        return "before-integration"
+    if mode == "continuous" and any(
+        task.get("assignment", {}).get("attempt", 0) >= 2 for task in tasks.values()
+    ) and "repeated-failure" not in seen:
+        return "repeated-failure"
+    return None
+
+
 def build_initial_state(
     plan: dict[str, Any],
     run_id: str,
@@ -155,6 +246,11 @@ def build_initial_state(
 ) -> dict[str, Any]:
     timestamp = now_iso()
     orchestration = plan["orchestration"]
+    counterpilot_mode = orchestration.get("counterpilot", "off")
+    effective_counterpilot_mode = resolve_counterpilot_mode(
+        counterpilot_mode, plan.get("risk_level", "low")
+    )
+    counterpilot_risk_waiver = deepcopy(orchestration.get("counterpilot_risk_waiver"))
     desired = int(policy.get("concurrency", {}).get("desired", 1))
     strategy = orchestration.get("coordination_strategy", "auto")
     hierarchical = strategy == "hierarchical" or (strategy == "auto" and desired >= 16)
@@ -214,7 +310,11 @@ def build_initial_state(
                 "worktree": None,
                 "branch": None,
                 "base_commit": None,
+                "runtime_receipt": None,
                 "coordinator_id": coordinator_by_task.get(source["id"], "primary"),
+                "dispatch_intent": None,
+                "dispatch_receipt": None,
+                "thread_receipt": None,
             },
             "evidence": {
                 "final_commit": None,
@@ -244,6 +344,9 @@ def build_initial_state(
             "actual_delegation": "unavailable",
             "host_concurrency": "unavailable",
             "fallback_reason": None,
+            "project_id": None,
+            "project_receipt": None,
+            "project_resolution": None,
             "thread_tools": [],
             "requested": [],
             "resolved": [],
@@ -268,6 +371,9 @@ def build_initial_state(
                 "thread_id": None,
                 "host_id": None,
                 "cursor": None,
+                "dispatch_intent": None,
+                "dispatch_receipt": None,
+                "thread_receipt": None,
                 "requested": {"role": "coordinator", "model": "unavailable", "reasoning": "unavailable"},
                 "resolved": {"model": None, "reasoning": None, "resolution": None},
                 "requested_triggers": [],
@@ -281,28 +387,62 @@ def build_initial_state(
                     "thread_id": None,
                     "host_id": None,
                     "cursor": None,
+                    "dispatch_intent": None,
+                    "dispatch_receipt": None,
+                    "thread_receipt": None,
                     "slot_limit": max(1, desired // max(1, len(shard_chunks))),
                 }
                 for index, chunk in enumerate(shard_chunks)
             },
             "counterpilot": {
-                "mode": orchestration.get("counterpilot", "off"),
-                "status": "disabled" if orchestration.get("counterpilot") == "off" else "unassigned",
+                "mode": counterpilot_mode,
+                "effective_mode": effective_counterpilot_mode,
+                "creation_policy": (
+                    "disabled"
+                    if effective_counterpilot_mode == "off"
+                    else "immediate"
+                    if effective_counterpilot_mode == "continuous"
+                    else "deferred"
+                ),
+                "status": counterpilot_initial_status(effective_counterpilot_mode),
                 "thread_id": None,
                 "host_id": None,
                 "cursor": None,
+                "dispatch_intent": None,
+                "dispatch_receipt": None,
+                "thread_receipt": None,
                 "requested": {"role": "counterpilot", "model": "unavailable", "reasoning": "unavailable"},
                 "resolved": {"model": None, "reasoning": None, "resolution": None},
+                "risk_waiver": counterpilot_risk_waiver,
                 "requested_triggers": [],
                 "completed_triggers": [],
+                "creation_triggers": [],
+                "trigger_history": [],
             },
             "secondary_counterpilot": {
-                "status": "disabled",
+                "mode": counterpilot_mode,
+                "effective_mode": effective_counterpilot_mode,
+                "creation_policy": (
+                    "disabled"
+                    if effective_counterpilot_mode == "off"
+                    else "immediate"
+                    if effective_counterpilot_mode == "continuous"
+                    else "deferred"
+                ),
+                "status": counterpilot_initial_status(effective_counterpilot_mode),
                 "thread_id": None,
                 "host_id": None,
                 "cursor": None,
+                "dispatch_intent": None,
+                "dispatch_receipt": None,
+                "thread_receipt": None,
                 "requested": {"role": "counterpilot", "model": "unavailable", "reasoning": "unavailable"},
                 "resolved": {"model": None, "reasoning": None, "resolution": None},
+                "risk_waiver": counterpilot_risk_waiver,
+                "requested_triggers": [],
+                "completed_triggers": [],
+                "creation_triggers": [],
+                "trigger_history": [],
             },
         },
         "coordination": {

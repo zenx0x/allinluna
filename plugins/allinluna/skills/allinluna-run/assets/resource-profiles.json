@@ -17,8 +17,8 @@
         "counterpilot": { "model_request": "tier:frontier", "reasoning": "ultra" },
         "authority": { "model_request": "tier:frontier", "reasoning": "max" },
         "architect": { "model_request": "tier:frontier", "reasoning": "xhigh" },
-        "engineer": { "model_request": "tier:standard", "reasoning": "high" },
-        "worker": { "model_request": "tier:fast", "reasoning": "high" },
+        "engineer": { "model_request": "family:spark", "reasoning": "high" },
+        "worker": { "model_request": "family:spark", "reasoning": "high" },
         "integration": { "model_request": "tier:standard", "reasoning": "xhigh" },
         "acceptance": { "model_request": "tier:frontier", "reasoning": "max", "independent": true }
       }
@@ -38,8 +38,8 @@
         "counterpilot": { "model_request": "tier:frontier", "reasoning": "xhigh" },
         "authority": { "model_request": "tier:frontier", "reasoning": "max" },
         "architect": { "model_request": "tier:frontier", "reasoning": "high" },
-        "engineer": { "model_request": "tier:standard", "reasoning": "high" },
-        "worker": { "model_request": "tier:fast", "reasoning": "medium" },
+        "engineer": { "model_request": "family:spark", "reasoning": "high" },
+        "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:standard", "reasoning": "high" },
         "acceptance": { "model_request": "tier:frontier", "reasoning": "high", "independent": true }
       }
@@ -61,7 +61,7 @@
         "authority": { "model_request": "family:luna", "reasoning": "max" },
         "architect": { "model_request": "family:luna", "reasoning": "high" },
         "engineer": { "model_request": "family:luna", "reasoning": "high" },
-        "worker": { "model_request": "family:luna", "reasoning": "medium" },
+        "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "family:luna", "reasoning": "high" },
         "acceptance": { "model_request": "family:luna", "reasoning": "high", "independent": true }
       }
@@ -81,8 +81,8 @@
         "counterpilot": { "model_request": "tier:frontier", "reasoning": "high" },
         "authority": { "model_request": "tier:frontier", "reasoning": "max" },
         "architect": { "model_request": "tier:frontier", "reasoning": "high" },
-        "engineer": { "model_request": "tier:standard", "reasoning": "high" },
-        "worker": { "model_request": "tier:fast", "reasoning": "medium" },
+        "engineer": { "model_request": "family:spark", "reasoning": "high" },
+        "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:standard", "reasoning": "high" },
         "acceptance": { "model_request": "tier:frontier", "reasoning": "high", "independent": true }
       }
@@ -102,8 +102,8 @@
         "counterpilot": { "model_request": "tier:frontier", "reasoning": "xhigh" },
         "authority": { "model_request": "tier:frontier", "reasoning": "max" },
         "architect": { "model_request": "tier:frontier", "reasoning": "xhigh" },
-        "engineer": { "model_request": "tier:standard", "reasoning": "high" },
-        "worker": { "model_request": "tier:fast", "reasoning": "medium" },
+        "engineer": { "model_request": "family:spark", "reasoning": "high" },
+        "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:standard", "reasoning": "high" },
         "acceptance": { "model_request": "tier:frontier", "reasoning": "high", "independent": true }
       }
@@ -123,8 +123,8 @@
         "counterpilot": { "model_request": "tier:frontier", "reasoning": "ultra" },
         "authority": { "model_request": "tier:frontier", "reasoning": "ultra" },
         "architect": { "model_request": "tier:frontier", "reasoning": "ultra" },
-        "engineer": { "model_request": "tier:standard", "reasoning": "high" },
-        "worker": { "model_request": "tier:fast", "reasoning": "medium" },
+        "engineer": { "model_request": "family:spark", "reasoning": "high" },
+        "worker": { "model_request": "family:spark", "reasoning": "medium" },
         "integration": { "model_request": "tier:frontier", "reasoning": "xhigh" },
         "acceptance": { "model_request": "tier:frontier", "reasoning": "xhigh", "independent": true }
       }

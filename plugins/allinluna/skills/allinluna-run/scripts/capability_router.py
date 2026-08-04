@@ -38,7 +38,7 @@ def _binding(binding: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 class CapabilityRouter:
-    """Route ordered bindings against a static availability and live permission snapshot."""
+    """Route bindings using explicit discovery evidence and separate live permissions."""
 
     def __init__(self, capabilities: list[dict[str, Any]] | None = None):
         self.registry = {_capability(item)["id"]: _capability(item) for item in (capabilities or [])}
@@ -47,12 +47,14 @@ class CapabilityRouter:
         self,
         bindings: list[dict[str, Any]],
         *,
-        availability: dict[str, bool] | None = None,
-        permissions: dict[str, bool] | None = None,
+        availability: dict[str, Any] | None = None,
+        permissions: dict[str, Any] | None = None,
+        discovery: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         availability = availability or {}
         permissions = permissions or {}
+        discovery = discovery or {}
         context = context or {}
         requested = [_binding(item, index) for index, item in enumerate(bindings)]
         requested.sort(key=lambda item: (item["invocation_order"], item["capability"]["id"]))
@@ -63,19 +65,21 @@ class CapabilityRouter:
             is_applicable = item["kind"] != "applicable" or bool(
                 item.get("applicable", context.get("applicable", True))
             )
-            available = bool(availability.get(cap_id, self.registry.get(cap_id, cap).get("available", True)))
-            permission = permissions.get(cap_id, True)
-            status = "resolved" if is_applicable and available and permission is not False else (
-                "not-applicable" if not is_applicable else "unavailable" if not available else "permission-denied"
+            availability_state, discovery_evidence = self._discovery_state(cap_id, availability, discovery)
+            permission_state = self._permission_state(cap_id, permissions)
+            status = "resolved" if is_applicable and availability_state == "available" and permission_state == "granted" else (
+                "not-applicable" if not is_applicable else
+                "unavailable" if availability_state != "available" else
+                "permission-denied" if permission_state == "denied" else "permission-unknown"
             )
             actual = deepcopy(cap) if status == "resolved" else None
             fallback_used = None
             if actual is None and item.get("fallback"):
                 fallback = _capability(item["fallback"] if isinstance(item["fallback"], dict) else {"id": item["fallback"], "type": "script"})
                 fallback_id = fallback["id"]
-                fallback_available = bool(availability.get(fallback_id, self.registry.get(fallback_id, fallback).get("available", True)))
-                fallback_permission = permissions.get(fallback_id, True)
-                if fallback_available and fallback_permission is not False:
+                fallback_availability, _ = self._discovery_state(fallback_id, availability, discovery)
+                fallback_permission = self._permission_state(fallback_id, permissions)
+                if fallback_availability == "available" and fallback_permission == "granted":
                     actual = fallback
                     fallback_used = fallback_id
                     status = "fallback"
@@ -84,8 +88,9 @@ class CapabilityRouter:
                 "resolved": deepcopy(actual) if status in {"resolved", "fallback"} else None,
                 "actual": actual,
                 "status": status,
-                "availability": "available" if available else "unavailable",
-                "live_permission": "granted" if permission is not False else "denied",
+                "availability": availability_state,
+                "discovery_evidence": discovery_evidence,
+                "live_permission": permission_state,
                 "fallback": fallback_used,
                 "purpose": item["purpose"],
                 "phase": item["phase"],
@@ -104,6 +109,54 @@ class CapabilityRouter:
             "blocking": blocking,
             "valid": not blocking,
         }
+
+    def _discovery_state(
+        self,
+        cap_id: str,
+        availability: dict[str, Any],
+        discovery: dict[str, Any],
+    ) -> tuple[str, Any]:
+        """Registry metadata is not proof; explicit catalog evidence is."""
+        if cap_id in availability:
+            value = availability[cap_id]
+            if isinstance(value, bool):
+                return ("available" if value else "unavailable", {"source": "availability", "value": value})
+            if isinstance(value, dict):
+                proven = value.get("available") is True and bool(
+                    value.get("evidence") or value.get("source") or value.get("discovered_at")
+                )
+                return (
+                    "available" if proven else "unavailable" if value.get("available") is False else "unknown",
+                    deepcopy(value),
+                )
+        if cap_id in discovery:
+            value = discovery[cap_id]
+            if isinstance(value, dict):
+                proven = value.get("available") is True and bool(
+                    value.get("evidence") or value.get("source") or value.get("discovered_at")
+                )
+                return (
+                    "available" if proven else "unavailable" if value.get("available") is False else "unknown",
+                    deepcopy(value),
+                )
+            if isinstance(value, bool):
+                return ("available" if value else "unavailable", {"source": "discovery", "value": value})
+        return ("unknown", None)
+
+    @staticmethod
+    def _permission_state(cap_id: str, permissions: dict[str, Any]) -> str:
+        if cap_id not in permissions:
+            # A catalog may omit a permission field when the host exposes no
+            # separate permission probe. Discovery remains independently
+            # required; omitted permission does not turn a discovered tool
+            # into a denied tool.
+            return "granted"
+        value = permissions[cap_id]
+        if value is True or value == "granted":
+            return "granted"
+        if value is False or value == "denied":
+            return "denied"
+        return "unknown"
 
 
 def record_usage(

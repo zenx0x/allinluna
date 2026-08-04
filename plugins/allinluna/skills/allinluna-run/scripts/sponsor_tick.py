@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from bootstrap_control_plane import actions_for as bootstrap_actions
-from coordinator_tick import monitoring_action
+from codex_app_adapter import monitoring_action
 from workflow_state import load_state
 
 

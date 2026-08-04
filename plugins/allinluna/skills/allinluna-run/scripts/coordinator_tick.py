@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute the next mandatory All in Luna coordinator actions."""
+"""Compute the next mandatory All in Luna Coordinator actions."""
 
 from __future__ import annotations
 
@@ -7,9 +7,28 @@ import argparse
 import json
 from pathlib import Path
 
+from codex_app_adapter import (
+    CREATE_THREAD_TOOL,
+    await_dispatch_receipt,
+    control_target,
+    create_thread_action,
+    dispatch_id,
+    dispatch_intent,
+    LIST_PROJECTS_TOOL,
+    monitoring_action,
+    owner_target,
+    project_resolution_action,
+)
 from render_control_plane_brief import render as render_control_brief
 from render_task_brief import render
-from workflow_state import append_event, atomic_write_json, event, load_state, now_iso
+from workflow_state import (
+    append_event,
+    atomic_write_json,
+    counterpilot_trigger,
+    event,
+    load_state,
+    now_iso,
+)
 
 
 def effective_slots(state: dict) -> int:
@@ -28,25 +47,178 @@ def soft_budget_reached(state: dict) -> dict | None:
     return None
 
 
-def monitoring_action(state: dict, targets: list[dict]) -> dict:
-    tools = set(state.get("capabilities", {}).get("thread_tools", []))
-    if "codex_app__wait_threads" in tools:
-        return {"kind": "wait-for-top-level-tasks", "tool": "codex_app__wait_threads", "targets": targets}
-    if {"codex_app__list_threads", "codex_app__read_thread"}.issubset(tools):
+def _unresolved(model: object) -> bool:
+    return not model or model == "unavailable" or str(model).startswith(("tier:", "family:"))
+
+
+def _control_action(
+    state: dict,
+    child_id: str,
+    child: dict,
+    *,
+    run_dir: Path,
+    write_briefs: bool,
+    record_intents: bool,
+) -> dict:
+    if child.get("dispatch_intent"):
+        return await_dispatch_receipt(child_id, child["dispatch_intent"])
+    brief_path = run_dir / "briefs" / f"{child_id}.md"
+    prompt = render_control_brief(state, "subcoordinator", child_id)
+    if write_briefs:
+        brief_path.parent.mkdir(parents=True, exist_ok=True)
+        brief_path.write_text(prompt, encoding="utf-8")
+    resolved = state["control_plane"]["primary_coordinator"]["resolved"]
+    model = resolved.get("model")
+    if _unresolved(model):
         return {
-            "kind": "poll-top-level-tasks",
-            "tools": ["codex_app__list_threads", "codex_app__read_thread"],
-            "targets": targets,
-            "instruction": "list once, read only changed threads using cursors, reconcile, then tick again",
+            "kind": "resolve-runtime-resources",
+            "coordinator_id": child_id,
+            "instruction": "resolve the child Coordinator model before dispatch",
         }
-    return {
-        "kind": "discover-thread-monitoring-tools",
-        "targets": targets,
-        "instruction": "discover wait_threads or list_threads + read_thread; do not claim monitoring is unavailable before discovery",
-    }
+    action = create_thread_action(
+        kind="dispatch-subcoordinator",
+        entity_id=dispatch_id(state["run_id"], child_id),
+        prompt=prompt,
+        target=control_target(state, child_id),
+        model=model,
+        thinking=resolved.get("reasoning"),
+        title=f"All in Luna {child_id} [{dispatch_id(state['run_id'], child_id)}]",
+        record_with="record_control_plane.py --role subcoordinator",
+        metadata={
+            "coordinator_id": child_id,
+            "git_bootstrap_required": False,
+        },
+    )
+    if record_intents:
+        child["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso())
+    return action
 
 
-def actions_for(state: dict, run_dir: Path, coordinator_id: str = "primary", write_briefs: bool = True) -> dict:
+def counterpilot_creation_action(
+    state: dict,
+    run_dir: Path,
+    trigger: str | None,
+    write_briefs: bool,
+    record_intents: bool,
+) -> dict:
+    counterpilot = state["control_plane"]["counterpilot"]
+    if counterpilot.get("dispatch_intent"):
+        return await_dispatch_receipt("counterpilot", counterpilot["dispatch_intent"])
+    resolved = counterpilot.get("resolved", {})
+    resolved_model = resolved.get("model")
+    if _unresolved(resolved_model):
+        return {
+            "kind": "resolve-control-plane-resources",
+            "role": "counterpilot",
+            "trigger": trigger,
+            "instruction": "resolve the CounterPilot model before creating the deferred task",
+        }
+    brief_path = run_dir / "briefs" / "counterpilot.md"
+    prompt = render_control_brief(state, "counterpilot")
+    if write_briefs:
+        brief_path.parent.mkdir(parents=True, exist_ok=True)
+        brief_path.write_text(prompt, encoding="utf-8")
+    action = create_thread_action(
+        kind="create-counterpilot",
+        entity_id=dispatch_id(state["run_id"], "counterpilot"),
+        prompt=prompt,
+        target=control_target(state, "counterpilot"),
+        model=resolved_model,
+        thinking=resolved.get("reasoning"),
+        title=f"All in Luna counterpilot [{dispatch_id(state['run_id'], 'counterpilot')}]",
+        record_with="record_control_plane.py --role counterpilot",
+        metadata={
+            "role": "counterpilot",
+            "trigger": trigger,
+            "git_bootstrap_required": False,
+        },
+    )
+    if trigger:
+        action["record_with"] += f" --trigger {trigger}"
+    if record_intents:
+        counterpilot["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso())
+    return action
+
+
+def _project_action(state: dict, *, record_intents: bool) -> dict:
+    resolution = state.setdefault("capabilities", {}).get("project_resolution")
+    if resolution:
+        return {
+            "kind": "await-project-receipt",
+            "tool": LIST_PROJECTS_TOOL,
+            "project_root": resolution.get("project_root"),
+            "receipt_required": True,
+            "instruction": "reuse the existing list_projects request; do not redispatch it",
+        }
+    action = project_resolution_action(state)
+    if record_intents:
+        state["capabilities"]["project_resolution"] = {
+            "status": "emitted",
+            "project_root": action.get("project_root"),
+            "requested_at": now_iso(),
+        }
+    return action
+
+
+def _owner_action(
+    state: dict,
+    run_dir: Path,
+    task_id: str,
+    *,
+    write_briefs: bool,
+    record_intents: bool,
+) -> dict:
+    task = state["tasks"][task_id]
+    assignment = task["assignment"]
+    if assignment.get("dispatch_intent"):
+        action = await_dispatch_receipt(task_id, assignment["dispatch_intent"])
+        action["task_id"] = task_id
+        return action
+    resolved_model = assignment.get("resolved_model")
+    if _unresolved(resolved_model):
+        return {
+            "kind": "resolve-runtime-resources",
+            "task_id": task_id,
+            "instruction": (
+                "resolve this task against the current runtime catalog with "
+                "refresh_task_resources.py before dispatch; never pass a logical tier "
+                "or family name to create_thread"
+            ),
+        }
+    target = owner_target(state)
+    if target is None:
+        raise RuntimeError("projectId is required before dispatching a worktree owner")
+    brief_path = run_dir / "briefs" / f"{task_id}.md"
+    prompt = render(state, task_id)
+    if write_briefs:
+        brief_path.parent.mkdir(parents=True, exist_ok=True)
+        brief_path.write_text(prompt, encoding="utf-8")
+    action = create_thread_action(
+        kind="dispatch-top-level-task",
+        entity_id=dispatch_id(state["run_id"], task_id),
+        prompt=prompt,
+        target=target,
+        model=resolved_model,
+        thinking=assignment.get("resolved_reasoning") or task["requested"]["reasoning"],
+        title=f"All in Luna {task_id} [{dispatch_id(state['run_id'], task_id)}]",
+        record_with=f"record_thread_receipt.py --task {task_id} --receipt APP_RESPONSE.json",
+        metadata={
+            "task_id": task_id,
+            "delegation": "top-level-task",
+        },
+    )
+    if record_intents:
+        assignment["dispatch_intent"] = dispatch_intent(action, emitted_at=now_iso())
+    return action
+
+
+def actions_for(
+    state: dict,
+    run_dir: Path,
+    coordinator_id: str = "primary",
+    write_briefs: bool = True,
+    record_intents: bool = True,
+) -> dict:
     tasks = state["tasks"]
     control = state["control_plane"]
     primary = control["primary_coordinator"]
@@ -80,6 +252,7 @@ def actions_for(state: dict, run_dir: Path, coordinator_id: str = "primary", wri
             "dispatch_count": 0,
             "actions": [{"kind": "bootstrap-control-plane", "tool": "bootstrap_control_plane.py"}],
         }
+
     if coordinator_id == "primary":
         managed_ids = {
             task_id for task_id, task in tasks.items()
@@ -92,6 +265,7 @@ def actions_for(state: dict, run_dir: Path, coordinator_id: str = "primary", wri
         if shard["status"] != "running":
             raise ValueError(f"coordinator is not assigned: {coordinator_id}")
         managed_ids = set(shard["task_ids"])
+
     running = [task_id for task_id, task in tasks.items() if task_id in managed_ids and task["status"] == "running"]
     ready = [task_id for task_id, task in tasks.items() if task_id in managed_ids and task["status"] == "ready"]
     total_running = sum(task["status"] == "running" for task in tasks.values())
@@ -101,64 +275,61 @@ def actions_for(state: dict, run_dir: Path, coordinator_id: str = "primary", wri
         slots = max(0, slots)
     dispatch = ready[:slots]
     actions: list[dict] = []
+
     counterpilot = control["counterpilot"]
-    if coordinator_id == "primary" and counterpilot["status"] == "running":
-        trigger = None
-        if "plan-formed" not in counterpilot.get("requested_triggers", []):
-            trigger = "plan-formed"
-        elif any(task["status"] == "ready" and task["resource_class"] == "integration" for task in tasks.values()):
-            trigger = "before-integration"
-        elif any(task["assignment"].get("attempt", 0) >= 2 for task in tasks.values()):
-            trigger = "repeated-failure"
-        if trigger and trigger not in counterpilot.get("requested_triggers", []):
+    if coordinator_id == "primary":
+        trigger = counterpilot_trigger(state)
+        if trigger and counterpilot["status"] in {"deferred", "unassigned"}:
+            actions.append(
+                counterpilot_creation_action(
+                    state,
+                    run_dir,
+                    trigger if counterpilot["status"] == "deferred" else None,
+                    write_briefs,
+                    record_intents,
+                )
+            )
+        elif trigger and counterpilot["status"] == "running":
             actions.append(
                 {
                     "kind": "request-counterpilot-pass",
                     "tool": "codex_app__send_message_to_thread",
-                    "thread_id": counterpilot["thread_id"],
+                    "threadId": counterpilot["thread_id"],
+                    "hostId": counterpilot.get("host_id"),
+                    "prompt": f"Run one consolidated CounterPilot pass for trigger: {trigger}",
                     "trigger": trigger,
-                    "message": f"Run one consolidated CounterPilot pass for trigger: {trigger}",
                     "record_with": "record_counterpilot_trigger.py --status requested",
                 }
             )
-    briefs_dir = run_dir / "briefs"
+
     if coordinator_id == "primary":
         for child_id, child in control["subcoordinators"].items():
-            if child["status"] != "unassigned":
-                continue
-            brief_path = briefs_dir / f"{child_id}.md"
-            if write_briefs:
-                briefs_dir.mkdir(parents=True, exist_ok=True)
-                brief_path.write_text(render_control_brief(state, "subcoordinator", child_id), encoding="utf-8")
-            resolved = primary["resolved"]
-            actions.append(
-                {
-                    "kind": "dispatch-subcoordinator",
-                    "coordinator_id": child_id,
-                    "tool": "codex_app__create_thread",
-                    "environment": "inherit",
-                    "model": resolved.get("model"),
-                    "reasoning": resolved.get("reasoning"),
-                    "brief_path": str(brief_path.resolve()),
-                    "record_with": "record_control_plane.py --role subcoordinator",
-                    "git_bootstrap_required": False,
-                }
-            )
+            if child["status"] == "unassigned":
+                actions.append(
+                    _control_action(
+                        state,
+                        child_id,
+                        child,
+                        run_dir=run_dir,
+                        write_briefs=write_briefs,
+                        record_intents=record_intents,
+                    )
+                )
         active_children = [
             {
                 "role": "subcoordinator",
-                "coordinator_id": child_id,
                 "thread_id": child["thread_id"],
                 "host_id": child.get("host_id"),
                 "after_cursor": child.get("cursor"),
             }
-            for child_id, child in control["subcoordinators"].items()
+            for child in control["subcoordinators"].values()
             if child["status"] == "running" and child.get("thread_id")
         ]
         if active_children:
             child_monitor = monitoring_action(state, active_children)
             child_monitor["kind"] = f"{child_monitor['kind']}-subcoordinators"
             actions.append(child_monitor)
+
     budget_signal = soft_budget_reached(state)
     if budget_signal:
         actions.append(
@@ -171,42 +342,21 @@ def actions_for(state: dict, run_dir: Path, coordinator_id: str = "primary", wri
                 ),
             }
         )
-    for task_id in dispatch:
-        task = tasks[task_id]
-        resolved_model = task["assignment"].get("resolved_model")
-        resolved_reasoning = task["assignment"].get("resolved_reasoning")
-        if not resolved_model or resolved_model.startswith(("tier:", "family:")):
+
+    if dispatch and owner_target(state) is None:
+        actions.append(_project_action(state, record_intents=record_intents))
+    elif dispatch:
+        for task_id in dispatch:
             actions.append(
-                {
-                    "kind": "resolve-runtime-resources",
-                    "task_id": task_id,
-                    "instruction": (
-                        "resolve this task against the current runtime catalog with "
-                        "refresh_task_resources.py before dispatch; never pass a logical tier "
-                        "or family name to create_thread"
-                    ),
-                }
+                _owner_action(
+                    state,
+                    run_dir,
+                    task_id,
+                    write_briefs=write_briefs,
+                    record_intents=record_intents,
+                )
             )
-            continue
-        brief_path = briefs_dir / f"{task_id}.md"
-        if write_briefs:
-            briefs_dir.mkdir(parents=True, exist_ok=True)
-            brief_path.write_text(render(state, task_id), encoding="utf-8")
-        roots = state["repository"].get("roots", [])
-        actions.append(
-            {
-                "kind": "dispatch-top-level-task",
-                "task_id": task_id,
-                "tool": "codex_app__create_thread",
-                "prerequisite_tool": "codex_app__list_projects",
-                "project_root": roots[0]["path"] if roots else None,
-                "environment": "worktree",
-                "brief_path": str(brief_path.resolve()),
-                "model": resolved_model,
-                "reasoning": resolved_reasoning or task["requested"]["reasoning"],
-                "record_with": "update_run.py --task TASK --status running --thread-id ...",
-            }
-        )
+
     wait_targets = [
         {
             "task_id": task_id,
@@ -220,24 +370,16 @@ def actions_for(state: dict, run_dir: Path, coordinator_id: str = "primary", wri
     if wait_targets:
         actions.append(monitoring_action(state, wait_targets))
     incomplete = [
-        task_id
-        for task_id, task in tasks.items()
+        task_id for task_id, task in tasks.items()
         if task["status"] not in {"completed", "skipped", "cancelled"}
     ]
     if not incomplete:
-        actions.append(
-            {
-                "kind": "completion-check",
-                "instruction": "validate the run and completion standard, then mark completed",
-            }
-        )
+        actions.append({"kind": "completion-check", "instruction": "validate the run and completion standard, then mark completed"})
     elif not actions:
         actions.append(
             {
                 "kind": "attention-required",
-                "blocked_tasks": [
-                    task_id for task_id, task in tasks.items() if task["status"] in {"blocked", "failed"}
-                ],
+                "blocked_tasks": [task_id for task_id, task in tasks.items() if task["status"] in {"blocked", "failed"}],
                 "instruction": "continue unrelated ready lanes; pause only if every remaining lane is blocked",
             }
         )
@@ -264,7 +406,13 @@ def main() -> int:
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
     run_dir, state = load_state(args.run)
-    output = actions_for(state, run_dir, args.coordinator_id, not args.no_write_briefs)
+    output = actions_for(
+        state,
+        run_dir,
+        args.coordinator_id,
+        not args.no_write_briefs,
+        not args.no_record,
+    )
     if not args.no_record:
         previous = state.get("coordination", {}).get("last_tick_at")
         state["coordination"]["last_tick_at"] = now_iso()
@@ -278,7 +426,10 @@ def main() -> int:
                 previous=previous,
                 current=state["coordination"]["last_tick_at"],
                 reason="coordinator control tick",
-                evidence={"actions": [item["kind"] for item in output["actions"]]},
+                evidence={
+                    "actions": [item["kind"] for item in output["actions"]],
+                    "dispatch_ids": [item.get("dispatch_id") for item in output["actions"] if item.get("dispatch_id")],
+                },
             ),
         )
     print(json.dumps(output, indent=2 if args.pretty else None, ensure_ascii=False))

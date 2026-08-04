@@ -119,6 +119,22 @@ class PlanValidationTests(unittest.TestCase):
         result = validate(plan)
         self.assertTrue(result["valid"], result)
 
+    def test_counterpilot_auto_and_high_risk_off_waiver_are_explicit(self) -> None:
+        plan = deepcopy(self.example)
+        plan["orchestration"]["counterpilot"] = "auto"
+        self.assertTrue(validate(plan)["valid"])
+
+        plan["orchestration"]["counterpilot"] = "off"
+        rejected = validate(plan)
+        self.assertFalse(rejected["valid"])
+        self.assertTrue(any("risk_waiver" in error for error in rejected["errors"]))
+        plan["orchestration"]["counterpilot_risk_waiver"] = {
+            "acknowledged": True,
+            "reason": "Sponsor accepts the high-risk review tradeoff.",
+        }
+        accepted = validate(plan)
+        self.assertTrue(accepted["valid"], accepted)
+
     def test_high_concurrency_requires_explicit_decomposition_choice(self) -> None:
         plan = deepcopy(self.example)
         plan["resource_policy"]["concurrency"]["desired"] = 48

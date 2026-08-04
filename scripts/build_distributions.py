@@ -145,7 +145,7 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         "plugins": [
             {
                 "name": plugin["name"],
-                "source": {"source": "local", "path": "."},
+                "source": {"source": "local", "path": "./"},
                 "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
                 "category": plugin.get("interface", {}).get("category", "Productivity"),
             }

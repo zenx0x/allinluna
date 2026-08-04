@@ -140,7 +140,7 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual(marketplace["name"], plugin["name"])
                 self.assertEqual(len(marketplace["plugins"]), 1)
                 self.assertEqual(marketplace["plugins"][0]["name"], plugin["name"])
-                self.assertEqual(marketplace["plugins"][0]["source"]["path"], ".")
+                self.assertEqual(marketplace["plugins"][0]["source"]["path"], "./")
 
 
 if __name__ == "__main__":

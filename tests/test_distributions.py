@@ -71,6 +71,28 @@ class DistributionTests(unittest.TestCase):
                 runtime = output / distribution / "shared/core/validate_route_packet.py"
                 self.assertTrue(runtime.is_file(), runtime)
 
+    def test_release_artifacts_exclude_python_cache_and_keep_research_readmes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            research = output / "research-routes"
+            self.assertTrue((research / "README.md").is_file())
+            self.assertTrue((research / "README.en.md").is_file())
+            self.assertIn("reversible", (research / "README.en.md").read_text(encoding="utf-8"))
+            self.assertIn("可逆", (research / "README.md").read_text(encoding="utf-8"))
+            self.assertNotEqual((research / "README.md").read_bytes(), (ROOT / "README.md").read_bytes())
+            garbage = [
+                path for path in output.rglob("*")
+                if "__pycache__" in path.parts or path.suffix.lower() in {".pyc", ".pyo"}
+            ]
+            self.assertEqual(garbage, [])
+
 
 if __name__ == "__main__":
     unittest.main()

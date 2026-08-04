@@ -13,6 +13,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "distributions" / "distribution-manifest.json"
+EXCLUDED_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+EXCLUDED_FILES = {".DS_Store", "Thumbs.db"}
+
+
+def is_release_file(path: Path) -> bool:
+    return not (
+        any(part in EXCLUDED_DIRS for part in path.parts)
+        or path.name in EXCLUDED_FILES
+        or path.suffix.lower() in {".pyc", ".pyo"}
+    )
 
 
 def read_json(path: Path) -> dict:
@@ -50,7 +60,7 @@ def expand_sources(root: Path, entries: list[str]) -> list[tuple[str, Path]]:
         if source.is_file():
             expanded.append((entry, source))
         else:
-            for child in sorted(p for p in source.rglob("*") if p.is_file()):
+            for child in sorted(p for p in source.rglob("*") if p.is_file() and is_release_file(p)):
                 expanded.append((child.relative_to(root).as_posix(), child))
     return expanded
 
@@ -67,7 +77,15 @@ def shared_inventory(root: Path, manifest: dict) -> dict[str, list[dict[str, str
 
 def copy_tree(source: Path, target: Path) -> None:
     if source.is_dir():
-        shutil.copytree(source, target, dirs_exist_ok=True)
+        shutil.copytree(
+            source,
+            target,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(
+                "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+                "*.pyc", "*.pyo", ".DS_Store", "Thumbs.db",
+            ),
+        )
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -90,10 +108,12 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     if not overlay.is_dir():
         raise FileNotFoundError(f"overlay does not exist: {spec['overlay']}")
     overlay_target = artifact / "overlay"
-    for source in sorted(p for p in overlay.rglob("*") if p.is_file()):
+    for source in sorted(p for p in overlay.rglob("*") if p.is_file() and is_release_file(p)):
         relative = source.relative_to(overlay)
         if relative.parts[0] == "skills":
             continue
+        if relative.name in {"README.md", "README.en.md"}:
+            copy_tree(source, artifact / relative.name)
         else:
             copy_tree(source, overlay_target / relative)
 

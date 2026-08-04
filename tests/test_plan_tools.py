@@ -65,12 +65,19 @@ class PlanValidationTests(unittest.TestCase):
 
     def test_root_coordinator_topology_is_mandatory(self) -> None:
         plan = deepcopy(self.example)
-        plan["orchestration"]["root_product_implementation"] = "allowed"
+        plan["orchestration"]["coordinator_product_implementation"] = "allowed"
         result = validate(plan)
         self.assertFalse(result["valid"])
         self.assertTrue(
-            any("root_product_implementation" in error for error in result["errors"])
+            any("coordinator_product_implementation" in error for error in result["errors"])
         )
+
+    def test_user_conversation_and_coordinator_are_separate(self) -> None:
+        plan = deepcopy(self.example)
+        plan["orchestration"]["coordinator_role"] = "current-conversation"
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("coordinator_role" in error for error in result["errors"]))
 
     def test_all_luna_speed_defaults_can_be_user_overridden(self) -> None:
         plan = deepcopy(self.example)
@@ -98,7 +105,36 @@ class PlanValidationTests(unittest.TestCase):
         self.assertTrue(any("overrides" in warning for warning in result["warnings"]))
 
         plan["resource_policy"]["concurrency"]["desired"] = 24
+        plan["orchestration"]["high_concurrency_review"] = "accepted"
+        plan["orchestration"]["decomposition_model"] = "gpt-5.6-sol"
         self.assertTrue(validate(plan)["valid"])
+
+    def test_parallel_only_does_not_force_governance_layers(self) -> None:
+        plan = deepcopy(self.example)
+        plan["execution_style"] = "parallel-only"
+        plan["risk_level"] = "low"
+        plan["orchestration"]["counterpilot"] = "off"
+        plan["tasks"] = [plan["tasks"][0]]
+        plan["milestones"] = []
+        result = validate(plan)
+        self.assertTrue(result["valid"], result)
+
+    def test_high_concurrency_requires_explicit_decomposition_choice(self) -> None:
+        plan = deepcopy(self.example)
+        plan["resource_policy"]["concurrency"]["desired"] = 48
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("high-quality decomposition" in error for error in result["errors"]))
+        plan["orchestration"]["high_concurrency_review"] = "declined"
+        self.assertTrue(validate(plan)["valid"])
+
+    def test_custom_high_concurrency_also_requires_decomposition_choice(self) -> None:
+        plan = deepcopy(self.example)
+        plan["resource_policy"]["profile"] = "custom"
+        plan["resource_policy"]["concurrency"]["desired"] = 64
+        result = validate(plan)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("high-quality decomposition" in error for error in result["errors"]))
 
     def test_luna_profile_requires_hard_lock(self) -> None:
         plan = deepcopy(self.example)

@@ -1,6 +1,8 @@
 # Integration and acceptance
 
-## Phase integration
+## Risk-adaptive phase integration
+
+Managed medium/high/critical work normally uses one integration task. Low-risk or `parallel-only` work does not gain an integration layer unless shared contracts, explicit plan requirements, or actual conflicts require one.
 
 One integration owner should:
 
@@ -14,6 +16,8 @@ One integration owner should:
 Integration may fix mechanical conflicts, schema/client drift, imports, adapters, and shared test wiring within its assigned scope. It must return scientific, authority, or owner-specific behavioral defects to the original lane.
 
 ## Independent acceptance
+
+High/critical, authority-sensitive, external-mutation, or explicitly requested work uses independent acceptance. Bounded low-risk work may finish with owner verification when its completion standard does not require an independent milestone.
 
 Acceptance evaluates the actual completion standard and user journeys against the integrated baseline. It should inspect:
 
@@ -33,11 +37,13 @@ re-integrate once, and re-run the failed acceptance evidence.
 
 ## Avoid governance inflation
 
-Do not add promotion, registry revision, meta-review, and duplicate acceptance layers unless a release contract explicitly requires them. The normal pattern is:
+Do not add promotion, registry revision, meta-review, and duplicate acceptance layers unless a release contract explicitly requires them. The normal high-risk pattern is:
 
 ```text
 owners → one integration → one independent acceptance → accepted baseline
 ```
+
+For lower-risk independent lanes it may be `owners → focused verification → completed baseline`. Risk adaptation must not remove a user-requested acceptance journey or weaken the completion standard.
 
 ## Acceptance result
 

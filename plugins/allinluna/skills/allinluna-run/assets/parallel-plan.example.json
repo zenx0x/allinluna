@@ -1,0 +1,24 @@
+{
+  "plan_id": "existing-user-plan",
+  "title": "Execute an existing user plan in parallel",
+  "objective": "Implement the user's already-approved plan without replanning its product direction.",
+  "repository": {
+    "mode": "existing",
+    "roots": [{"path": ".", "git": true, "branch": "main", "head": "runtime-verify", "dirty_state": "unknown"}],
+    "instructions": ["AGENTS.md"],
+    "protected_paths": []
+  },
+  "completion_standard": ["Every supplied task is implemented and its supplied verification passes."],
+  "stop_boundary": "Stop when every supplied plan item is complete; do not publish.",
+  "tasks": [
+    {
+      "id": "P1",
+      "title": "First independent lane",
+      "description": "Implement the first complete lane exactly as supplied by the user plan.",
+      "dependencies": [],
+      "paths": ["src/first/"],
+      "deliverables": ["Completed first lane"],
+      "verification": ["Run the supplied focused check"]
+    }
+  ]
+}

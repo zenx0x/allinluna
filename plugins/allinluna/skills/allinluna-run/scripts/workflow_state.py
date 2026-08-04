@@ -154,6 +154,26 @@ def build_initial_state(
     runtime_tier: str,
 ) -> dict[str, Any]:
     timestamp = now_iso()
+    orchestration = plan["orchestration"]
+    desired = int(policy.get("concurrency", {}).get("desired", 1))
+    strategy = orchestration.get("coordination_strategy", "auto")
+    hierarchical = strategy == "hierarchical" or (strategy == "auto" and desired >= 16)
+    shard_size = int(orchestration.get("shard_size", 8))
+    implementation_ids = [
+        source["id"]
+        for source in plan["tasks"]
+        if source.get("resource_class") not in {"integration", "acceptance"}
+    ]
+    shard_chunks = (
+        [implementation_ids[index : index + shard_size] for index in range(0, len(implementation_ids), shard_size)]
+        if hierarchical and len(implementation_ids) > shard_size
+        else []
+    )
+    coordinator_by_task = {
+        task_id: f"subcoordinator-{index + 1}"
+        for index, chunk in enumerate(shard_chunks)
+        for task_id in chunk
+    }
     tasks: dict[str, dict[str, Any]] = {}
     for source in plan["tasks"]:
         status = "ready" if not source["dependencies"] else "pending"
@@ -191,6 +211,7 @@ def build_initial_state(
                 "worktree": None,
                 "branch": None,
                 "base_commit": None,
+                "coordinator_id": coordinator_by_task.get(source["id"], "primary"),
             },
             "evidence": {
                 "final_commit": None,
@@ -205,10 +226,12 @@ def build_initial_state(
         tasks[task["id"]] = task
 
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "run_id": run_id,
         "plan_id": plan["plan_id"],
         "plan_hash": json_sha256(plan),
+        "execution_style": plan["execution_style"],
+        "risk_level": plan["risk_level"],
         "run_dir": str(run_dir.resolve()),
         "status": "planned",
         "profile": profile,
@@ -218,6 +241,7 @@ def build_initial_state(
             "actual_delegation": "unavailable",
             "host_concurrency": "unavailable",
             "fallback_reason": None,
+            "thread_tools": [],
         },
         "resource_policy": deepcopy(policy),
         "usage": {
@@ -229,12 +253,57 @@ def build_initial_state(
         "repository": deepcopy(plan["repository"]),
         "authorizations": deepcopy(plan["authorizations"]),
         "orchestration": deepcopy(plan["orchestration"]),
+        "control_plane": {
+            "sponsor": {"role": "user-conversation", "thread_id": None, "host_id": None},
+            "primary_coordinator": {
+                "status": "unassigned",
+                "thread_id": None,
+                "host_id": None,
+                "cursor": None,
+                "requested": {"role": "coordinator", "model": "unavailable", "reasoning": "unavailable"},
+                "resolved": {"model": None, "reasoning": None, "resolution": None},
+                "requested_triggers": [],
+                "completed_triggers": [],
+            },
+            "subcoordinators": {
+                f"subcoordinator-{index + 1}": {
+                    "id": f"subcoordinator-{index + 1}",
+                    "status": "unassigned",
+                    "task_ids": chunk,
+                    "thread_id": None,
+                    "host_id": None,
+                    "cursor": None,
+                    "slot_limit": max(1, desired // max(1, len(shard_chunks))),
+                }
+                for index, chunk in enumerate(shard_chunks)
+            },
+            "counterpilot": {
+                "mode": orchestration.get("counterpilot", "off"),
+                "status": "disabled" if orchestration.get("counterpilot") == "off" else "unassigned",
+                "thread_id": None,
+                "host_id": None,
+                "cursor": None,
+                "requested": {"role": "counterpilot", "model": "unavailable", "reasoning": "unavailable"},
+                "resolved": {"model": None, "reasoning": None, "resolution": None},
+                "requested_triggers": [],
+                "completed_triggers": [],
+            },
+            "secondary_counterpilot": {
+                "status": "disabled",
+                "thread_id": None,
+                "host_id": None,
+                "cursor": None,
+                "requested": {"role": "counterpilot", "model": "unavailable", "reasoning": "unavailable"},
+                "resolved": {"model": None, "reasoning": None, "resolution": None},
+            },
+        },
         "coordination": {
             "plan_revision": 0,
             "last_tick_at": None,
             "stop_boundary": plan.get("stop_boundary"),
         },
         "defects": {},
+        "challenges": {},
         "completion_standard": deepcopy(plan["completion_standard"]),
         "tasks": tasks,
         "milestones": deepcopy(plan["milestones"]),

@@ -179,7 +179,10 @@ def validate() -> tuple[list[str], list[str]]:
     profiles_path = SKILLS / "allinluna-run" / "assets" / "resource-profiles.json"
     try:
         profiles = json.loads(profiles_path.read_text(encoding="utf-8"))["profiles"]
-        required_profiles = {"premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"}
+        required_profiles = {
+            "premium", "balanced", "economy", "speed", "fast", "ultra-fast",
+            "all-luna", "mad-luna", "custom",
+        }
         if set(profiles) != required_profiles:
             errors.append("resource profile set is incomplete or contains unexpected modes")
         mad = profiles["mad-luna"]

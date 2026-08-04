@@ -1,44 +1,40 @@
 # Orchestration contract
 
-## Root coordinator responsibilities
+## Control-plane roles
 
-The root coordinator owns:
+The user's main conversation is the **Sponsor**. It owns product intent, explicit authority, and user-facing status, but is not the implementation coordinator. The Sponsor creates and monitors two separate user-visible tasks:
 
-- current baseline and protected-worktree verification;
-- dependency release and concurrency limits;
-- self-contained task dispatch;
-- requested-versus-actual resource records;
-- continuous wait/status monitoring;
-- defect routing back to original owners;
-- one phase integration and one milestone acceptance;
-- persistent run state and final handoff.
+- **Primary Coordinator**: owns the global DAG, resource policy, dependency release, owner dispatch, defect routing, and completion standard.
+- **CounterPilot**: independently challenges scope, assumptions, dependency safety, and recovery claims with evidence and falsifiable probes.
 
-The coordinator never absorbs substantive product implementation merely to save a dispatch. Tight coupling produces dependency-ordered top-level owners; it does not authorize the root to become an owner. Root implementation occurs only as an honestly recorded runtime fallback after delegation capability or Git bootstrap is genuinely unavailable.
+Thread IDs for Sponsor, Coordinator, CounterPilot, child Coordinators, and implementation owners must be distinct.
+
+## Hierarchical coordination
+
+For high concurrency, the primary Coordinator may create child Coordinator tasks for disjoint shards. Auto mode enables this when desired concurrency is at least 16 and there are more implementation owners than the configured shard size. Each child:
+
+- receives a fixed task-ID set and slot limit;
+- dispatches and monitors only that set;
+- cannot change global scope, resource locks, or completion criteria;
+- cannot share exclusive writable ownership with another shard;
+- reports blockers and evidence to the primary Coordinator.
+
+The hierarchy is one level deep. Do not create coordinators for micro-fixes or to inflate parallelism.
 
 ## Continuous execution
 
-After dispatch, continue:
-
 ```text
-monitor → collect evidence → return defects → re-verify → integrate → accept → release dependents
+Sponsor monitors control plane
+  -> primary Coordinator releases shards and owners
+  -> child Coordinators monitor assigned owners
+  -> owners implement and verify
+  -> defects return to original owners
+  -> risk-proportional integration/acceptance
+  -> completion standard
 ```
 
-Do not stop because a task was created, a progress report arrived, one commit landed, or one integration passed while downstream planned work remains.
+Task creation, a progress report, one commit, or one successful checkpoint is not completion. If one lane blocks, continue unrelated lanes. Pause globally only for a required product choice, missing authority/credential, destructive action, live external mutation, or a dependency blocking every remaining lane.
 
-`coordinator_tick.py` is the deterministic next-action source. Every successful dispatch is
-recorded immediately; every wait result is reconciled; every completion or defect is followed by
-another tick until completion, an authorized stop boundary, or a true global blocker.
+## Ownership and completion
 
-If one lane blocks, continue unrelated ready lanes. Pause the whole run only for an architecture-changing user choice, missing irreplaceable authority/credential, destructive action, live external mutation, or a dependency that blocks every remaining lane.
-
-## Ownership boundaries
-
-Every owner receives a full brief and an exclusive write set. Read access may be broader when needed. Shared contracts belong to one owner or to the integration task after upstream commits exist.
-
-Integration may resolve mechanical/shared-file conflicts and adapter/schema mismatches within its scope. Scientific or product-semantic defects return to the semantic owner.
-
-Acceptance is read-only unless the plan explicitly combines roles for a small task. An independent acceptor must not silently repair and then approve its own repair.
-
-## Completion
-
-The run finishes only at the plan's completion standard. “Implemented but not runtime-tested,” “backend only,” “fixture only,” and “works for the original project only” are incomplete when the plan requires the full product journey.
+Every owner receives a self-contained brief and exclusive write set. Shared contracts belong to one owner or an integration task. Integration may repair mechanical shared-file issues; scientific or owner-semantic defects return to the original owner. Completion remains the full plan standard, never the first vertical slice.

@@ -1,9 +1,11 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "plan_id": "example-feature",
   "title": "Example full-stack feature",
   "mode": "execute-ready",
   "objective": "Add a project-aware feature through the domain, API, client, user interface, and focused verification layers.",
+  "execution_style": "managed",
+  "risk_level": "high",
   "completion_standard": [
     "The feature works end to end for two isolated projects.",
     "Failure, permission, empty, and recovery states are tested.",
@@ -35,10 +37,16 @@
     "publication": false
   },
   "orchestration": {
-    "root_role": "coordinator",
-    "root_product_implementation": "forbidden",
+    "sponsor_role": "user-conversation",
+    "coordinator_role": "separate-top-level-task",
+    "coordinator_product_implementation": "forbidden",
     "owner_delegation": "top-level-task",
-    "owner_subagents": "allowed-bounded"
+    "owner_subagents": "allowed-bounded",
+    "counterpilot": "risk-triggered",
+    "coordination_strategy": "auto",
+    "shard_size": 8,
+    "high_concurrency_review": "not-required",
+    "decomposition_model": null
   },
   "resource_policy": {
     "profile": "balanced",

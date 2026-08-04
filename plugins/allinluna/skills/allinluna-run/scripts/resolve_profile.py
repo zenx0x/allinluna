@@ -134,10 +134,16 @@ def resolve(
     if plan_policy:
         same_profile = plan_policy.get("profile") == profile_name
         modifiers = plan_policy.get("modifiers", [])
-        if "speed" in modifiers:
-            speed = profile_table.get("speed", {})
-            policy["concurrency"] = deepcopy(speed.get("concurrency", policy.get("concurrency", {})))
-            policy["modifiers"] = ["speed"]
+        velocity = next(
+            (name for name in ("ultra-fast", "fast", "speed") if name in modifiers),
+            None,
+        )
+        if velocity:
+            velocity_profile = profile_table.get(velocity, {})
+            policy["concurrency"] = deepcopy(
+                velocity_profile.get("concurrency", policy.get("concurrency", {}))
+            )
+            policy["modifiers"] = [velocity]
         plan_override = {
             key: value
             for key, value in plan_policy.items()

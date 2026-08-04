@@ -14,9 +14,9 @@ Do not collapse these into a single “quality” setting:
 
 Unknown telemetry is `unavailable`; do not estimate actual cost from model names alone.
 
-## Two-level delegation default
+## Hierarchical delegation default
 
-At the root orchestration level, prefer user-visible top-level Codex tasks for independent substantive owner lanes. Do not create a top-level task for every micro-fix. Within an assigned top-level owner, allow bounded internal subagents for decomposable work under the same paths, model policy, and verification contract. Root-level subagents are a user-approved fallback, not a substitute for planned top-level owners.
+The user conversation is the Sponsor and creates a separate primary Coordinator plus a risk-triggered CounterPilot. The Coordinator prefers user-visible top-level Codex tasks for substantive owner lanes. At 16+ desired concurrency it may add one level of child Coordinators for disjoint shards. Do not create a task for every micro-fix. Within an owner, bounded subagents may work under the same paths, model policy, and verification contract.
 
 ## Resource classes
 
@@ -34,13 +34,15 @@ Assign logical tiers such as `frontier`, `standard`, `fast`, or a user-requested
 
 - `premium`: prioritize decision quality. Use frontier reasoning for authority, architecture, and acceptance; do not use expensive independent duplicates for trivial work.
 - `balanced`: frontier/standard planning, efficient engineering, bounded concurrency.
-- `economy`: Luna or fast family for clear work, concurrency 1–2, decomposition before escalation, explicit approval when escalation crosses policy.
-- `speed`: increase concurrency only for independent owners; do not trade away tests or ownership.
+- `economy`: Luna or fast family for clear work, desired concurrency 4, decomposition before escalation, explicit approval when escalation crosses policy.
+- `speed`: desired concurrency 12 for independent owners; do not trade away tests or ownership.
+- `fast`: desired concurrency 24 with hierarchical coordination when useful.
+- `ultra-fast`: desired concurrency 48 with a one-time high-quality decomposition choice.
 - `all-luna`: hard Luna family lock, high reasoning, moderate concurrency.
 - `mad-luna`: hard Luna family lock, maximum supported reasoning, maximum safe concurrency, and independent Luna verification for high-risk milestones.
 - `custom`: every important field must be explicit; missing fields inherit from balanced only when the user permits inheritance.
 
-Profiles and execution modifiers can compose. `all-luna + speed` means Luna-only roles from `all-luna` plus the `speed` concurrency strategy (desired 6, host-capped); it does not permit mixed-model fallback. Store the composition as `profile: "all-luna"` and `modifiers: ["speed"]`.
+Profiles and velocity modifiers compose. `all-luna + fast` means Luna-only roles plus fast scheduling; it does not permit mixed-model fallback. Store the base lock and modifier separately.
 
 ## Hard locks and fallbacks
 
@@ -54,7 +56,7 @@ A hard model lock means every actual assignment must match the lock. Legal polic
 
 ## Concurrency
 
-When the user has not chosen resource settings, planning should offer one optional preset choice and otherwise default to `balanced` with desired concurrency 3. The choice belongs in planning, not as a repeated Run-stage authorization. Any positive user-supplied value replaces the numeric default.
+When the user has not chosen resource settings, offer one optional preset choice and otherwise default to `balanced` with desired concurrency 8. Accept explicit values from 1–64. The choice belongs in planning, not as a repeated Run-stage authorization.
 
 The planner automatically extracts independent owner lanes using the dependency DAG and exclusive writable ownership. All ready, conflict-free lanes may run together up to the desired target. Concurrency is therefore a scheduling target, not a request for artificial task fragmentation.
 
@@ -68,4 +70,4 @@ The effective concurrency is the minimum of:
 
 More agents do not help tightly coupled work. Plan those steps sequentially or give shared files to integration.
 
-Profile concurrency values are defaults rather than ceilings. Preserve any positive value explicitly requested by the user; otherwise use the selected profile default. Do not encode current dependency readiness as desired concurrency. The runtime effective value is capped independently by actual host capacity, ready work, ownership safety, and budget. Empty or non-Git projects first receive a coordinator Git-bootstrap dependency and then use top-level owner tasks.
+Profile concurrency values are defaults rather than ceilings. At 16+, ask once whether a high-quality model should review dependencies, conflicts, ownership, and child-Coordinator shard boundaries. Record accepted plus its model, or declined. Do not encode current readiness as desired concurrency. Runtime capacity is capped independently by the host, ready work, ownership, machine, and budget.

@@ -249,6 +249,12 @@ class RunLifecycleTests(unittest.TestCase):
                 "--catalog",
                 str(RUN / "assets" / "runtime-catalog.example.json"),
             )
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "coordinator-thread",
+                "--reason", "sponsor created independent coordinator",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
             result = command(
                 str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty"
             )
@@ -260,7 +266,149 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertEqual(action["model"], "gpt-5.6-luna")
             brief = Path(action["brief_path"])
             self.assertTrue(brief.exists())
-            self.assertIn("root task remains coordinator", brief.read_text(encoding="utf-8"))
+            self.assertIn("independent primary Coordinator", brief.read_text(encoding="utf-8"))
+
+    def test_control_plane_bootstrap_separates_sponsor_coordinator_and_counterpilot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            result = command(str(SCRIPTS / "bootstrap_control_plane.py"), str(run), "--pretty")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(
+                {action["kind"] for action in payload["actions"]},
+                {"create-primary-coordinator", "create-counterpilot"},
+            )
+            self.assertTrue(all(action.get("git_bootstrap_required") is False for action in payload["actions"]))
+            self.assertTrue(payload["sponsor_must_not_implement"])
+
+    def test_control_plane_roles_reject_thread_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary) / "state")
+            first = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run), "--role", "sponsor",
+                "--thread-id", "main-thread", "--reason", "record sponsor",
+            )
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            second = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "main-thread",
+                "--reason", "invalid reuse",
+            )
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("distinct threads", second.stdout)
+
+    def test_high_concurrency_creates_child_coordinator_shards(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            source = json.loads(
+                (RUN / "assets" / "parallel-plan.example.json").read_text(encoding="utf-8")
+            )
+            source["tasks"] = []
+            for index in range(18):
+                source["tasks"].append(
+                    {
+                        "id": f"P{index + 1}",
+                        "title": f"Lane {index + 1}",
+                        "description": f"Implement independent complete lane number {index + 1}.",
+                        "dependencies": [],
+                        "paths": [f"src/lane-{index + 1}/"],
+                        "deliverables": [f"Lane {index + 1} complete"],
+                        "verification": [f"Verify lane {index + 1}"],
+                    }
+                )
+            source_path = temp / "source.json"
+            plan_path = temp / "parallel.json"
+            source_path.write_text(json.dumps(source), encoding="utf-8")
+            imported = command(
+                str(SCRIPTS / "import_parallel_plan.py"), str(source_path),
+                "--output", str(plan_path), "--profile", "fast",
+                "--high-concurrency-review", "accepted",
+                "--decomposition-model", "gpt-5.6-sol",
+            )
+            self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
+            run = self.init(
+                temp / "state", "fast", plan_path, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(state["control_plane"]["subcoordinators"]), 3)
+            recorded = command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "primary-thread",
+                "--reason", "created primary",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            tick = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--pretty")
+            self.assertEqual(tick.returncode, 0, tick.stdout + tick.stderr)
+            payload = json.loads(tick.stdout)
+            self.assertEqual(
+                len([action for action in payload["actions"] if action["kind"] == "dispatch-subcoordinator"]),
+                3,
+            )
+
+            for index in range(3):
+                child_id = f"subcoordinator-{index + 1}"
+                recorded = command(
+                    str(SCRIPTS / "record_control_plane.py"), str(run),
+                    "--role", "subcoordinator", "--coordinator-id", child_id,
+                    "--thread-id", f"child-thread-{index + 1}", "--reason", "created child",
+                )
+                self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            tick = command(str(SCRIPTS / "coordinator_tick.py"), str(run), "--no-record")
+            payload = json.loads(tick.stdout)
+            child_poll = next(
+                action for action in payload["actions"]
+                if action["kind"] == "poll-top-level-tasks-subcoordinators"
+            )
+            self.assertEqual(len(child_poll["targets"]), 3)
+
+    def test_sponsor_tick_monitors_coordinator_without_dispatching_product_work(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            result = command(str(SCRIPTS / "sponsor_tick.py"), str(run), "--pretty")
+            payload = json.loads(result.stdout)
+            self.assertEqual(
+                {action["kind"] for action in payload["actions"]},
+                {"create-primary-coordinator", "create-counterpilot"},
+            )
+            command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "primary",
+                "--reason", "created",
+            )
+            result = command(str(SCRIPTS / "sponsor_tick.py"), str(run), "--pretty")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["sponsor_role"], "user-conversation")
+            self.assertEqual(payload["actions"][0]["kind"], "poll-top-level-tasks")
+            self.assertEqual(payload["actions"][0]["targets"][0]["thread_id"], "primary")
+
+    def test_counterpilot_challenge_requires_evidence_and_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.init(Path(temporary) / "state")
+            created = command(
+                str(SCRIPTS / "manage_challenge.py"), str(run), "--action", "create",
+                "--challenge-id", "C1", "--target", "coordinator", "--severity", "high",
+                "--category", "scope", "--assumption", "All journeys are covered",
+                "--evidence", "Journey J7 has no owner", "--question", "Who owns J7?",
+                "--risk-if-ignored", "Silent scope reduction", "--suggested-probe", "Trace J7",
+            )
+            self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+            resolved = command(
+                str(SCRIPTS / "manage_challenge.py"), str(run), "--action", "resolve",
+                "--challenge-id", "C1", "--resolution", "accepted",
+                "--resolution-reason", "Assigned J7 to the UI owner",
+            )
+            self.assertEqual(resolved.returncode, 0, resolved.stdout + resolved.stderr)
+            state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["challenges"]["C1"]["status"], "accepted")
 
     def test_active_plan_revision_appends_scope_and_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -379,6 +527,33 @@ class RunLifecycleTests(unittest.TestCase):
             self.assertEqual(payload["evidence_required"], ["T1-domain-api"])
             state = json.loads((run / "run-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["tasks"]["T1-domain-api"]["status"], "running")
+
+    def test_coordinator_uses_list_and_read_when_wait_tool_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            run = self.init(
+                temp / "state", "balanced", EXAMPLE, "--catalog",
+                str(RUN / "assets" / "runtime-catalog.example.json"),
+            )
+            command(
+                str(SCRIPTS / "record_control_plane.py"), str(run),
+                "--role", "primary-coordinator", "--thread-id", "coordinator",
+                "--reason", "created",
+            )
+            self.update(
+                run, "--task", "T1-domain-api", "--status", "running",
+                "--thread-id", "owner-thread", "--reason", "owner dispatched",
+            )
+            tick = command(
+                str(SCRIPTS / "coordinator_tick.py"), str(run), "--no-record"
+            )
+            self.assertEqual(tick.returncode, 0, tick.stdout + tick.stderr)
+            payload = json.loads(tick.stdout)
+            polling = next(action for action in payload["actions"] if action["kind"] == "poll-top-level-tasks")
+            self.assertEqual(
+                polling["tools"],
+                ["codex_app__list_threads", "codex_app__read_thread"],
+            )
 
     def test_human_control_changes_concurrency_without_replanning(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -570,9 +745,12 @@ class RunLifecycleTests(unittest.TestCase):
                 "allinluna-default",
             )
             self.assertEqual(prepared["resource_policy"]["modifiers"], [])
-            self.assertEqual(prepared["orchestration"]["root_role"], "coordinator")
             self.assertEqual(
-                prepared["orchestration"]["root_product_implementation"],
+                prepared["orchestration"]["coordinator_role"],
+                "separate-top-level-task",
+            )
+            self.assertEqual(
+                prepared["orchestration"]["coordinator_product_implementation"],
                 "forbidden",
             )
             self.assertIn("stop_boundary", prepared)

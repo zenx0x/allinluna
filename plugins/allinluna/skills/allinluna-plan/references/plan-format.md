@@ -1,44 +1,25 @@
 # Development plan format
 
-The canonical artifact is JSON conforming to `assets/development-plan.schema.json`.
+The canonical JSON artifact conforms to `assets/development-plan.schema.json` schema version `2.0`.
 
 ## Top-level fields
 
-- `schema_version`: format compatibility, currently `1.0`.
-- `plan_id`: stable lowercase identifier.
-- `title`: human-readable project objective.
 - `mode`: `plan-only`, `execute-ready`, or `goal-ready`.
-- `objective`: concise requested outcome.
-- `completion_standard`: measurable conditions for whole-plan completion.
-- `repository`: existing/greenfield mode, roots, revision evidence, and dirty-state notes.
-- `authorizations`: explicit action permissions.
-- `orchestration`: mandatory root coordinator, forbidden root product implementation, top-level owners, and bounded owner subagents.
-- `resource_policy`: profile, locks, fallback, concurrency, and budget.
-- `stop_boundary`: the exact completion edge and downstream work that must not start.
-- task `validation_level`: focused owner checks, cross-lane integration, milestone acceptance, or explicitly required full validation.
-- `tasks`: dependency graph and ownership.
-- `milestones`: phase-level integration and acceptance.
-- `assumptions`: progress-enabling assumptions.
-- `unknowns`: facts requiring runtime verification or user input.
+- `execution_style`: `managed` or `parallel-only`.
+- `risk_level`: `low`, `medium`, `high`, or `critical`.
+- `objective` and `completion_standard`: full requested outcome and measurable finish.
+- `repository`: existing/greenfield roots, revision, and dirty-state evidence.
+- `authorizations`: implementation, Git, Goal, top-level tasks, external actions.
+- `orchestration`: Sponsor, separate primary Coordinator, CounterPilot, optional child-coordinator strategy, shard size, and high-concurrency review choice.
+- `resource_policy`: profile/modifiers, hard locks, fallback, desired concurrency 1–64, and budget.
+- `tasks`, `milestones`, `stop_boundary`, `assumptions`, and `unknowns`.
 
-## Task fields
+Every plan keeps `top_level_tasks=true`; actual runtime fallback is recorded separately. Desired concurrency never becomes 1 merely because only one task is currently ready.
 
-Every task has:
+## Task fields and ownership
 
-- `id`, `title`, `phase`, `description`;
-- `dependencies` containing existing task IDs;
-- `ownership.paths` and `ownership.exclusive`;
-- `role` and `resource_class`;
-- `deliverables` and `verification`, both non-empty;
-- `external_side_effects`, even when empty;
-- `acceptance_required`.
+Every task has stable identity, dependencies, exclusive owned paths, role/resource class, deliverables, verification, validation level, external side effects, and acceptance requirement. Concurrent exclusive ownership may not overlap unless dependency ordering prevents simultaneous writes.
 
-Paths use repository-relative forward slashes. Directory ownership ends in `/`; glob ownership may use `*` or `**`. Concurrent tasks with overlapping exclusive ownership are invalid unless ordered by dependencies.
+In `parallel-only`, preserve the user's approved plan direction. Normalize dependencies and ownership only enough for safe execution; do not invent product redesign. Integration and acceptance remain risk-adaptive rather than mandatory bureaucracy for every low-risk plan.
 
-## Milestones
-
-A milestone names the included tasks, integration evidence, acceptance evidence, and the tasks it unlocks. Do not create a milestone solely to restate task completion.
-
-## Stable identity
-
-Do not change task IDs after execution begins. Split a task by adding new child IDs and an event explaining the supersession. This allows run recovery to distinguish old completion from new work.
+At desired concurrency 16 or above, `high_concurrency_review` must be explicitly `accepted` or `declined`; accepted review requires a concrete decomposition model.

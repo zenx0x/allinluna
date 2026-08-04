@@ -26,7 +26,7 @@ class ResourceProfileTests(unittest.TestCase):
     def test_all_profiles_exist(self) -> None:
         self.assertEqual(
             set(self.profiles["profiles"]),
-            {"premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"},
+            {"premium", "balanced", "economy", "speed", "fast", "ultra-fast", "all-luna", "mad-luna", "custom"},
         )
 
     def test_all_profiles_default_root_to_top_level_and_allow_owner_subagents(self) -> None:
@@ -49,7 +49,7 @@ class ResourceProfileTests(unittest.TestCase):
     def test_runtime_catalog_caps_concurrency(self) -> None:
         result = resolve(self.profiles, "mad-luna", catalog=self.catalog)
         self.assertTrue(result["valid"], result)
-        self.assertEqual(result["concurrency"]["desired"], 8)
+        self.assertEqual(result["concurrency"]["desired"], 24)
         self.assertEqual(result["concurrency"]["effective"], 4)
         self.assertTrue(
             all(role["actual_model"] == "gpt-5.6-luna" for role in result["resolved_roles"].values())
@@ -124,6 +124,13 @@ class ResourceProfileTests(unittest.TestCase):
         authority = result["resolved_roles"]["authority"]
         self.assertEqual(authority["actual_model"], "gpt-5.6-sol")
         self.assertEqual(authority["actual_reasoning"], "ultra")
+
+    def test_fast_and_ultra_fast_double_parallelism(self) -> None:
+        fast = resolve(self.profiles, "fast")
+        ultra = resolve(self.profiles, "ultra-fast")
+        self.assertEqual(fast["concurrency"]["desired"], 24)
+        self.assertEqual(ultra["concurrency"]["desired"], 48)
+        self.assertEqual(ultra["policy"]["concurrency"]["strategy"], "hierarchical-maximum-safe")
 
 
 if __name__ == "__main__":

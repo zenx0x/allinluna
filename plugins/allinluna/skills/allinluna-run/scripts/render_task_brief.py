@@ -23,7 +23,8 @@ def render(state: dict, task_id: str) -> str:
     return f"""# {task_id} — {task['title']}
 
 You are the top-level owner for this complete All in Luna lane. You may create bounded
-subagents inside this ownership boundary. The root task remains coordinator.
+subagents inside this ownership boundary. The independent primary Coordinator manages this lane;
+the user's sponsor conversation does not implement product files.
 
 ## Objective
 

@@ -9,6 +9,8 @@
     "run_id",
     "plan_id",
     "plan_hash",
+    "execution_style",
+    "risk_level",
     "run_dir",
     "status",
     "profile",
@@ -19,8 +21,10 @@
     "repository",
     "authorizations",
     "orchestration",
+    "control_plane",
     "coordination",
     "defects",
+    "challenges",
     "completion_standard",
     "tasks",
     "milestones",
@@ -28,22 +32,25 @@
     "updated_at"
   ],
   "properties": {
-    "schema_version": { "const": "1.0" },
+    "schema_version": { "const": "2.0" },
     "run_id": { "type": "string", "minLength": 1 },
     "plan_id": { "type": "string", "minLength": 1 },
     "plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "execution_style": { "enum": ["managed", "parallel-only"] },
+    "risk_level": { "enum": ["low", "medium", "high", "critical"] },
     "run_dir": { "type": "string", "minLength": 1 },
     "status": { "enum": ["planned", "running", "paused", "blocked", "completed", "failed"] },
-    "profile": { "enum": ["premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"] },
+    "profile": { "enum": ["premium", "balanced", "economy", "speed", "fast", "ultra-fast", "all-luna", "mad-luna", "custom"] },
     "goal_authorized": { "type": "boolean" },
     "capabilities": {
       "type": "object",
-      "required": ["requested_delegation", "actual_delegation", "host_concurrency", "fallback_reason"],
+      "required": ["requested_delegation", "actual_delegation", "host_concurrency", "fallback_reason", "thread_tools"],
       "properties": {
         "requested_delegation": { "enum": ["auto", "top-level-task", "subagent", "sequential"] },
         "actual_delegation": { "enum": ["unavailable", "top-level-task", "subagent", "sequential"] },
         "host_concurrency": { "type": ["integer", "string"] },
-        "fallback_reason": { "type": ["string", "null"] }
+        "fallback_reason": { "type": ["string", "null"] },
+        "thread_tools": { "type": "array", "items": { "type": "string" } }
       }
     },
     "resource_policy": { "type": "object" },
@@ -61,14 +68,21 @@
     "authorizations": { "type": "object" },
     "orchestration": {
       "type": "object",
-      "required": ["root_role", "root_product_implementation", "owner_delegation", "owner_subagents"],
+      "required": ["sponsor_role", "coordinator_role", "coordinator_product_implementation", "owner_delegation", "owner_subagents", "counterpilot", "coordination_strategy", "shard_size", "high_concurrency_review", "decomposition_model"],
       "properties": {
-        "root_role": { "const": "coordinator" },
-        "root_product_implementation": { "const": "forbidden" },
+        "sponsor_role": { "const": "user-conversation" },
+        "coordinator_role": { "const": "separate-top-level-task" },
+        "coordinator_product_implementation": { "const": "forbidden" },
         "owner_delegation": { "const": "top-level-task" },
-        "owner_subagents": { "const": "allowed-bounded" }
+        "owner_subagents": { "const": "allowed-bounded" },
+        "counterpilot": { "type": "string" },
+        "coordination_strategy": { "type": "string" },
+        "shard_size": { "type": "integer" },
+        "high_concurrency_review": { "type": "string" },
+        "decomposition_model": { "type": ["string", "null"] }
       }
     },
+    "control_plane": { "type": "object" },
     "coordination": {
       "type": "object",
       "required": ["plan_revision", "last_tick_at", "stop_boundary"],
@@ -79,6 +93,7 @@
       }
     },
     "defects": { "type": "object" },
+    "challenges": { "type": "object" },
     "completion_standard": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "tasks": {
       "type": "object",

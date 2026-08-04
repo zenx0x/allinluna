@@ -1,4 +1,4 @@
 interface:
   display_name: "All in Luna — 规划"
-  short_description: "规划完整开发流程，并默认拆分为侧边栏可见的顶层 Codex 任务"
-  default_prompt: "使用 $allinluna-plan 生成完整计划；根任务固定为总协调器，所有计划写入 top_level_tasks=true，自动拆分侧边栏可见的顶层 Codex 任务负责人，包含一次集成、一次独立验收、分级测试和明确停止边界；允许用户设置模型、推理和并发。"
+  short_description: "规划完整开发，或把现有计划转换为高并发顶层任务"
+  default_prompt: "使用 $allinluna-plan：用户主对话作为 Sponsor，另建独立 Coordinator；将 Owners 规划为侧边栏可见的顶层 Codex 任务。按风险决定 Integration、Acceptance 与 CounterPilot。支持 managed 或 parallel-only，支持 8/12/16/24/48/64、fast 与 ultra-fast；16+ 时询问是否用高质量模型检查并发拆解。"

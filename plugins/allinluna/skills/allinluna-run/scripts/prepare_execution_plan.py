@@ -28,6 +28,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Compatibility flag; every All in Luna execution already authorizes top-level tasks.",
     )
     parser.add_argument("--authorize-git-operations", action="store_true")
+    parser.add_argument("--execution-style", choices=["managed", "parallel-only"])
+    parser.add_argument("--risk-level", choices=["low", "medium", "high", "critical"])
+    parser.add_argument("--high-concurrency-review", choices=["accepted", "declined"])
+    parser.add_argument("--decomposition-model")
     parser.add_argument("--deny-goal", action="store_true")
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args(argv)
@@ -45,6 +49,22 @@ def main(argv: list[str] | None = None) -> int:
         revised = deepcopy(plan)
         changed: list[str] = []
 
+        if revised.get("schema_version") != "2.0":
+            revised["schema_version"] = "2.0"
+            changed.append("schema_version")
+        if "execution_style" not in revised:
+            revised["execution_style"] = args.execution_style or "managed"
+            changed.append("execution_style")
+        elif args.execution_style:
+            revised["execution_style"] = args.execution_style
+            changed.append("execution_style")
+        if "risk_level" not in revised:
+            revised["risk_level"] = args.risk_level or "high"
+            changed.append("risk_level")
+        elif args.risk_level:
+            revised["risk_level"] = args.risk_level
+            changed.append("risk_level")
+
         if "modifiers" not in revised.get("resource_policy", {}):
             revised["resource_policy"]["modifiers"] = []
             changed.append("resource_policy.modifiers")
@@ -52,11 +72,28 @@ def main(argv: list[str] | None = None) -> int:
             revised["stop_boundary"] = None
             changed.append("stop_boundary")
 
+        previous_orchestration = revised.get("orchestration", {})
+        desired = revised.get("resource_policy", {}).get("concurrency", {}).get("desired", 1)
+        review = args.high_concurrency_review or previous_orchestration.get(
+            "high_concurrency_review", "not-required"
+        )
         required_orchestration = {
-            "root_role": "coordinator",
-            "root_product_implementation": "forbidden",
+            "sponsor_role": "user-conversation",
+            "coordinator_role": "separate-top-level-task",
+            "coordinator_product_implementation": "forbidden",
             "owner_delegation": "top-level-task",
             "owner_subagents": "allowed-bounded",
+            "counterpilot": previous_orchestration.get(
+                "counterpilot",
+                "risk-triggered" if revised["risk_level"] in {"high", "critical"} else "off",
+            ),
+            "coordination_strategy": previous_orchestration.get("coordination_strategy", "auto"),
+            "shard_size": previous_orchestration.get("shard_size", 8),
+            "high_concurrency_review": review if desired >= 16 else "not-required",
+            "decomposition_model": (
+                args.decomposition_model
+                or previous_orchestration.get("decomposition_model")
+            ),
         }
         if revised.get("orchestration") != required_orchestration:
             revised["orchestration"] = required_orchestration
@@ -76,7 +113,13 @@ def main(argv: list[str] | None = None) -> int:
         acceptance_tasks = [
             task for task in tasks if task.get("resource_class") == "acceptance"
         ]
-        if not integration_tasks:
+        require_integration = revised["execution_style"] == "managed" and revised["risk_level"] in {
+            "medium", "high", "critical"
+        }
+        require_acceptance = revised["execution_style"] == "managed" and revised["risk_level"] in {
+            "high", "critical"
+        }
+        if require_integration and not integration_tasks:
             existing_ids = {task.get("id") for task in tasks}
             integration_id = "AIL-INTEGRATION"
             counter = 2
@@ -111,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             integration_tasks = [integration]
             changed.append("tasks.AIL-INTEGRATION")
         integration_ids = [task["id"] for task in integration_tasks]
-        if not acceptance_tasks:
+        if require_acceptance and not acceptance_tasks:
             existing_ids = {task.get("id") for task in tasks}
             acceptance_id = "AIL-ACCEPTANCE"
             counter = 2

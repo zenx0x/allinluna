@@ -1,6 +1,6 @@
 ---
 name: allinluna-run
-description: Execute and resume a complete development plan with explicit model, reasoning, delegation, concurrency, Git ownership, verification, recovery, integration, and acceptance controls. Use when the user asks to implement or continue a plan, run parallel agents or top-level tasks, use a resource mode such as economy or mad-luna, persist a long-running workflow, or recover an interrupted multi-lane development effort. Every All in Luna plan authorizes top-level tasks; Goal creation remains separately opt-in.
+description: Execute or resume a complete plan through a user Sponsor conversation, a separate top-level Coordinator, optional child coordinators, CounterPilot, and top-level owners. Use for managed delivery, direct parallel execution of a user or third-party plan, high-concurrency fast/ultra-fast modes, model and reasoning control, persistent recovery, or All-Luna swarms. Goal creation remains separately opt-in.
 ---
 
 # All in Luna - Run
@@ -18,7 +18,15 @@ Tell the user this skill is controlling execution and name the selected resource
 
 If no executable plan exists, use `$allinluna-plan` first. Do not repeatedly replan a plan whose assumptions still hold.
 
-After plan validation, remain the root coordinator. This is mandatory default execution topology, not an optional optimization. Verify the plan's orchestration contract and do not start implementing product files in the current task. Initialize run state, complete or decline the Git-bootstrap decision, then create the first dependency-ready top-level owner task even when only one owner is ready. Continue dispatching newly ready owners as dependencies clear; a sequential dependency graph still uses separate top-level owners managed by the coordinator.
+After validation, the current user conversation remains the Sponsor. Initialize run state, record
+the Sponsor thread, run `bootstrap_control_plane.py`, and immediately create a separate user-visible
+primary Coordinator. Create CounterPilot according to the plan. The Sponsor must not implement
+product files or directly manage ordinary owners. The Coordinator handles Git bootstrap, owner
+dispatch, monitoring, child coordinators, defects, integration, and completion.
+
+For a plan supplied by the user, Grill Me, or another planning skill, select `parallel-only` and
+use `import_parallel_plan.py`. Preserve the supplied scope, order, and completion contract; All in
+Luna adds only dispatch metadata, ownership validation, resources, and persistent coordination.
 
 When the user asks All in Luna to execute a previously `plan-only` plan, do not run that stale snapshot and do not mutate it in place. Create a validated execution revision with `scripts/prepare_execution_plan.py`. The revision always sets `top_level_tasks=true`. “Do not create a Goal” independently keeps `goal_creation=false`.
 
@@ -46,9 +54,12 @@ Determine which execution tier the host actually exposes:
 
 1. **User-owned top-level tasks:** every All in Luna plan authorizes this tier; use it whenever the host exposes the capability.
 2. **Subagents:** use for bounded independent work when available.
-3. **Sequential:** use the current task only after verified absence of both delegation tiers or explicit user-declined Git bootstrap. Tight coupling changes dependency order, not the mandatory coordinator/owner separation.
+3. **Sequential:** only as a recorded runtime fallback after verified absence of top-level tasks
+   and subagents or explicit refusal of Git isolation. Never call this a separate Coordinator.
 
-The root coordinator's default delegation for every built-in resource profile is `top-level-task`, and every All in Luna plan records that authorization as true. For independent substantive owner lanes, create user-visible top-level Codex tasks rather than root-level subagents. Do not ask the user to repeat the authorization and do not use a root-level subagent as a substitute for a planned top-level owner.
+The Sponsor first creates the independent Coordinator without requiring Git or a worktree. The
+Coordinator then creates implementation owners with worktree isolation. CounterPilot is also
+read-only and must not wait for Git bootstrap.
 
 Each created top-level owner may create its own bounded subagents when that helps complete its assigned scope. Authorize this in the self-contained owner brief. Owner subagents must remain inside the owner's paths, base, model lock, budget, and completion contract; they do not become additional top-level lanes and their output is not completion until the owner integrates and verifies it. In `all-luna` and `mad-luna`, owner subagents must inherit or explicitly use Luna and may not silently switch families.
 
@@ -56,17 +67,19 @@ Record requested and actual tier. Never represent subagents as top-level tasks o
 
 On Codex App hosts, discover top-level capability before inspecting subagents:
 
-1. do not rely on the initially rendered tool list: when `functions.exec` is present, search its deferred `ALL_TOOLS` catalog for `codex_app__create_thread` and `codex_app__list_projects`; when a tool-search capability is present, search for `create_thread`, `list_projects`, and `list_threads` there;
+1. do not rely on the initially rendered tool list: discover create, list, read, send, and optional wait tools;
 2. load/call the discovered tools and treat a successful schema discovery as capability availability; the tool does not need to have been printed in the original prompt;
 3. read the model and reasoning combinations declared by `codex_app__create_thread` itself;
 4. treat that list as the `top-level-task` model catalog, even when the subagent catalog exposes different models;
 5. call `codex_app__list_projects` before creating project-scoped worktree tasks;
-6. create a delegation-scoped runtime catalog like `assets/runtime-catalog.example.json` outside the target repository;
+6. create a delegation-scoped runtime catalog including the real `thread_tools` list;
 7. resolve the requested profile against the intended delegation surface.
 
 In the official Codex desktop app, `codex_app__create_thread` is a deferred app tool and should normally be discoverable even when omitted from the short initial tool list. Saying “top-level tasks are unavailable” without performing the deferred search above is a workflow defect. If discovery returns its declaration, use it; do not offer or select fallback merely because direct invocation was not initially visible.
 
-Require Git-backed isolation for parallel top-level implementation owners. Run `scripts/inspect_git_readiness.py PROJECT_ROOT --pretty` first. If Git is missing, ask once for permission to install Git with the host's supported package manager. If the directory is not a repository or has no commit, ask in the same request for permission to initialize it, preserve the existing files, create an initial baseline commit, and enable worktrees. After authorization, perform the setup, re-run readiness inspection, then dispatch project-scoped worktree tasks. Never install software, initialize Git, configure identity, or commit without that authorization.
+Create Coordinator and CounterPilot before Git readiness. Require Git-backed isolation only for
+parallel writing owners. The Coordinator runs `inspect_git_readiness.py`, asks once for Git install,
+repository initialization, baseline commit, and worktree authorization, then continues.
 
 If the user declines Git setup, keep the plan's `top_level_tasks=true` invariant but record actual delegation as `subagent` when available, otherwise `sequential`, with fallback reason `user-declined-git-bootstrap`. The refusal is approval for this ordinary fallback only; it does not authorize other model-family fallbacks, destructive actions, publication, or live mutation. Do not retry invalid worktree parameters or claim top-level tasks were created.
 
@@ -96,6 +109,9 @@ Before declaring the preferred top-level surface unavailable, exhaust the host's
 
 Pass `--goal-authorized` only when the user explicitly requested a Goal. Goal authorization in the plan and command must both be true.
 
+The run directory contains Sponsor, primary/child Coordinator, CounterPilot, owner, challenge, and
+defect state. Control-plane roles must use distinct thread IDs.
+
 The run directory contains:
 
 - `run-state.json`: current state, tasks, assignments, commits, and checks;
@@ -118,17 +134,26 @@ Do not delete, reset, clean, force-push, rewrite history, mutate credentials, or
 
 ## 5. Execute continuously
 
-Use the deterministic coordinator control plane on every cycle:
+The Sponsor starts the independent control plane:
 
 ```bash
-python scripts/coordinator_tick.py RUN_DIR --pretty
+python scripts/bootstrap_control_plane.py RUN_DIR --pretty
+python scripts/record_control_plane.py RUN_DIR --role primary-coordinator \
+  --thread-id THREAD --reason "created independent coordinator"
 ```
 
-For each `dispatch-top-level-task` action, read its generated brief, call the declared
-`codex_app__list_projects`/`codex_app__create_thread` tools, then immediately persist the
+Only the Coordinator runs the execution cycle:
+
+```bash
+python scripts/coordinator_tick.py RUN_DIR --coordinator-id primary --pretty
+```
+
+For each `dispatch-subcoordinator` or `dispatch-top-level-task` action, call the declared tools,
+then immediately persist the
 thread, host, worktree, branch, base, resolved model, and reasoning with `update_run.py`.
-For `wait-for-top-level-tasks`, call the host wait tool, normalize the result, reconcile it
-with `reconcile_threads.py`, collect final evidence, and tick again. Do not end the turn while
+When `wait_threads` exists, use it. Otherwise use the emitted `list_threads + read_thread + cursor`
+adapter; never hardcode a missing wait tool. Reconcile owner snapshots with
+`reconcile_threads.py`, collect final evidence, and tick again. Do not end the Coordinator while
 the plan remains executable merely because one tick dispatched work or returned no final result.
 
 For every ready task:
@@ -155,22 +180,30 @@ plans and patches under `revisions/`; do not restart or silently rewrite complet
 - `balanced`: mix strong planning with efficient bounded implementation.
 - `economy`: use score-based Luna/fast selection, low default concurrency, and automatic same-policy fallback without shrinking scope.
 - `speed`: maximize safe independent lanes while preventing shared-file writers.
+- `fast`: target 24 concurrent tasks with hierarchical coordination.
+- `ultra-fast`: target 48 concurrent tasks with hierarchical coordination.
 - `all-luna`: hard-lock all roles to the Luna family with high reasoning.
 - `mad-luna`: hard-lock all roles to Luna, request maximum supported reasoning and maximum safe concurrency, and add an independent Luna verifier to high-risk milestones.
 - `custom`: follow exact role assignments and limits.
 
-For `all-luna + speed`, retain the `all-luna` hard model lock and roles, apply the `speed` modifier, and default to concurrency 6 subject to runtime constraints. If the user supplied another positive concurrency value, preserve it. Do not resolve the composition as the mixed-model `speed` profile.
+Support desired concurrency presets 8, 12, 16, 24, 48, and 64, capped by actual host and machine
+capacity. `all-luna + fast/ultra-fast` retains the Luna lock. At 16+, require the planning record
+to show whether the user accepted or declined high-quality dependency and conflict decomposition.
+
+With hierarchical coordination, the primary Coordinator manages cross-shard dependencies,
+resources, integration, and sponsor escalation. Child coordinators manage disjoint owner shards;
+they never integrate globally or change other shards.
 
 `mad-luna` is not permission to exceed host capacity, user budget, repository safety, or external-action boundaries. No mode may lower the completion standard.
 
 ## 7. Integrate once, accept independently
 
-At each planned phase boundary:
+At each required risk-adaptive boundary:
 
 1. verify owner commits and changed-path ownership;
 2. integrate field-by-field when shared contracts changed;
 3. run the milestone's proportional checks;
-4. use one independent acceptance pass for the user journey and authority boundaries;
+4. use independent acceptance only where the plan's risk and authority contract requires it;
 5. send defects back to the owning lane and re-run only affected acceptance plus required regression checks;
 6. establish the accepted common baseline, then immediately release newly unblocked work.
 
@@ -219,6 +252,12 @@ Finish only when:
 - the run's full completion standard is satisfied.
 
 Mark the run complete only after `validate_run.py` accepts it. The final response must state completed changes, files/commits, checks, actual resource/capability tier, remaining blockers, and the next useful step.
+
+CounterPilot is a separate read-only task. Trigger it after plan formation, material architecture or
+scope changes, repeated failure, before integration, or at critical milestones according to its
+mode. Every challenge needs evidence and a falsifiable probe; ordinary challenges go to the
+Coordinator, while product direction, authority, or destructive/live choices go to the Sponsor.
+Use `manage_challenge.py`; do not let unsupported objections block execution.
 
 ## Non-negotiable behavior
 

@@ -11,11 +11,11 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 ```text
 已有仓库或新想法
   -> 完整且通过验证的计划
-  -> 解析运行时模型和平台能力
-  -> 文件所有权互不冲突的实施线路
-  -> 一次阶段集成
-  -> 一次独立验收
-  -> 获得验收通过的公共基线
+  -> 用户主对话 / Sponsor
+  -> 独立主 Coordinator + 可选 CounterPilot
+  -> 子 Coordinator 分片 + Owners
+  -> 风险所需的集成与验收
+  -> 完整停止边界
 ```
 
 ## 内置 Skills
@@ -30,7 +30,9 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 | `premium` | 最高决策质量 | 前沿模型负责规划和验收；强工程模型实施；高风险工作独立复核 |
 | `balanced` | 推荐的通用默认值 | 强规划、高效实施和有界并行之间取得平衡 |
 | `economy` | 降低资源消耗 | Luna 优先、低并发，升级模型前需要明确授权 |
-| `speed` | 缩短总耗时 | 对真正独立的负责人线路实施更积极的并行 |
+| `speed` | 缩短总耗时 | 默认目标 12，对独立线路积极并行 |
+| `fast` | 高速并发 | 默认目标 24，启用层级协调 |
+| `ultra-fast` | 超高速并发 | 默认目标 48，启用层级协调和高质量拆解检查 |
 | `all-luna` | 一致的 Luna-only 执行 | 硬性锁定 Luna 模型家族，使用高推理强度和中等并发 |
 | `mad-luna` | 最大化 Luna 集群 | 硬性锁定 Luna、最高推理、最大安全并发，并由独立 Luna 验证高风险工作 |
 | `custom` | 完全由用户控制 | 分角色指定模型、推理、回退、并发和预算策略 |
@@ -41,7 +43,9 @@ All in Luna 是一个开源 Codex 插件，用于规划并完整执行软件开�
 
 模型解析支持到 `ultra`，并可依据运行目录提供的质量、速度和经济性元数据按 profile 加权选择。Fallback list 会真正逐项执行；缺少评分时保留目录顺序，不伪造成本或性能数据。
 
-默认情况下，根协调任务会把独立且有实质交付的负责人线路派发为用户可见的顶层 Codex 任务。每个顶层负责人可以在自己的所有权和模型策略内使用有界 subagents；根协调任务不会静默地用 subagent 替代原定顶层负责人。
+默认情况下，用户正在对话的任务是 Sponsor，而不是 Coordinator。Sponsor 负责需求、方向、授权、资源和状态查看；它首先创建一个独立、侧边栏可见的主 Coordinator。主 Coordinator 再创建 Owners，并在并发较高时创建子 Coordinator。每个 Owner 可以在自己的所有权和模型策略内使用有界 subagents。
+
+CounterPilot 是独立的只读逆向副驾驶：它挑战隐含假设、范围缩水、依赖冲突、错误方向和过度治理，但不能无证据阻塞执行，也不代替 Integration 或 Acceptance。
 
 只有在完整检查宿主工具目录后确认“创建顶层任务”的工具确实没有暴露时，All in Luna 才会自动依次回退到根级 subagent、当前任务顺序执行；此时不再要求用户重复确认。计划仍保持 `top_level_tasks=true`，运行状态会记录真实执行层级和 `top-level-tool-unavailable`。如果回退层级无法满足 Luna-only 等硬模型锁，则暂停该线路，而不是冒充满足或更换模型。
 
@@ -53,34 +57,39 @@ Codex App 的 `create_thread` 通常属于延迟加载工具，未出现在最�
 
 ## 默认执行拓扑（重要）
 
-All in Luna **默认不是在当前任务里单线程顺序完成所有工作**。通过插件自带的 Plan/Run 入口启动时，它会：
+All in Luna **不会让用户主对话自己兼任总协调和产品实现**。通过 Plan/Run 启动时，它会：
 
 1. 识别可以安全并行、拥有独立交付物和文件边界的主体线路；
-2. 为这些线路创建多个用户可见的顶层 Codex 任务，它们会出现在 Codex 侧边栏；
-3. 让根协调任务负责依赖排序、等待、缺陷退回、阶段集成和验收；
-4. 允许每个顶层负责人按自身需要继续创建有界 subagents；
-5. 在任务很小、强耦合或共享边界无法并行时，仍由协调器顺序派发一个或多个顶层负责人。
+2. 先创建独立的 `All in Luna Coordinator — 项目名`；
+3. 按风险创建 CounterPilot，并由 Coordinator 创建侧边栏可见的顶层 Codex 任务 Owners；
+4. 在 16+ 并发或线路过多时，由主 Coordinator 创建子 Coordinator 分片；
+5. 允许每个 Owner 使用有界 subagents；
+6. 持续执行、监控、返修，直到停止边界。
 
-总协调器是默认且强制的执行角色，不需要用户额外“启用”。新计划会写入结构化 orchestration contract；旧计划转为 execute-ready 时会自动补齐。总协调器不得直接承担主体产品实现，除非宿主确实缺少顶层任务能力并触发了被如实记录的运行时回退。
+主 Coordinator 是默认且强制的独立顶层任务，不需要用户额外启用。Sponsor 和 Coordinator 的 thread ID 必须不同；CounterPilot 也必须独立。只读控制面无需等待 Git，只有并行写代码的 Owners 需要 worktree。
 
 Run 现在通过确定性的 coordinator tick 生成下一步动作和完整负责人 brief：派发 ready 顶层任务、记录 thread/host/worktree/model、等待任务、收集证据、释放依赖并继续下一轮。活动计划可以增量追加任务和停止边界；验收缺陷会结构化退回原 owner，未解决缺陷会阻止完成。Git 证据工具可核对真实 commit、parent、tree、changed paths 与所有权范围。
 
-这里的“顺序”只表示顶层负责人之间存在依赖，不表示根协调任务亲自写实现。即使只有一个任务当前可执行，根协调也必须先创建该顶层任务，等待完成后再派发下一个负责人。`balanced` 的计划目标并发始终是 3，不能因为当前只有一个 ready task 或目录尚未初始化 Git 而写成 1。
+这里的“顺序”只表示 Owners 之间存在依赖，不表示 Sponsor 或 Coordinator 亲自写实现。即使只有一个任务当前可执行，Coordinator 也应派发该 Owner。
 
-资源模式给出的期望并发为：`balanced` 3 个、`premium` 4 个、`economy` 2 个、`speed` 6 个、`all-luna` 4 个、`mad-luna` 8 个。实际同时运行数受宿主平台并发上限、任务依赖和文件所有权约束。All in Luna 不会为了凑数量而把每个小修复都创建成顶层任务。
+资源模式默认期望并发为：`economy` 4、`balanced` 8、`premium` 12、`speed` 12、`fast` 24、`ultra-fast` 48、`all-luna` 8、`mad-luna` 24。也支持 8、12、16、24、48、64 或 1–64 自定义值；实际并发仍受宿主、机器、依赖和文件所有权限制。
 
-这些数字只是默认值，不是固定上限。用户可以在 Plan 阶段指定任意正整数并发；规划器会原样保留。用户没有指定时，Plan 会提供一次非阻塞的资源模式/并发选择，未作选择则继续使用 `balanced + 3`，Run 阶段不再重复询问。规划器默认按依赖关系和独立文件所有权自动拆分负责人线路，并把当前可执行且互不冲突的线路并行派发；无需用户手工拆任务，也不会为了凑并发机械制造微任务。
+用户选择 16+ 时，Plan 会询问是否使用高质量模型检查依赖、冲突、所有权和分片；用户可以接受或拒绝。该检查只发生一次，不扩张成重复治理。`fast` 相对 `speed` 翻倍到 24，`ultra-fast` 再翻倍到 48。
+
+## 精简并发模式
+
+`parallel-only` 用于已经由用户、Grill Me 或其他工具完成规划的情况。All in Luna 不重新讨论产品方向，只把现有计划规范化为依赖 DAG、所有权和顶层任务，并负责并发派发、监控和恢复。低风险计划不会被机械补上 Integration、Acceptance 或多层审查；只有原计划或真实风险要求时才增加。
 
 所有 All in Luna 计划都必须记录 `top_level_tasks=true` 和 `top_level_tasks_basis=allinluna-default`，不存在生成 `false` 的模式。即使项目很小、非 Git、plan-only 或最终只有一条紧耦合线路，该授权仍保持为 `true`；实际可并行任务数再由依赖关系和宿主能力决定。
 
 非 Git 项目会先进入 Git 准备流程：All in Luna 检查 Git 是否安装、目录是否已经初始化、是否存在可供 worktree 使用的基线提交，然后一次性请求安装 Git、初始化仓库和创建基线提交的授权。用户接受后由 All in Luna 完成准备并继续多开隔离的顶层任务；用户拒绝后改用普通 subagents 或当前任务顺序执行，同时保持计划中的 `top_level_tasks=true`，并如实记录实际回退原因。
 
-资源策略可以组合。例如 `all-luna + speed` 表示所有委派角色仍硬锁 `gpt-5.6-luna`，同时采用 `speed` 的目标并发 6；它不是把基础 profile 改成允许混合模型的 `speed`。
+资源策略可以组合。例如 `all-luna + ultra-fast` 仍硬锁 Luna，同时采用 48 目标并发和层级协调。
 
 第一次使用可以直接输入：
 
 ```text
-使用 All in Luna 完整推进当前项目。先生成完整计划，再通过多个侧边栏可见的顶层 Codex 任务并行实施；每个顶层负责人可以按需要使用有界 subagents。使用 balanced 模式，不创建 Goal。
+使用 All in Luna 完整推进当前项目。当前对话仅作为 Sponsor，创建独立主 Coordinator 和按风险触发的 CounterPilot；由 Coordinator 派发 Owners。使用 balanced 8 并发，不创建 Goal。
 ```
 
 ## 安装
@@ -102,7 +111,12 @@ codex plugin marketplace add zenx0x/allinluna
 
 ```text
 使用 $allinluna-run 完整执行已经批准的计划，持续推进到实施、集成和验收完成。
-通过顶层 Codex 任务负责人执行；每个负责人可以使用有界 subagents。使用 economy 模式；如需升级模型，必须先询问我。
+当前对话只作 Sponsor，创建独立 Coordinator；通过顶层 Codex 任务负责人执行。使用 economy 模式。
+```
+
+```text
+使用 $allinluna-run 的 parallel-only + fast 模式执行我已经完成的计划。
+不要重新设计方案；使用独立 Coordinator，并把计划拆为无冲突的顶层任务并发实施。
 ```
 
 ```text
@@ -122,7 +136,7 @@ codex plugin marketplace add zenx0x/allinluna
 - Goal 必须由用户明确选择，不能因任务规模较大而自动创建。
 - 所有 All in Luna 计划一律授权用户可见顶层任务；禁止 Goal 不会改变这一字段。
 - 顶层任务工具确实未暴露、实际无法使用 worktree 或用户拒绝 Git 准备时，只降级运行层级，不把计划字段改回 `false`；工具缺失回退无需再次确认。
-- 每个顶层负责人可以使用有界 subagents；根协调任务不得用 subagent 替代负责人线路。
+- 每个顶层负责人可以使用有界 subagents；主 Coordinator 或子 Coordinator 不得用 subagent 替代负责人线路。
 - 项目指令和脏工作区会被检查并保留。
 - 独立写入者获得明确的文件所有权；发现缺陷后返回原实施任务修复。
 - 请求的模型/推理设置和实际运行设置分开记录。
@@ -163,7 +177,12 @@ python plugins/allinluna/skills/allinluna-run/scripts/prepare_execution_plan.py 
   --authorize-implementation-writes --authorize-top-level-tasks --deny-goal
 python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
   --profile balanced --catalog runtime-catalog.json
-python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py RUN_DIRECTORY --pretty
+python plugins/allinluna/skills/allinluna-run/scripts/bootstrap_control_plane.py RUN_DIRECTORY --pretty
+python plugins/allinluna/skills/allinluna-run/scripts/sponsor_tick.py RUN_DIRECTORY --pretty
+python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py `
+  RUN_DIRECTORY --coordinator-id primary --pretty
+python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py `
+  RUN_DIRECTORY --coordinator-id subcoordinator-1 --pretty
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY
 python plugins/allinluna/skills/allinluna-run/scripts/validate_run.py RUN_DIRECTORY --pretty
 
@@ -178,6 +197,12 @@ python plugins/allinluna/skills/allinluna-run/scripts/control_run.py `
 python plugins/allinluna/skills/allinluna-run/scripts/refresh_task_resources.py `
   RUN_DIRECTORY --catalog runtime-catalog.json `
   --role engineer=gpt-5.6-luna:high --reason "用户调整模型与推理强度"
+
+# 将用户已有计划转换为精简并发执行计划
+python plugins/allinluna/skills/allinluna-run/scripts/import_parallel_plan.py `
+  existing-plan.json --output parallel.execute-ready.json `
+  --profile fast --high-concurrency-review accepted `
+  --decomposition-model gpt-5.6-sol
 ```
 
 资源调整只作用于尚未派发或需要重试的负责人；运行中和已完成任务的实际模型证据不会被改写。

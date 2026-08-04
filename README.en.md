@@ -11,10 +11,11 @@ The name is also a promise: you can run a mixed-model workflow, or go all in wit
 ```text
 repository or idea
   -> complete validated plan
+  -> Sponsor conversation creates an independent Coordinator + CounterPilot
   -> runtime model/capability resolution
-  -> conflict-free owner lanes
-  -> one phase integration
-  -> one independent acceptance
+  -> optional child Coordinators for high-concurrency shards
+  -> conflict-free top-level owner lanes
+  -> risk-proportional integration and acceptance
   -> accepted common baseline
 ```
 
@@ -31,6 +32,8 @@ repository or idea
 | `balanced` | Best general default | Strong planning, efficient implementation, bounded parallelism |
 | `economy` | Reduce resource use | Luna-first workers, low concurrency, explicit approval before escalation |
 | `speed` | Reduce wall-clock time | Aggressive parallelism for genuinely independent owners |
+| `fast` | High-throughput delivery | 24 desired slots with hierarchical coordination when useful |
+| `ultra-fast` | Maximum mixed-model throughput | 48 desired slots, host-capped, with reviewed decomposition |
 | `all-luna` | Consistent Luna-only execution | Hard Luna family lock with high reasoning and moderate concurrency |
 | `mad-luna` | Maximum Luna swarm | Hard Luna family lock, maximum reasoning, maximum safe concurrency, independent Luna verification on high-risk work |
 | `custom` | Exact user control | Per-role model, reasoning, fallback, concurrency, and budget policy |
@@ -41,7 +44,7 @@ Model, reasoning effort, delegation tier, concurrency, and budget are separate c
 
 Resolution supports `ultra` reasoning and can rank catalog candidates using profile-weighted quality, speed, and economy metadata. Fallback lists are actually tried in order; missing scores preserve stable catalog order instead of inventing cost or performance telemetry.
 
-By default, the root coordinator dispatches independent substantive owner lanes as user-visible top-level Codex tasks. Each top-level owner may create bounded internal subagents under its own ownership and model policy. Root-level subagents never silently replace planned top-level owners.
+The user's main conversation is the **Sponsor**, not the Coordinator. By default the Sponsor creates a separate user-visible primary Coordinator task and an independent CounterPilot task. The Coordinator dispatches substantive owner lanes as user-visible top-level Codex tasks. Each owner may create bounded internal subagents under its own ownership and model policy.
 
 Only after the host tool catalog has been fully checked and the top-level task creation tool is genuinely absent does All in Luna automatically fall back to a root subagent and then sequential execution; it does not ask the user to reconfirm. The plan keeps `top_level_tasks=true`, while run state records the actual tier and `top-level-tool-unavailable`. If the fallback surface cannot satisfy a hard lock such as Luna-only, that lane pauses instead of pretending compliance or switching models.
 
@@ -57,25 +60,33 @@ All in Luna **does not default to completing everything sequentially inside the 
 
 1. identifies substantive owner lanes that are safely parallel and have independent deliverables and file ownership;
 2. creates multiple user-visible top-level Codex tasks for those lanes, visible in the Codex sidebar;
-3. keeps the root coordinator focused on dependencies, waiting, defect return, phase integration, and acceptance;
+3. keeps the independent primary Coordinator focused on dependencies, monitoring, defect return, and risk-proportional integration/acceptance;
 4. lets every top-level owner create bounded internal subagents when useful; and
-5. serializes one or more top-level owners when work is small, tightly coupled, or cannot be parallelized safely.
+5. creates child Coordinator tasks for disjoint shards when concurrency is high, while keeping one primary Coordinator authoritative.
 
-The root coordinator is the mandatory default execution role and does not require a separate user toggle. New plans contain a structured orchestration contract, and execute-ready revision automatically upgrades older plans. The coordinator does not perform substantive product implementation unless the host genuinely lacks top-level task capability and a runtime fallback is recorded honestly.
+The independent Coordinator is the mandatory default execution role and does not require a separate user toggle. The Sponsor remains available for product choices and external authority, but does not become an implementation owner. New plans contain this structured control-plane contract, and execute-ready revision upgrades older plans.
 
 Run now uses a deterministic coordinator tick to produce next actions and complete owner briefs: dispatch ready top-level tasks, record thread/host/worktree/model evidence, wait, collect results, release dependencies, and tick again. Active plans can append tasks and stop boundaries. Acceptance defects return structurally to the original owner and unresolved defects prevent completion. Git evidence tooling verifies real commits, parents, trees, changed paths, and ownership.
 
-“Sequential” here means dependencies between top-level owners, not product implementation by the root coordinator. Even when only one owner is currently ready, the coordinator creates that top-level task, waits, and dispatches the next owner afterward. A `balanced` plan always keeps desired concurrency at 3; current readiness or missing Git setup cannot rewrite it to 1.
+“Sequential” means dependencies between top-level owners, not product implementation by the Sponsor or Coordinator. Even when only one owner is ready, the Coordinator creates that top-level task, monitors it, and releases the next owner afterward.
 
-Desired concurrency by profile is: `balanced` 3, `premium` 4, `economy` 2, `speed` 6, `all-luna` 4, and `mad-luna` 8. Actual concurrency is limited by the host, dependencies, and ownership safety. All in Luna does not create a top-level task for every micro-fix merely to reach a number.
+Desired concurrency defaults are: `economy` 4, `balanced` 8, `premium` 12, `speed` 12, `fast` 24, `ultra-fast` 48, `all-luna` 8, and `mad-luna` 24. Custom values from 1–64 are supported. Actual concurrency is limited by the host, machine, ready DAG width, writable ownership, and budget. All in Luna does not invent micro-tasks merely to fill slots.
 
-These values are defaults, not fixed ceilings. During Plan, a user may provide any positive desired concurrency and it is preserved. If no value is given, Plan offers one non-blocking resource/concurrency choice and continues with `balanced + 3` when unanswered; Run does not ask again. The planner automatically decomposes work into dependency-safe owner lanes with exclusive writable ownership and dispatches ready, conflict-free lanes concurrently, without requiring manual task splitting or creating artificial micro-tasks.
+These are presets, not fixed ceilings. During Plan, a user may provide a value from 1–64; if unanswered, Plan continues with `balanced + 8`. At 16 or more desired slots, Plan asks once whether a high-quality model should review the decomposition, dependencies, ownership, and conflict risks. Accepting enables that review; declining preserves the user's concurrency without repeated prompts.
+
+When high concurrency is useful, one primary Coordinator can create child Coordinators for disjoint task shards (normally 2–12 owners per shard). Child Coordinators dispatch and monitor only their assigned owners. They do not form an open-ended hierarchy, share writable ownership, or replace the primary Coordinator's global dependency and completion authority.
+
+The CounterPilot is a distinct top-level challenger, not another approval bureaucracy. It tests scope, assumptions, dependency safety, and failure recovery at risk-triggered points. `mad-luna` can request a second independent challenge pass for high-risk work. CounterPilot findings are evidence-bearing challenges and do not silently mutate implementation.
 
 Every All in Luna plan must record `top_level_tasks=true` and `top_level_tasks_basis=allinluna-default`; there is no mode that emits `false`. The authorization remains true for small, non-Git, plan-only, or tightly coupled projects even when dependency analysis ultimately yields only one owner.
 
 Non-Git projects enter a Git-readiness flow first. All in Luna checks whether Git is installed, whether the directory is initialized, and whether a baseline commit exists for worktrees, then requests one authorization to install Git, initialize the repository, and create that baseline. If accepted, All in Luna prepares Git and continues with isolated top-level tasks. If declined, it uses ordinary subagents or sequential execution while preserving `top_level_tasks=true` in the plan and recording the actual fallback reason.
 
-Resource policies compose. For example, `all-luna + speed` keeps every delegated role hard-locked to `gpt-5.6-luna` while applying `speed`'s desired concurrency of 6; it does not switch the base profile to mixed-model `speed`.
+Resource policies compose. For example, `all-luna + fast` keeps every delegated role hard-locked to Luna while applying the fast velocity policy. It does not switch the base profile to mixed-model `fast`.
+
+## Parallel-only mode
+
+If a user already has an approved implementation plan—whether written manually or produced by a planning skill such as Grill Me—`parallel-only` imports it without reopening product direction. All in Luna validates dependencies and ownership, builds the independent Coordinator/CounterPilot control plane, and focuses on concurrent execution. Integration and acceptance are added only when the declared risk or plan explicitly requires them.
 
 First-time users can simply enter:
 
@@ -126,7 +137,8 @@ and continue until the plan's completion standard is met.
 - Goal creation is opt-in, never inferred.
 - Every All in Luna plan authorizes user-visible top-level tasks; denying Goal creation never changes that field.
 - When the top-level tool is genuinely absent, worktrees are unavailable, or Git preparation is declined, only actual delegation falls back; the plan field never returns to `false`, and verified tool absence does not require another confirmation.
-- Each top-level owner may use bounded internal subagents; the root coordinator does not substitute subagents for owner lanes.
+- The Sponsor, primary Coordinator, CounterPilot, child Coordinators, and owners use distinct task identities.
+- Each top-level owner may use bounded internal subagents; Coordinators do not substitute subagents for planned owner lanes.
 - Project instructions and dirty worktrees are inspected and preserved.
 - Independent writers receive explicit ownership; defects return to the owning task.
 - Requested and actual model/reasoning settings are recorded separately.
@@ -165,9 +177,19 @@ python plugins/allinluna/skills/allinluna-run/scripts/resolve_profile.py `
 python plugins/allinluna/skills/allinluna-run/scripts/prepare_execution_plan.py `
   plan.json --output plan.execute-ready.json `
   --authorize-implementation-writes --authorize-top-level-tasks --deny-goal
+# Import an already-approved plan without replanning product direction
+python plugins/allinluna/skills/allinluna-run/scripts/import_parallel_plan.py `
+  approved-plan.json --output parallel.execute-ready.json --profile fast `
+  --high-concurrency-review accepted --decomposition-model gpt-5.6-sol
 python plugins/allinluna/skills/allinluna-run/scripts/init_run.py plan.json `
   --profile balanced --catalog runtime-catalog.json
+# Sponsor creates and monitors the independent control plane
+python plugins/allinluna/skills/allinluna-run/scripts/bootstrap_control_plane.py RUN_DIRECTORY --pretty
+python plugins/allinluna/skills/allinluna-run/scripts/sponsor_tick.py RUN_DIRECTORY --pretty
+# The primary or a named child Coordinator advances its own disjoint task set
 python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py RUN_DIRECTORY --pretty
+python plugins/allinluna/skills/allinluna-run/scripts/coordinator_tick.py `
+  RUN_DIRECTORY --coordinator-id subcoordinator-1 --pretty
 python plugins/allinluna/skills/allinluna-run/scripts/render_status.py RUN_DIRECTORY
 python plugins/allinluna/skills/allinluna-run/scripts/validate_run.py RUN_DIRECTORY --pretty
 

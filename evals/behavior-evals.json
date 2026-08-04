@@ -24,7 +24,7 @@
     "id": "plan-greenfield-coordinator-topology",
     "skill": "allinluna-plan",
     "prompt": "Use All in Luna to plan and build a new application in this empty non-Git directory with balanced resources.",
-    "must": ["top_level_tasks true", "balanced desired concurrency 3", "T0 Git bootstrap", "root coordinator", "top-level implementation owners"],
+    "must": ["top_level_tasks true", "balanced desired concurrency 8", "T0 Git bootstrap", "separate Sponsor and primary Coordinator", "CounterPilot", "top-level implementation owners"],
     "must_not": ["concurrency 1", "current-thread implementation", "treat non-Git as sequential topology", "wait for repeated top-level authorization"]
   },
   {
@@ -38,7 +38,7 @@
     "id": "plan-resource-choice-and-user-concurrency",
     "skill": "allinluna-plan",
     "prompt": "Use All in Luna to plan this project. I have not chosen a resource mode or concurrency yet.",
-    "must": ["offer one non-blocking planning-stage resource choice", "default to balanced concurrency 3 when unanswered", "accept any positive user concurrency", "automatically decompose independent owner lanes"],
+    "must": ["offer one non-blocking planning-stage resource choice", "default to balanced concurrency 8 when unanswered", "accept user concurrency from 1 to 64", "automatically decompose independent owner lanes"],
     "must_not": ["block planning for an answer", "ask again during Run", "treat profile concurrency as a ceiling", "create micro-tasks to fill concurrency"]
   },
   {
@@ -72,8 +72,8 @@
   {
     "id": "run-all-luna-speed-composition",
     "skill": "allinluna-run",
-    "prompt": "Run with all-luna + speed.",
-    "must": ["retain Luna hard lock", "apply speed modifier", "target concurrency 6", "use top-level Codex tasks"],
+    "prompt": "Run with all-luna + fast.",
+    "must": ["retain Luna hard lock", "apply fast modifier", "target concurrency 24", "ask once for high-quality decomposition review", "use top-level Codex tasks"],
     "must_not": ["switch to mixed-model speed profile", "set top_level_tasks false", "ask for repeated task authorization"]
   },
   {
@@ -87,7 +87,7 @@
     "id": "run-sequential-dependencies-still-use-top-level-owners",
     "skill": "allinluna-run",
     "prompt": "The GUI depends on the core service, so execute this All in Luna plan.",
-    "must": ["remain root coordinator", "dispatch the first ready top-level owner", "wait for dependency", "dispatch the next top-level owner"],
+    "must": ["Sponsor creates a separate primary Coordinator", "Coordinator dispatches the first ready top-level owner", "monitor dependency", "dispatch the next top-level owner"],
     "must_not": ["implement product files in the coordinator", "call the plan single-threaded", "collapse desired concurrency", "replace owners with the current task"]
   },
   {
@@ -122,8 +122,8 @@
     "id": "run-two-level-topology",
     "skill": "allinluna-run",
     "prompt": "Run this normally with All in Luna.",
-    "must": ["enforce root_role coordinator", "forbid root product implementation", "dispatch substantive owner lanes as top-level Codex tasks", "allow bounded internal subagents inside each owner", "keep root and owner delegation distinct"],
-    "must_not": ["treat coordination as opt-in", "create a top-level task for every micro-fix", "replace owner lanes with root-level subagents", "count internal subagent output as owner completion"]
+    "must": ["keep the user conversation as Sponsor", "create a distinct primary Coordinator", "create a distinct CounterPilot", "dispatch substantive owner lanes as top-level Codex tasks", "allow bounded internal subagents inside each owner"],
+    "must_not": ["treat coordination as opt-in", "reuse one thread for Sponsor and Coordinator", "create a top-level task for every micro-fix", "count internal subagent output as owner completion"]
   },
   {
     "id": "run-owner-repair",
@@ -137,7 +137,7 @@
     "skill": "allinluna-run",
     "prompt": "Execute this validated plan continuously through its stop boundary.",
     "must": ["run coordinator_tick", "dispatch every ready conflict-free top-level owner", "record thread and worktree evidence", "wait and reconcile", "tick again until completion or a true global blocker"],
-    "must_not": ["stop after dispatch", "implement in the root coordinator", "wait for the user to say continue between stages"]
+    "must_not": ["stop after dispatch", "implement in the Sponsor or Coordinator", "wait for the user to say continue between stages"]
   },
   {
     "id": "run-active-plan-revision",
@@ -180,5 +180,33 @@
     "prompt": "Finish the whole approved plan.",
     "must": ["all required tasks complete or approved skipped", "verification evidence", "accepted baseline"],
     "must_not": ["stop at task dispatch", "stop at one commit", "mark blocked work complete"]
+  },
+  {
+    "id": "run-high-concurrency-hierarchy",
+    "skill": "allinluna-run",
+    "prompt": "Execute 32 independent owner lanes with fast mode.",
+    "must": ["ask once for high-quality decomposition review", "create a separate primary Coordinator", "create child Coordinators for disjoint shards", "enforce one global concurrency cap", "monitor child Coordinator tasks"],
+    "must_not": ["create recursive coordinator hierarchy", "overlap exclusive ownership", "use the Sponsor as Coordinator", "invent micro-tasks to fill slots"]
+  },
+  {
+    "id": "run-parallel-only-approved-plan",
+    "skill": "allinluna-run",
+    "prompt": "Execute this already-approved Grill Me plan in parallel-only mode; do not redesign it.",
+    "must": ["import the existing plan", "preserve product direction", "validate dependencies and ownership", "create the independent control plane", "dispatch ready conflict-free owners"],
+    "must_not": ["replan product scope", "force governance layers for low risk", "collapse to one current-thread implementation"]
+  },
+  {
+    "id": "run-monitoring-tool-adapter",
+    "skill": "allinluna-run",
+    "prompt": "Continue coordinating when wait_threads is not exposed by this host.",
+    "must": ["discover the complete tool catalog", "use list_threads plus read_thread cursors when available", "continue monitoring owners and child Coordinators"],
+    "must_not": ["hardcode wait_threads", "claim top-level monitoring unavailable before discovery", "silently switch to sequential execution"]
+  },
+  {
+    "id": "run-counterpilot-challenge",
+    "skill": "allinluna-run",
+    "prompt": "Challenge this high-risk plan before integration without adding review bureaucracy.",
+    "must": ["use an independent CounterPilot task", "record evidence and a falsifiable probe", "route accepted defects to the original owner", "keep unrelated lanes running"],
+    "must_not": ["let CounterPilot mutate implementation", "add duplicate promotion layers", "treat an unsupported objection as a blocker"]
   }
 ]

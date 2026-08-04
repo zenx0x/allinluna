@@ -10,7 +10,7 @@
     "telemetry_policy": { "type": "string", "minLength": 1 },
     "profiles": {
       "type": "object",
-      "required": ["premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"],
+      "required": ["premium", "balanced", "economy", "speed", "fast", "ultra-fast", "all-luna", "mad-luna", "custom"],
       "additionalProperties": { "$ref": "#/$defs/profile" }
     }
   },
@@ -65,7 +65,7 @@
           "required": ["desired", "strategy"],
           "properties": {
             "desired": { "type": "integer", "minimum": 1 },
-            "strategy": { "enum": ["low-concurrency", "bounded-independent", "maximum-safe", "user-defined"] }
+            "strategy": { "enum": ["low-concurrency", "bounded-independent", "maximum-safe", "hierarchical-maximum-safe", "user-defined"] }
           }
         },
         "budget": {
@@ -86,7 +86,7 @@
             "required": ["model_request", "reasoning"],
             "properties": {
               "model_request": { "type": "string" },
-              "reasoning": { "enum": ["low", "medium", "high", "xhigh", "max"] },
+              "reasoning": { "enum": ["low", "medium", "high", "xhigh", "max", "ultra"] },
               "independent": { "type": "boolean" },
               "escalation_requires_approval": { "type": "boolean" },
               "duplicate_high_risk_review": { "type": "boolean" }

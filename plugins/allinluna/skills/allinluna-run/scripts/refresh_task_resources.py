@@ -59,6 +59,23 @@ def main() -> int:
             task["assignment"]["resource_resolution"] = resolved["resolution"]
             task["updated_at"] = now_iso()
             changed.append(task_id)
+        for role, key in (("coordinator", "primary_coordinator"), ("counterpilot", "counterpilot")):
+            target = state["control_plane"][key]
+            if target["status"] not in {"unassigned", "disabled"}:
+                continue
+            resolved = result["resolved_roles"].get(role)
+            if not resolved:
+                continue
+            target["requested"].update(
+                {"model": resolved["requested_model"], "reasoning": resolved["requested_reasoning"]}
+            )
+            target["resolved"].update(
+                {
+                    "model": resolved["actual_model"],
+                    "reasoning": resolved["actual_reasoning"],
+                    "resolution": resolved["resolution"],
+                }
+            )
         state["profile"] = profile
         state["resource_policy"] = result["policy"]
         state["capabilities"]["actual_delegation"] = result["delegation"]["selected"]

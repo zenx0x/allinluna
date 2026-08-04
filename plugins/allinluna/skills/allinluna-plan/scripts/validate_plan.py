@@ -11,14 +11,19 @@ from pathlib import Path
 from typing import Any
 
 
-PROFILES = {"premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"}
+PROFILES = {
+    "premium", "balanced", "economy", "speed", "fast", "ultra-fast",
+    "all-luna", "mad-luna", "custom",
+}
 PROFILE_CONCURRENCY = {
-    "premium": 4,
-    "balanced": 3,
-    "economy": 2,
-    "speed": 6,
-    "all-luna": 4,
-    "mad-luna": 8,
+    "premium": 12,
+    "balanced": 8,
+    "economy": 4,
+    "speed": 12,
+    "fast": 24,
+    "ultra-fast": 48,
+    "all-luna": 8,
+    "mad-luna": 24,
 }
 RESOURCE_CLASSES = {
     "authority",
@@ -35,6 +40,8 @@ REQUIRED_TOP = {
     "title",
     "mode",
     "objective",
+    "execution_style",
+    "risk_level",
     "completion_standard",
     "stop_boundary",
     "repository",
@@ -135,14 +142,20 @@ def validate(data: Any) -> dict[str, Any]:
         errors.append(f"missing top-level fields: {', '.join(missing)}")
     if extra:
         errors.append(f"unknown top-level fields: {', '.join(extra)}")
-    if data.get("schema_version") != "1.0":
-        errors.append("schema_version must be 1.0")
+    if data.get("schema_version") != "2.0":
+        errors.append("schema_version must be 2.0")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,79}", str(data.get("plan_id", ""))):
         errors.append("plan_id must be 2-80 lowercase letters, digits, dots, underscores, or hyphens")
     if data.get("mode") not in {"plan-only", "execute-ready", "goal-ready"}:
         errors.append("mode must be plan-only, execute-ready, or goal-ready")
     if not nonempty_string(data.get("objective")):
         errors.append("objective must be a non-empty string")
+    execution_style = data.get("execution_style")
+    if execution_style not in {"managed", "parallel-only"}:
+        errors.append("execution_style must be managed or parallel-only")
+    risk_level = data.get("risk_level")
+    if risk_level not in {"low", "medium", "high", "critical"}:
+        errors.append("risk_level must be low, medium, high, or critical")
     completion = data.get("completion_standard")
     if not isinstance(completion, list) or not completion or not all(map(nonempty_string, completion)):
         errors.append("completion_standard must contain at least one non-empty string")
@@ -187,8 +200,9 @@ def validate(data: Any) -> dict[str, Any]:
 
     orchestration = data.get("orchestration")
     required_orchestration = {
-        "root_role": "coordinator",
-        "root_product_implementation": "forbidden",
+        "sponsor_role": "user-conversation",
+        "coordinator_role": "separate-top-level-task",
+        "coordinator_product_implementation": "forbidden",
         "owner_delegation": "top-level-task",
         "owner_subagents": "allowed-bounded",
     }
@@ -198,6 +212,18 @@ def validate(data: Any) -> dict[str, Any]:
         for field, expected in required_orchestration.items():
             if orchestration.get(field) != expected:
                 errors.append(f"orchestration.{field} must be {expected}")
+        if orchestration.get("counterpilot") not in {
+            "off", "risk-triggered", "milestone", "continuous"
+        }:
+            errors.append("orchestration.counterpilot is invalid")
+        if orchestration.get("coordination_strategy") not in {"auto", "flat", "hierarchical"}:
+            errors.append("orchestration.coordination_strategy is invalid")
+        shard_size = orchestration.get("shard_size")
+        if not isinstance(shard_size, int) or not 2 <= shard_size <= 12:
+            errors.append("orchestration.shard_size must be between 2 and 12")
+        high_review = orchestration.get("high_concurrency_review")
+        if high_review not in {"not-required", "accepted", "declined"}:
+            errors.append("orchestration.high_concurrency_review is invalid")
     if data.get("mode") == "plan-only" and auth.get("implementation_writes"):
         warnings.append("plan-only mode authorizes implementation writes; execution must still wait for a request")
 
@@ -211,19 +237,29 @@ def validate(data: Any) -> dict[str, Any]:
     modifiers = policy.get("modifiers")
     if not isinstance(modifiers, list) or len(modifiers) != len(set(modifiers)):
         errors.append("resource_policy.modifiers must be a unique array")
-    elif any(modifier not in {"speed"} for modifier in modifiers):
-        errors.append("resource_policy.modifiers supports only speed")
+    elif any(modifier not in {"speed", "fast", "ultra-fast"} for modifier in modifiers):
+        errors.append("resource_policy.modifiers supports speed, fast, and ultra-fast")
     concurrency = policy.get("concurrency")
-    if not isinstance(concurrency, dict) or not isinstance(concurrency.get("desired"), int) or concurrency.get("desired", 0) < 1:
-        errors.append("resource_policy.concurrency.desired must be a positive integer")
+    if not isinstance(concurrency, dict) or not isinstance(concurrency.get("desired"), int) or not 1 <= concurrency.get("desired", 0) <= 64:
+        errors.append("resource_policy.concurrency.desired must be between 1 and 64")
     elif profile in PROFILE_CONCURRENCY:
-        expected = 6 if "speed" in (modifiers or []) else PROFILE_CONCURRENCY[profile]
+        multiplier = 4 if "ultra-fast" in (modifiers or []) else 2 if "fast" in (modifiers or []) else 1
+        expected = PROFILE_CONCURRENCY[profile] * multiplier
         if concurrency.get("desired") != expected:
             warnings.append(
                 f"resource_policy.concurrency.desired={concurrency.get('desired')} overrides "
-                f"the {profile}{' + speed' if 'speed' in (modifiers or []) else ''} "
+                f"the {profile}{' + ' + modifiers[-1] if modifiers else ''} "
                 f"default of {expected}"
             )
+    if isinstance(concurrency, dict) and isinstance(concurrency.get("desired"), int) and concurrency["desired"] >= 16:
+        review = orchestration.get("high_concurrency_review") if isinstance(orchestration, dict) else None
+        if review not in {"accepted", "declined"}:
+            errors.append(
+                "concurrency >=16 requires an explicit high-quality decomposition choice: "
+                "high_concurrency_review=accepted or declined"
+            )
+        if review == "accepted" and not nonempty_string(orchestration.get("decomposition_model")):
+            errors.append("accepted high-concurrency review requires decomposition_model")
     if policy.get("unavailable_action") == "fallback-list" and not policy.get("fallback_models"):
         errors.append("fallback-list policy requires fallback_models")
     hard_lock = policy.get("hard_model_lock")
@@ -351,16 +387,29 @@ def validate(data: Any) -> dict[str, Any]:
     acceptance_ids = [
         task_id for task_id, task in tasks.items() if task.get("resource_class") == "acceptance"
     ]
-    if not integration_ids:
-        errors.append("every executable All in Luna plan requires a phase integration task")
-    if not acceptance_ids:
-        errors.append("every executable All in Luna plan requires independent acceptance")
+    authority_or_external = any(
+        task.get("resource_class") == "authority" or bool(task.get("external_side_effects"))
+        for task in tasks.values()
+    )
+    require_integration = execution_style == "managed" and (
+        risk_level in {"medium", "high", "critical"} or len(tasks) > 1
+    )
+    require_acceptance = execution_style == "managed" and (
+        risk_level in {"high", "critical"} or authority_or_external
+    )
+    require_counterpilot = execution_style == "managed" and risk_level in {"high", "critical"}
+    if require_integration and not integration_ids:
+        errors.append("this managed risk level requires one phase integration task")
+    if require_acceptance and not acceptance_ids:
+        errors.append("this managed risk level requires independent acceptance")
+    if require_counterpilot and isinstance(orchestration, dict) and orchestration.get("counterpilot") == "off":
+        errors.append("high and critical managed plans require CounterPilot")
     implementation_ids = [
         task_id
         for task_id, task in tasks.items()
         if task.get("resource_class") not in {"integration", "acceptance"}
     ]
-    for implementation_id in implementation_ids:
+    for implementation_id in implementation_ids if integration_ids else []:
         if not any(
             implementation_id in closure.get(integration_id, set())
             for integration_id in integration_ids

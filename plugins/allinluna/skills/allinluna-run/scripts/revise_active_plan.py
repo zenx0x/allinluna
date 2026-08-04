@@ -95,6 +95,32 @@ def main() -> int:
         for task_id in {task["id"] for task in additions}:
             state["tasks"][task_id] = generated["tasks"][task_id]
             new_task = state["tasks"][task_id]
+            subcoordinators = state.get("control_plane", {}).get("subcoordinators", {})
+            if subcoordinators:
+                shard_size = int(state["orchestration"].get("shard_size", 8))
+                target_id, target = min(
+                    subcoordinators.items(), key=lambda item: len(item[1]["task_ids"])
+                )
+                if len(target["task_ids"]) >= shard_size:
+                    target_id = f"subcoordinator-{len(subcoordinators) + 1}"
+                    target = {
+                        "id": target_id,
+                        "status": "unassigned",
+                        "task_ids": [],
+                        "thread_id": None,
+                        "host_id": None,
+                        "cursor": None,
+                        "slot_limit": max(
+                            1,
+                            int(state["resource_policy"]["concurrency"]["desired"])
+                            // (len(subcoordinators) + 1),
+                        ),
+                    }
+                    subcoordinators[target_id] = target
+                target["task_ids"].append(task_id)
+                new_task["assignment"]["coordinator_id"] = target_id
+            else:
+                new_task["assignment"]["coordinator_id"] = "primary"
             role = new_task["requested"]["role"]
             reusable = next(
                 (

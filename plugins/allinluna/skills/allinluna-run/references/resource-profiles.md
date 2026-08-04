@@ -1,55 +1,25 @@
 # Resource profiles
 
-The authoritative defaults live in `assets/resource-profiles.json`. Profiles are allocation policies, not guarantees that a named model exists.
+The authoritative defaults live in `assets/resource-profiles.json`. Profiles allocate models and scheduling; they never reduce scope or completion criteria.
+
+| Profile | Desired concurrency | Typical policy |
+| --- | ---: | --- |
+| `economy` | 4 | Luna-first, explicit escalation |
+| `balanced` | 8 | general mixed-model default |
+| `premium` | 12 | strongest decision and acceptance roles |
+| `speed` | 12 | latency-oriented scheduling |
+| `fast` | 24 | high-throughput hierarchical scheduling |
+| `ultra-fast` | 48 | maximum mixed-model throughput |
+| `all-luna` | 8 | hard Luna family lock |
+| `mad-luna` | 24 | Luna max swarm plus duplicate high-risk challenge |
+| `custom` | 1–64 | user-defined roles and concurrency |
+
+Actual concurrency is the minimum imposed by the host, machine, ready DAG width, ownership safety, and active budget. At desired concurrency 16 or above, ask once whether a high-quality model should review decomposition, dependencies, ownership, and conflict risk. Record `accepted` plus the model, or `declined`; do not repeatedly ask.
+
+Velocity modifiers compose with model profiles. `all-luna + fast` or `all-luna + ultra-fast` preserves the Luna hard lock while applying the velocity policy. Never switch to a mixed-model profile silently.
 
 ## Runtime resolution
 
-1. Load the profile.
-2. Apply user overrides.
-3. Query or inspect the host's actual model/reasoning/delegation capabilities.
-4. Resolve logical tiers or model families.
-5. Record requested and actual values per task.
-6. Enforce hard locks before dispatch and during validation.
+Resolve each logical role against the delegation-specific host catalog. Top-level and subagent catalogs may expose different models. Record requested, resolved, and actual model/reasoning/delegation separately. Enforce hard locks recursively for owner subagents. If telemetry is absent, record `unavailable` rather than inventing usage or cost.
 
-When the runtime catalog supplies quality, speed, and economy scores, resolution ranks matching
-models with the selected profile's weights. Missing scores do not invent telemetry: stable catalog
-order remains the tie-breaker. `ultra` reasoning is supported when the selected model declaration
-exposes it. A `fallback-list` is executed in order rather than stored as inert metadata.
-
-Use `scripts/resolve_profile.py` to produce a deterministic merged policy. Supply `--delegation top-level-task|subagent|sequential` with a delegation-scoped catalog. It deliberately leaves unresolved logical tiers visible when no runtime catalog is supplied.
-
-On Codex App, build the top-level catalog from the `codex_app__create_thread` tool declaration, not from subagent model overrides. The two surfaces may expose different model families and reasoning levels.
-
-## Profile comparison
-
-| Profile | Default concurrency | Model policy | High-risk review |
-| --- | ---: | --- | --- |
-| `premium` | 4 | mixed logical tiers | independent frontier |
-| `balanced` | 3 | mixed logical tiers | independent when warranted |
-| `economy` | 2 | Luna-first | targeted, ask before escalation |
-| `speed` | 6, host-capped | fastest suitable mixed tiers | milestone-only |
-| `all-luna` | 4 | hard Luna lock | Luna high |
-| `mad-luna` | 8, host-capped | hard Luna lock | independent Luna max |
-| `custom` | user-defined | user-defined | user-defined |
-
-The table values are defaults, not user-facing ceilings. A user may request any positive desired concurrency. Effective concurrency is still limited by the host's actual capacity, dependency-ready work, writable ownership, and budget.
-
-Use `modifiers: ["speed"]` to compose the speed scheduling strategy with another base profile. In particular, `all-luna + speed` keeps every Luna role and hard lock while defaulting desired concurrency to 6; an explicit user value overrides that number without importing the mixed-model role assignments from `speed`.
-
-Every built-in profile defaults substantive root-level owner lanes to user-visible top-level Codex tasks. Each profile keeps root-level `subagent` then `sequential` as its runtime fallback order. After the host tool catalog has been fully checked and the top-level task tool is genuinely absent, fallback is automatic and is recorded as `top-level-tool-unavailable`; it does not rewrite the plan authorization or masquerade as a top-level task. A hard model lock still blocks any fallback surface that cannot satisfy it. Once assigned, a top-level owner may use bounded internal subagents under the same ownership and model policy.
-
-## Mad Luna
-
-`mad-luna` requests:
-
-- the Luna model family for coordinator, planner, implementers, integration, and acceptance;
-- the highest reasoning effort exposed for each role;
-- maximum safe independent parallelism;
-- an independent verifier for high-risk milestones;
-- no automatic non-Luna escape hatch.
-
-If Luna or maximum reasoning is unavailable, record the exact mismatch. Follow `unavailable_action` (`pause` by default); do not relabel another model as Luna.
-
-## Budget
-
-Budgets can be expressed as hard/soft limits for tokens, credits, elapsed time, or currency. Only enforce a metric the host exposes. Keep unobservable actuals as `unavailable`. A soft limit prompts reassessment; a hard limit pauses new dispatch without marking incomplete work complete.
+For high-concurrency work, resource profiles also resolve primary Coordinator and CounterPilot roles. Child Coordinators inherit the primary Coordinator policy unless the user explicitly provides a different bounded policy.

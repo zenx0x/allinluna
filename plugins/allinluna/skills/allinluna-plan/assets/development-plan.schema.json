@@ -10,6 +10,8 @@
     "title",
     "mode",
     "objective",
+    "execution_style",
+    "risk_level",
     "completion_standard",
     "stop_boundary",
     "repository",
@@ -22,11 +24,13 @@
     "unknowns"
   ],
   "properties": {
-    "schema_version": { "const": "1.0" },
+    "schema_version": { "const": "2.0" },
     "plan_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$" },
     "title": { "type": "string", "minLength": 3 },
     "mode": { "enum": ["plan-only", "execute-ready", "goal-ready"] },
     "objective": { "type": "string", "minLength": 10 },
+    "execution_style": { "enum": ["managed", "parallel-only"] },
+    "risk_level": { "enum": ["low", "medium", "high", "critical"] },
     "completion_standard": {
       "type": "array",
       "minItems": 1,
@@ -88,12 +92,29 @@
     "orchestration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root_role", "root_product_implementation", "owner_delegation", "owner_subagents"],
+      "required": [
+        "sponsor_role",
+        "coordinator_role",
+        "coordinator_product_implementation",
+        "owner_delegation",
+        "owner_subagents",
+        "counterpilot",
+        "coordination_strategy",
+        "shard_size",
+        "high_concurrency_review",
+        "decomposition_model"
+      ],
       "properties": {
-        "root_role": { "const": "coordinator" },
-        "root_product_implementation": { "const": "forbidden" },
+        "sponsor_role": { "const": "user-conversation" },
+        "coordinator_role": { "const": "separate-top-level-task" },
+        "coordinator_product_implementation": { "const": "forbidden" },
         "owner_delegation": { "const": "top-level-task" },
-        "owner_subagents": { "const": "allowed-bounded" }
+        "owner_subagents": { "const": "allowed-bounded" },
+        "counterpilot": { "enum": ["off", "risk-triggered", "milestone", "continuous"] },
+        "coordination_strategy": { "enum": ["auto", "flat", "hierarchical"] },
+        "shard_size": { "type": "integer", "minimum": 2, "maximum": 12 },
+        "high_concurrency_review": { "enum": ["not-required", "accepted", "declined"] },
+        "decomposition_model": { "type": ["string", "null"] }
       }
     },
     "resource_policy": { "$ref": "#/$defs/resourcePolicy" },
@@ -125,12 +146,12 @@
       ],
       "properties": {
         "profile": {
-          "enum": ["premium", "balanced", "economy", "speed", "all-luna", "mad-luna", "custom"]
+          "enum": ["premium", "balanced", "economy", "speed", "fast", "ultra-fast", "all-luna", "mad-luna", "custom"]
         },
         "modifiers": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["speed"] }
+          "items": { "enum": ["speed", "fast", "ultra-fast"] }
         },
         "hard_model_lock": { "type": ["string", "null"] },
         "unavailable_action": { "enum": ["pause", "ask", "fallback-list"] },
@@ -140,7 +161,7 @@
           "additionalProperties": false,
           "required": ["desired", "host_cap_behavior"],
           "properties": {
-            "desired": { "type": "integer", "minimum": 1 },
+            "desired": { "type": "integer", "minimum": 1, "maximum": 64 },
             "host_cap_behavior": { "const": "cap-at-runtime" }
           }
         },

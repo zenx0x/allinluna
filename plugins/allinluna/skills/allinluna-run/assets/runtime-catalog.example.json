@@ -1,6 +1,12 @@
 {
   "schema_version": "2.0",
   "max_concurrency": 4,
+  "thread_tools": [
+    "codex_app__create_thread",
+    "codex_app__list_threads",
+    "codex_app__read_thread",
+    "codex_app__send_message_to_thread"
+  ],
   "surfaces": {
     "top-level-task": {
       "available": true,

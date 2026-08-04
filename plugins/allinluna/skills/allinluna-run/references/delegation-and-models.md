@@ -8,11 +8,13 @@
 
 Use the highest tier that is both available and authorized—not the highest tier imagined by the plan. Record capability discovery in run state.
 
-All built-in profiles make `top-level-task` the root coordinator's preferred delegation, and every All in Luna plan records `top_level_tasks=true`. Root-level subagent and sequential execution are runtime fallbacks, not substitutes for owner lanes and not reasons to rewrite plan authorization.
+All built-in profiles make `top-level-task` the independent primary Coordinator's preferred delegation, and every All in Luna plan records `top_level_tasks=true`. Sponsor-thread or Coordinator-thread product implementation is not the default. Subagent and sequential execution are runtime fallbacks, not substitutes for owner lanes and not reasons to rewrite plan authorization.
 
 Use root-level fallback automatically only after verified host unavailability of the top-level task tool, or after the user declines the required Git bootstrap. For verified tool absence, try `subagent` before `sequential` and record `top-level-tool-unavailable`; do not request confirmation again. Do not treat an undiscovered tool, invalid task parameters, or a failed first invocation as proof of absence. A fallback that violates a hard family/model lock remains forbidden and must pause rather than silently switch models.
 
-Top-level owners may use bounded internal subagents without returning ownership to the root coordinator. Their task brief must explicitly allow this and preserve the owner's exclusive paths, base commit, model policy, reasoning ceiling, budget, tests, and reporting contract. Internal subagents cannot independently satisfy the owner task; the owner must integrate and verify their work. Hard family locks apply recursively.
+Top-level owners may use bounded internal subagents without returning ownership to a Coordinator. Their task brief must explicitly allow this and preserve the owner's exclusive paths, base commit, model policy, reasoning ceiling, budget, tests, and reporting contract. Internal subagents cannot independently satisfy the owner task; the owner must integrate and verify their work. Hard family locks apply recursively.
+
+At high concurrency the primary Coordinator may delegate disjoint task-ID shards to one level of child Coordinators. A child Coordinator is a user-visible top-level task, not an implementation owner and not a substitute for owner work. Its brief contains its shard, slot limit, forbidden global changes, and return protocol.
 
 ## Codex App discovery order
 

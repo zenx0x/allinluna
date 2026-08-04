@@ -33,6 +33,8 @@ def validate(target: Path) -> dict[str, Any]:
         "run_id",
         "plan_id",
         "plan_hash",
+        "execution_style",
+        "risk_level",
         "run_dir",
         "status",
         "profile",
@@ -43,8 +45,10 @@ def validate(target: Path) -> dict[str, Any]:
         "repository",
         "authorizations",
         "orchestration",
+        "control_plane",
         "coordination",
         "defects",
+        "challenges",
         "completion_standard",
         "tasks",
         "milestones",
@@ -54,8 +58,8 @@ def validate(target: Path) -> dict[str, Any]:
     missing = sorted(required - state.keys())
     if missing:
         errors.append("missing state fields: " + ", ".join(missing))
-    if state.get("schema_version") != "1.0":
-        errors.append("schema_version must be 1.0")
+    if state.get("schema_version") != "2.0":
+        errors.append("schema_version must be 2.0")
     if state.get("status") not in RUN_TRANSITIONS:
         errors.append(f"invalid run status: {state.get('status')}")
     if Path(state.get("run_dir", "")).resolve() != run_dir.resolve():
@@ -69,10 +73,25 @@ def validate(target: Path) -> dict[str, Any]:
     if isinstance(host_concurrency, int) and host_concurrency < 1:
         errors.append("host_concurrency must be positive")
     orchestration = state.get("orchestration", {})
-    if orchestration.get("root_role") != "coordinator":
-        errors.append("run root role must remain coordinator")
-    if orchestration.get("root_product_implementation") != "forbidden":
-        errors.append("root product implementation must remain forbidden")
+    if orchestration.get("sponsor_role") != "user-conversation":
+        errors.append("user conversation must remain the sponsor")
+    if orchestration.get("coordinator_role") != "separate-top-level-task":
+        errors.append("primary coordinator must remain a separate top-level task")
+    if orchestration.get("coordinator_product_implementation") != "forbidden":
+        errors.append("coordinator product implementation must remain forbidden")
+    control = state.get("control_plane", {})
+    sponsor_thread = control.get("sponsor", {}).get("thread_id")
+    coordinator_thread = control.get("primary_coordinator", {}).get("thread_id")
+    counterpilot_thread = control.get("counterpilot", {}).get("thread_id")
+    secondary_counterpilot_thread = control.get("secondary_counterpilot", {}).get("thread_id")
+    if sponsor_thread and coordinator_thread and sponsor_thread == coordinator_thread:
+        errors.append("sponsor and primary coordinator must use different threads")
+    if counterpilot_thread and counterpilot_thread in {sponsor_thread, coordinator_thread}:
+        errors.append("CounterPilot must use a thread independent from sponsor and coordinator")
+    if secondary_counterpilot_thread and secondary_counterpilot_thread in {
+        sponsor_thread, coordinator_thread, counterpilot_thread
+    }:
+        errors.append("secondary CounterPilot must use an independent thread")
 
     plan_path = run_dir / "plan.json"
     if not plan_path.exists():
@@ -199,6 +218,13 @@ def validate(target: Path) -> dict[str, Any]:
         ]
         if open_defects:
             errors.append("completed run has unresolved defects: " + ", ".join(open_defects))
+        open_critical = [
+            challenge_id
+            for challenge_id, challenge in state.get("challenges", {}).items()
+            if challenge.get("status") == "open" and challenge.get("severity") in {"high", "critical"}
+        ]
+        if open_critical:
+            errors.append("completed run has unresolved high challenges: " + ", ".join(open_critical))
 
     events_path = run_dir / "events.jsonl"
     event_count = 0

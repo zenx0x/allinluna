@@ -39,7 +39,7 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             built = build(root, Path(temp) / "built")
         inventories: list[dict] = []
         for artifact, spec in zip(built, specs, strict=True):
-            required = [artifact / ".codex-plugin/plugin.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
+            required = [artifact / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
             if spec["id"] == "research-routes":
                 required.extend([artifact / "README.md", artifact / "README.en.md"])
             for path in required:
@@ -50,6 +50,15 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             plugin = read_json(artifact / ".codex-plugin/plugin.json")
             if plugin.get("name") != spec["plugin_name"]:
                 errors.append(f"{spec['id']} plugin name mismatch")
+            prompts = plugin.get("interface", {}).get("defaultPrompt")
+            if not isinstance(prompts, list) or len(prompts) != 3:
+                errors.append(f"{spec['id']} must expose exactly 3 defaultPrompt entries")
+            marketplace = read_json(artifact / ".agents/plugins/marketplace.json")
+            entries = marketplace.get("plugins", [])
+            if marketplace.get("name") != spec["plugin_name"] or len(entries) != 1:
+                errors.append(f"{spec['id']} standalone marketplace identity is invalid")
+            elif entries[0].get("name") != plugin.get("name") or entries[0].get("source", {}).get("path") != ".":
+                errors.append(f"{spec['id']} standalone marketplace entry does not match plugin root")
             provenance = read_json(artifact / ".source-provenance.json")
             if provenance != expected_provenance:
                 errors.append(f"{spec['id']} source provenance does not match current HEAD")

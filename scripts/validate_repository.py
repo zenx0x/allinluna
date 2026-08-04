@@ -106,6 +106,11 @@ def validate() -> tuple[list[str], list[str]]:
             errors.append("missing research-routes plugin metadata")
         elif json.loads(research_plugin_path.read_text(encoding="utf-8")).get("name") != "research-routes":
             errors.append("research-routes plugin name must be research-routes")
+        for metadata_path in (plugin_path, research_plugin_path):
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            prompts = metadata.get("interface", {}).get("defaultPrompt")
+            if not isinstance(prompts, list) or len(prompts) != 3:
+                errors.append(f"{metadata_path.relative_to(ROOT)} must define exactly 3 defaultPrompt entries")
     except (OSError, json.JSONDecodeError, IndexError) as exc:
         errors.append(f"invalid plugin metadata: {exc}")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import unittest
@@ -48,6 +49,13 @@ class RepositoryContractTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_plugin_default_prompts_are_exactly_three(self) -> None:
+        for name in ("allinluna", "research-routes"):
+            metadata = json.loads(
+                (ROOT / "plugins" / name / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(metadata["interface"]["defaultPrompt"]), 3)
 
 
 if __name__ == "__main__":

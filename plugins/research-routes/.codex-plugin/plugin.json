@@ -29,9 +29,7 @@
     "defaultPrompt": [
       "Use Research Routes to map a question, problem, or repository into concurrent research routes.",
       "Use Research Routes to explore hypotheses and probes while preserving unknowns and evidence polarity.",
-      "Use Research Routes to run an approved route with explicit HumanDecision and recovery semantics.",
-      "使用 Research Routes 保持路线中立，分离 Claims、Evidence、未知和失败区间，比较多条路线并提出可逆探针。",
-      "Use Research Routes to compare evidence-backed routes without turning a terrain map into implementation authorization or canonical-state promotion."
+      "Use Research Routes to run an approved route with explicit HumanDecision and recovery semantics."
     ]
   }
 }

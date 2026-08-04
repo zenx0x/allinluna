@@ -33,10 +33,7 @@
     "defaultPrompt": [
       "\u4f7f\u7528 All in Luna \u89c4\u5212\u9879\u76ee\uff1a\u5f53\u524d\u5bf9\u8bdd\u53ea\u4f5c Sponsor\uff0c\u6267\u884c\u65f6\u53e6\u5efa\u72ec\u7acb Coordinator\uff1b\u6839\u636e\u98ce\u9669\u51b3\u5b9a CounterPilot\u3001Integration \u548c Acceptance\u3002",
       "\u4f7f\u7528 All in Luna \u5b8c\u6574\u6267\u884c\uff1a\u7acb\u5373\u521b\u5efa\u72ec\u7acb Coordinator\uff1b\u9ad8\u5e76\u53d1\u65f6\u521b\u5efa\u5b50\u534f\u8c03\u5206\u7247\uff0c\u6301\u7eed\u6267\u884c\u5230\u505c\u6b62\u8fb9\u754c\u3002",
-      "\u4f7f\u7528 All in Luna \u7684 parallel-only \u6a21\u5f0f\u76f4\u63a5\u5e76\u53d1\u6267\u884c\u6211\u5df2\u6709\u7684\u8ba1\u5212\uff0c\u4e0d\u91cd\u65b0\u8bbe\u8ba1\u4ea7\u54c1\u65b9\u5411\u3002",
-      "Plan this project with top_level_tasks=true and independent owner lanes as user-visible top-level Codex tasks; each owner may use bounded internal subagents.",
-      "Execute this plan with top_level_tasks=true through worktree owners; request Git bootstrap authorization first for a non-Git project.",
-      "Resume the saved All in Luna workflow through top-level owners and their bounded internal subagents."
+      "\u4f7f\u7528 All in Luna \u7684 parallel-only \u6a21\u5f0f\u76f4\u63a5\u5e76\u53d1\u6267\u884c\u6211\u5df2\u6709\u7684\u8ba1\u5212\uff0c\u4e0d\u91cd\u65b0\u8bbe\u8ba1\u4ea7\u54c1\u65b9\u5411\u3002"
     ]
   }
 }

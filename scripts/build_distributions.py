@@ -137,6 +137,23 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     (plugin_dir / "plugin.json").write_text(
         json.dumps(plugin, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    marketplace_dir = artifact / ".agents" / "plugins"
+    marketplace_dir.mkdir(parents=True, exist_ok=True)
+    marketplace = {
+        "name": spec["plugin_name"],
+        "interface": {"displayName": spec["display_name"]},
+        "plugins": [
+            {
+                "name": plugin["name"],
+                "source": {"source": "local", "path": "."},
+                "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+                "category": plugin.get("interface", {}).get("category", "Productivity"),
+            }
+        ],
+    }
+    (marketplace_dir / "marketplace.json").write_text(
+        json.dumps(marketplace, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
     inventory = shared_inventory(root, manifest)
     for category, entries in manifest["shared_paths"].items():

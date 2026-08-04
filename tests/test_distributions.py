@@ -122,6 +122,26 @@ class DistributionTests(unittest.TestCase):
             self.assertIn("shared/", (research / "README.en.md").read_text(encoding="utf-8"))
             self.assertTrue((research / ".codex-plugin/plugin.json").is_file())
 
+    def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            for distribution in ("all-in-luna", "research-routes"):
+                artifact = output / distribution
+                plugin = json.loads((artifact / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+                marketplace = json.loads((artifact / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+                self.assertEqual(len(plugin["interface"]["defaultPrompt"]), 3)
+                self.assertEqual(marketplace["name"], plugin["name"])
+                self.assertEqual(len(marketplace["plugins"]), 1)
+                self.assertEqual(marketplace["plugins"][0]["name"], plugin["name"])
+                self.assertEqual(marketplace["plugins"][0]["source"]["path"], ".")
+
 
 if __name__ == "__main__":
     unittest.main()

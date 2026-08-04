@@ -8,14 +8,13 @@ import json
 import tempfile
 from pathlib import Path
 
-from build_distributions import ROOT, build, expand_sources, read_json, sha256, source_provenance
+from build_distributions import ROOT, build, expand_sources, plugin_root_for, read_json, sha256, source_provenance
 
 
 SOURCE_ONLY_README_PATHS = (
     "scripts/build_distributions.py",
     "scripts/validate_distributions.py",
     "scripts/validate_installations.py",
-    "plugins/research-routes/",
     "scripts/validate_route_packet.py",
 )
 
@@ -39,15 +38,16 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             built = build(root, Path(temp) / "built")
         inventories: list[dict] = []
         for artifact, spec in zip(built, specs, strict=True):
-            required = [artifact / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
+            plugin_root = plugin_root_for(artifact, spec)
+            required = [plugin_root / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
             if spec["id"] == "research-routes":
                 required.extend([artifact / "README.md", artifact / "README.en.md"])
             for path in required:
                 if not path.is_file():
                     errors.append(f"{spec['id']} missing {path.relative_to(artifact)}")
-            if not (artifact / ".codex-plugin/plugin.json").is_file():
+            if not (plugin_root / ".codex-plugin/plugin.json").is_file():
                 continue
-            plugin = read_json(artifact / ".codex-plugin/plugin.json")
+            plugin = read_json(plugin_root / ".codex-plugin/plugin.json")
             if plugin.get("name") != spec["plugin_name"]:
                 errors.append(f"{spec['id']} plugin name mismatch")
             prompts = plugin.get("interface", {}).get("defaultPrompt")
@@ -57,7 +57,10 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             entries = marketplace.get("plugins", [])
             if marketplace.get("name") != spec["plugin_name"] or len(entries) != 1:
                 errors.append(f"{spec['id']} standalone marketplace identity is invalid")
-            elif entries[0].get("name") != plugin.get("name") or entries[0].get("source", {}).get("path") != "./.":
+            expected_source_path = "./plugins/research-routes" if spec["id"] == "research-routes" else "./."
+            if entries and entries[0].get("source", {}).get("path") != expected_source_path:
+                errors.append(f"{spec['id']} standalone marketplace source path is invalid")
+            elif entries and entries[0].get("name") != plugin.get("name"):
                 errors.append(f"{spec['id']} standalone marketplace entry does not match plugin root")
             provenance = read_json(artifact / ".source-provenance.json")
             if provenance != expected_provenance:
@@ -74,8 +77,10 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
         if len(inventories) == 2 and inventories[0] != inventories[1]:
             errors.append("shared file inventory differs between distributions")
         if len(built) == 2:
-            luna_skills = {p.relative_to(built[0] / "skills").as_posix() for p in (built[0] / "skills").rglob("*") if p.is_file()}
-            routes_skills = {p.relative_to(built[1] / "skills").as_posix() for p in (built[1] / "skills").rglob("*") if p.is_file()}
+            luna_root = plugin_root_for(built[0], specs[0])
+            routes_root = plugin_root_for(built[1], specs[1])
+            luna_skills = {p.relative_to(luna_root / "skills").as_posix() for p in (luna_root / "skills").rglob("*") if p.is_file()}
+            routes_skills = {p.relative_to(routes_root / "skills").as_posix() for p in (routes_root / "skills").rglob("*") if p.is_file()}
             if not luna_skills.issubset(routes_skills):
                 errors.append("Research Routes is missing shared skill files")
             if "research-routes/SKILL.md" not in routes_skills:

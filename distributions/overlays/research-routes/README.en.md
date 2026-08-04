@@ -12,7 +12,7 @@ Research Routes is an independent Codex research distribution, not a jump page a
 
 ## Shortest install and use
 
-The repository root itself is the installable Research Routes plugin root: in Codex Plugins, choose installation from a local path and select this directory. Do not run the source-repository builder again inside the distribution repository. Plugin entry skills live under `skills/research-routes*`, the plugin manifest is `.codex-plugin/plugin.json`, and shared contracts live under `shared/`.
+The repository root is the marketplace root; in Codex Plugins, choose installation from a local path and select this directory. The actual plugin root is `plugins/research-routes/`. Do not run the source-repository builder again inside the distribution repository. Plugin entry skills live under `plugins/research-routes/skills/research-routes*`, the plugin manifest is `plugins/research-routes/.codex-plugin/plugin.json`, and shared contracts live under `plugins/research-routes/shared/`.
 
 ## Research boundary
 
@@ -24,4 +24,4 @@ A terrain map is not experiment authorization, implementation order, HumanDecisi
 - Preserve contradictory results and failure regimes instead of retaining only positive conclusions.
 - Choose a low-cost, reversible probe that can distinguish competing assumptions before implementation.
 
-Advanced contracts live under `skills/research-routes*/`, `shared/`, `.codex-plugin/plugin.json`, and the root `LICENSE`.
+Advanced contracts live under `plugins/research-routes/skills/research-routes*/`, `plugins/research-routes/shared/`, `plugins/research-routes/.codex-plugin/plugin.json`, and the root `LICENSE`.

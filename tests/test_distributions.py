@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -68,7 +69,8 @@ class DistributionTests(unittest.TestCase):
                 check=True,
             )
             for distribution in ("all-in-luna", "research-routes"):
-                runtime = output / distribution / "shared/core/validate_route_packet.py"
+                plugin_root = output / distribution / "plugins/research-routes" if distribution == "research-routes" else output / distribution
+                runtime = plugin_root / "shared/core/validate_route_packet.py"
                 self.assertTrue(runtime.is_file(), runtime)
 
     def test_release_artifacts_exclude_python_cache_and_keep_research_readmes(self) -> None:
@@ -107,7 +109,6 @@ class DistributionTests(unittest.TestCase):
                 "scripts/build_distributions.py",
                 "scripts/validate_distributions.py",
                 "scripts/validate_installations.py",
-                "plugins/research-routes/",
                 "scripts/validate_route_packet.py",
             )
             for distribution in ("all-in-luna", "research-routes"):
@@ -118,9 +119,10 @@ class DistributionTests(unittest.TestCase):
                 readme = (research / name).read_text(encoding="utf-8")
                 self.assertTrue(readme)
                 self.assertFalse(any(path in readme for path in forbidden), name)
-            self.assertIn("skills/research-routes", (research / "README.en.md").read_text(encoding="utf-8"))
-            self.assertIn("shared/", (research / "README.en.md").read_text(encoding="utf-8"))
-            self.assertTrue((research / ".codex-plugin/plugin.json").is_file())
+            research_readme = (research / "README.en.md").read_text(encoding="utf-8")
+            self.assertIn("plugins/research-routes/skills/research-routes", research_readme)
+            self.assertIn("plugins/research-routes/shared/", research_readme)
+            self.assertTrue((research / "plugins/research-routes/.codex-plugin/plugin.json").is_file())
 
     def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -134,13 +136,44 @@ class DistributionTests(unittest.TestCase):
             )
             for distribution in ("all-in-luna", "research-routes"):
                 artifact = output / distribution
-                plugin = json.loads((artifact / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
                 marketplace = json.loads((artifact / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+                source_path = marketplace["plugins"][0]["source"]["path"]
+                self.assertTrue(source_path.startswith("./"))
+                self.assertNotEqual(source_path, "./")
+                plugin_root = artifact / source_path[2:]
+                if distribution == "research-routes":
+                    self.assertIn(artifact.resolve(), plugin_root.resolve().parents)
+                else:
+                    self.assertEqual(artifact.resolve(), plugin_root.resolve())
+                self.assertFalse((artifact / "plugins" / "research-routes" / "plugins").exists())
+                plugin = json.loads((plugin_root / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
                 self.assertEqual(len(plugin["interface"]["defaultPrompt"]), 3)
                 self.assertEqual(marketplace["name"], plugin["name"])
                 self.assertEqual(len(marketplace["plugins"]), 1)
                 self.assertEqual(marketplace["plugins"][0]["name"], plugin["name"])
-                self.assertEqual(marketplace["plugins"][0]["source"]["path"], "./.")
+                expected_path = "./plugins/research-routes" if distribution == "research-routes" else "./."
+                self.assertEqual(marketplace["plugins"][0]["source"]["path"], expected_path)
+
+    def test_git_marketplace_structure_resolves_strict_plugin_subdirectory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            git_root = Path(temp) / "git-marketplace"
+            shutil.copytree(output / "research-routes", git_root)
+            subprocess.run(["git", "init", str(git_root)], capture_output=True, text=True, check=True)
+            marketplace = json.loads((git_root / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+            source_path = marketplace["plugins"][0]["source"]["path"]
+            self.assertEqual(source_path, "./plugins/research-routes")
+            plugin_root = (git_root / source_path[2:]).resolve()
+            self.assertIn(git_root.resolve(), plugin_root.parents)
+            self.assertTrue((plugin_root / ".codex-plugin/plugin.json").is_file())
+            self.assertFalse((git_root / "plugins/research-routes/plugins").exists())
 
 
 if __name__ == "__main__":

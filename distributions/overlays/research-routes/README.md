@@ -12,7 +12,7 @@ Research Routes 是一个独立的 Codex 研究发行版，不是跳转页，也
 
 ## 最短安装与使用
 
-本仓库根目录本身就是可安装的 Research Routes 插件根目录：在 Codex Plugins 中选择从本地路径安装并选择此目录。无需在发行仓库再次运行源仓库构建器。插件入口位于 `skills/research-routes*`，插件清单是 `.codex-plugin/plugin.json`；共享契约位于 `shared/`。
+本仓库根目录是 marketplace 根；在 Codex Plugins 中选择从本地路径安装并选择此目录。真正的插件根是 `plugins/research-routes/`，无需在发行仓库再次运行源仓库构建器。插件入口位于 `plugins/research-routes/skills/research-routes*`，插件清单是 `plugins/research-routes/.codex-plugin/plugin.json`；共享契约位于 `plugins/research-routes/shared/`。
 
 ## 科研边界
 
@@ -24,4 +24,4 @@ terrain map 不是 experiment authorization、implementation order、HumanDecisi
 - 保留相互矛盾的结果和失败区间，避免只留下正向结论。
 - 在实现前选择成本可控、可回滚、能区分假设的下一次 probe。
 
-高级契约见 `skills/research-routes*/`、`shared/`、`.codex-plugin/plugin.json` 和根目录 `LICENSE`。
+高级契约见 `plugins/research-routes/skills/research-routes*/`、`plugins/research-routes/shared/`、`plugins/research-routes/.codex-plugin/plugin.json` 和根目录 `LICENSE`。

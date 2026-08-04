@@ -20,9 +20,22 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
         install_root = Path(temp) / "plugins"
         snapshots: dict[str, bytes] = {}
         for artifact in artifacts:
-            plugin_path = artifact / ".codex-plugin/plugin.json"
-            if not plugin_path.is_file():
-                errors.append(f"missing plugin manifest in {artifact}")
+            marketplace_path = artifact / ".agents" / "plugins" / "marketplace.json"
+            if not marketplace_path.is_file():
+                errors.append(f"missing marketplace manifest in {artifact}")
+                continue
+            marketplace = read_json(marketplace_path)
+            entries = marketplace.get("plugins", [])
+            if len(entries) != 1:
+                errors.append(f"marketplace must have one plugin entry in {artifact}")
+                continue
+            source_path = entries[0].get("source", {}).get("path", "")
+            if not source_path.startswith("./"):
+                errors.append(f"marketplace source path must be relative: {source_path}")
+                continue
+            plugin_path = (artifact / source_path[2:]).resolve() / ".codex-plugin" / "plugin.json"
+            if not plugin_path.is_file() or artifact.resolve() not in plugin_path.parents:
+                errors.append(f"marketplace plugin path escapes or is missing in {artifact}")
                 continue
             plugin = read_json(plugin_path)
             name = plugin.get("name")
@@ -31,14 +44,21 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
                 continue
             destination = install_root / name
             shutil.copytree(artifact, destination)
-            snapshots[name] = (destination / ".codex-plugin/plugin.json").read_bytes()
+            installed_plugin_root = (destination / source_path[2:]).resolve()
+            if destination.resolve() not in installed_plugin_root.parents and installed_plugin_root != destination.resolve():
+                errors.append(f"installed marketplace path escapes {destination}")
+                continue
+            snapshots[name] = (installed_plugin_root / ".codex-plugin/plugin.json").read_bytes()
         names = set(snapshots)
         if names != {"allinluna", "research-routes"}:
             errors.append(f"co-installation names are {sorted(names)}")
         if snapshots.get("allinluna") == snapshots.get("research-routes"):
             errors.append("co-installed plugin manifests must remain distinct")
         for name in names:
-            if not (install_root / name / "skills").is_dir():
+            marketplace = read_json(install_root / name / ".agents/plugins/marketplace.json")
+            source_path = marketplace["plugins"][0]["source"]["path"]
+            installed_plugin_root = install_root / name / source_path[2:]
+            if not (installed_plugin_root / "skills").is_dir():
                 errors.append(f"{name} has no installable skills directory")
             if not (install_root / name / "shared-files.json").is_file():
                 errors.append(f"{name} has no shared parity manifest")

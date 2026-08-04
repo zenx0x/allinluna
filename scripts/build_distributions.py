@@ -91,18 +91,25 @@ def copy_tree(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
 
 
+def plugin_root_for(artifact: Path, spec: dict) -> Path:
+    if spec["id"] == "research-routes":
+        return artifact / "plugins" / "research-routes"
+    return artifact
+
+
 def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, provenance: dict) -> Path:
     artifact = output / spec["id"]
     if artifact.exists():
         shutil.rmtree(artifact)
     artifact.mkdir(parents=True)
+    plugin_root = plugin_root_for(artifact, spec)
     source_plugin = root / manifest["source_plugin"]
-    copy_tree(source_plugin / "skills", artifact / "skills")
+    copy_tree(source_plugin / "skills", plugin_root / "skills")
     overlay_plugin = root / "plugins" / spec["plugin_name"]
     if (overlay_plugin / "skills").is_dir():
-        copy_tree(overlay_plugin / "skills", artifact / "skills")
-    copy_tree(root / "tests", artifact / "tests")
-    copy_tree(root / "evals", artifact / "evals")
+        copy_tree(overlay_plugin / "skills", plugin_root / "skills")
+    copy_tree(root / "tests", plugin_root / "tests")
+    copy_tree(root / "evals", plugin_root / "evals")
     copy_tree(root / "LICENSE", artifact / "LICENSE")
 
     overlay = root / spec["overlay"]
@@ -132,7 +139,7 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
             "shortDescription": read_json(overlay / "brand.json")["tagline"],
         },
     }
-    plugin_dir = artifact / ".codex-plugin"
+    plugin_dir = plugin_root / ".codex-plugin"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.json").write_text(
         json.dumps(plugin, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -145,7 +152,10 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         "plugins": [
             {
                 "name": plugin["name"],
-                "source": {"source": "local", "path": "./."},
+                "source": {
+                    "source": "local",
+                    "path": "./plugins/research-routes" if spec["id"] == "research-routes" else "./.",
+                },
                 "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
                 "category": plugin.get("interface", {}).get("category", "Productivity"),
             }
@@ -160,7 +170,7 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         for relative, path in expand_sources(root, entries):
             if relative.startswith("plugins/allinluna/skills/") or relative in {"tests", "evals"} or relative.startswith("tests/") or relative.startswith("evals/"):
                 continue
-            copy_tree(path, artifact / "shared" / category / Path(relative).name)
+            copy_tree(path, plugin_root / "shared" / category / Path(relative).name)
     shared_files = [item for items in inventory.values() for item in items]
     (artifact / "shared-files.json").write_text(
         json.dumps({"schema_version": "1.0", "files": shared_files}, indent=2) + "\n",

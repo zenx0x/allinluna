@@ -16,4 +16,3 @@ permissions, stop boundary, and recovery metadata, but do not redesign product d
 
 Use `scripts/launch.py` for deterministic records. A pending record is not execution and must not
 create a Goal or mutate an external service.
-

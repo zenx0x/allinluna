@@ -23,4 +23,3 @@ Route the record as follows:
 
 Do not create a Goal during intake. Do not formalize execution until the one launch confirmation is
 created by `$allinluna-launch`.
-

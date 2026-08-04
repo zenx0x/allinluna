@@ -29,4 +29,3 @@
     "confirmation_prompt": {"type": "string", "minLength": 20}
   }
 }
-

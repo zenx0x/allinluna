@@ -36,6 +36,11 @@ class LocalAction:
     lease_id: str
     attempt_id: str
 
+    def __getitem__(self, key: str) -> Any:
+        """Keep the action inspectable through the mapping-shaped lane API."""
+
+        return self.to_dict()[key]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "work_unit_id": self.work_unit_id,
@@ -54,8 +59,10 @@ class LocalScheduler:
     def __init__(
         self,
         store: Any,
-        task_id: str,
+        task_id: str | None = None,
         *,
+        work_graph: Any | None = None,
+        host: Any | None = None,
         resource_broker: ResourceBroker | None = None,
         owner_id: str | None = None,
         adapter: str = "native-subagent",
@@ -63,18 +70,33 @@ class LocalScheduler:
         action_factory: Callable[[Mapping[str, Any], Mapping[str, Any]], HostAction] | None = None,
     ) -> None:
         self.store = store
-        self.task_id = str(task_id)
+        self.work_graph = work_graph
+        self.host = host
+        graph_task_id = getattr(work_graph, "task_id", None)
+        if task_id is None and graph_task_id is None:
+            raise TypeError("LocalScheduler requires task_id or work_graph")
+        if task_id is not None and graph_task_id is not None and str(task_id) != str(graph_task_id):
+            raise ValueError("task_id must match work_graph.task_id")
+        self.task_id = str(task_id if task_id is not None else graph_task_id)
         self.resource_broker = resource_broker or ResourceBroker()
         self.owner_id = owner_id or f"lane:{self.task_id}"
         self.adapter = adapter
         self.recovery = LeaseRecoveryBehavior(store, ttl_seconds=lease_ttl_seconds)
         self.action_factory = action_factory or self._default_action
         self._policies: dict[str, dict[str, tuple[str, ...]]] = {}
+        self._promotion_requests: list[dict[str, Any]] = []
 
     def _units(self) -> list[dict[str, Any]]:
+        if self.work_graph is not None:
+            return [dict(item) for item in self.work_graph.records()]
         return self.store._fetchall("SELECT * FROM work_units WHERE task_id = ? ORDER BY id", (self.task_id,))
 
     def _unit(self, unit_id: str) -> dict[str, Any]:
+        if self.work_graph is not None:
+            value = self.work_graph.get(unit_id)
+            if value is None or str(value.get("task_id")) != self.task_id:
+                raise KeyError(unit_id)
+            return dict(value)
         value = self.store.get_work_unit(unit_id)
         if value is None or str(value.get("task_id")) != self.task_id:
             raise KeyError(unit_id)
@@ -104,22 +126,41 @@ class LocalScheduler:
 
     def _dependencies_ready(self, unit: Mapping[str, Any]) -> bool:
         for dependency in unit.get("dependencies", ()):
-            upstream = self.store.get_work_unit(str(dependency["depends_on_work_unit_id"]))
+            dependency_id = (
+                dependency.get("depends_on_work_unit_id")
+                if isinstance(dependency, Mapping)
+                else dependency
+            )
+            upstream = self._unit(str(dependency_id)) if self.work_graph is not None else self.store.get_work_unit(str(dependency_id))
             if upstream is None or upstream.get("state") != "completed":
                 return False
         parent_id = unit.get("parent_id")
         if parent_id:
-            parent = self.store.get_work_unit(str(parent_id))
+            parent = self._unit(str(parent_id)) if self.work_graph is not None else self.store.get_work_unit(str(parent_id))
             if parent is None or parent.get("state") in {"cancelled", "failed"}:
                 return False
         return True
 
     def ready_units(self) -> list[dict[str, Any]]:
         units = self._units()
-        dependencies = {str(unit["id"]): tuple(str(item["depends_on_work_unit_id"]) for item in (self.store.get_work_unit(str(unit["id"])) or {}).get("dependencies", ())) for unit in units}
+        dependencies = {
+            str(unit["id"]): tuple(
+                str(item.get("depends_on_work_unit_id") if isinstance(item, Mapping) else item)
+                for item in unit.get("dependencies", ())
+            )
+            for unit in units
+        }
         if detect_cycles((str(unit["id"]) for unit in units), dependencies):
             return []
-        ready = [self.store.get_work_unit(str(unit["id"])) or unit for unit in units if str(unit["state"]) in {"proposed", "ready", "blocked"} and self._dependencies_ready(self.store.get_work_unit(str(unit["id"])) or unit)]
+        ready = [
+            unit
+            for unit in units
+            if str(unit["state"]) in {"proposed", "ready", "blocked"}
+            and self._dependencies_ready(unit)
+        ]
+        if self.work_graph is not None:
+            expanded = {str(unit["parent_id"]) for unit in units if unit.get("parent_id")}
+            ready = [unit for unit in ready if str(unit["id"]) not in expanded]
         return ready
 
     def _default_action(self, unit: Mapping[str, Any], allocation: Mapping[str, Any]) -> HostAction:
@@ -132,7 +173,11 @@ class LocalScheduler:
             "schema_version": "1.0",
             "protocol": "work-unit-envelope/v1",
             "message_id": "message-" + stable_digest(key),
-            "run_ref": f"run://{self._task_run_id()}",
+            "run_ref": (
+                f"run://{run_id}"
+                if (run_id := self._task_run_id()) is not None
+                else None
+            ),
             "task_ref": f"task://{self.task_id}",
             "work_unit_id": unit_id,
             "parent_work_unit_id": str(unit["parent_id"]) if unit.get("parent_id") else self.task_id,
@@ -168,9 +213,11 @@ class LocalScheduler:
             payload={"work_unit_envelope": envelope, "resource_receipt": allocation.get("receipt")},
         )
 
-    def _task_run_id(self) -> str:
+    def _task_run_id(self) -> str | None:
         task = self.store.get_task(self.task_id)
         if task is None:
+            if self.work_graph is not None:
+                return None
             raise KeyError(self.task_id)
         return str(task["run_id"])
 
@@ -187,9 +234,36 @@ class LocalScheduler:
         )
         return self.store._fetchone("SELECT * FROM work_unit_attempts WHERE id = ?", (attempt_id,)) or {"id": attempt_id, "dispatch_key": key}
 
-    def step(self) -> list[LocalAction]:
+    def _dispatch_compat_host(self, action: HostAction) -> None:
+        """Forward a compatibility action without ingesting host observations."""
+
+        if self.host is None:
+            return
+        spawn = getattr(self.host, "spawn", None)
+        if callable(spawn):
+            spawn(action.payload.get("work_unit_envelope", action.to_dict()))
+
+    def step(self, capacity: int | None = None) -> list[LocalAction]:
+        if self.work_graph is not None:
+            ready = filter_ownership_conflicts(self.ready_units())
+            if capacity is not None:
+                if capacity < 0:
+                    raise ValueError("capacity must be non-negative")
+                ready = ready[:capacity]
+            allocations = self.resource_broker.allocate_lane_slots(self.task_id, ready)
+            selected: list[LocalAction] = []
+            for unit, allocation in zip(ready, allocations):
+                action = self.action_factory(unit, allocation.to_dict())
+                self._dispatch_compat_host(action)
+                selected.append(LocalAction(str(unit["id"]), action, allocation.to_dict(), "", ""))
+            return selected
+
         self.recovery.expire()
         ready = filter_ownership_conflicts(self.ready_units(), self.store._fetchall("SELECT * FROM leases WHERE state = 'active' AND scope_type = 'work_unit'"))
+        if capacity is not None:
+            if capacity < 0:
+                raise ValueError("capacity must be non-negative")
+            ready = ready[:capacity]
         allocations = self.resource_broker.allocate_lane_slots(self.task_id, ready)
         selected: list[LocalAction] = []
         for unit, allocation in zip(ready, allocations):
@@ -261,10 +335,84 @@ class LocalScheduler:
 
     ready_work_units = ready_units
 
+    def correct(
+        self,
+        work_unit_id: str,
+        *,
+        expected_contract_revision: int | None = None,
+        issue: str,
+        required_change: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a same-lane correction envelope without replacing work."""
+
+        self._unit(str(work_unit_id))
+        return {
+            "type": "Correction",
+            "target": str(work_unit_id),
+            "task_id": self.task_id,
+            "scope": "same-lane",
+            "expected_contract_revision": expected_contract_revision,
+            "issue": str(issue),
+            "required_change": str(required_change or issue),
+            "idempotency_key": "intent:correction:" + uuid.uuid4().hex[:20],
+            "replacement": False,
+            "new_work_unit_id": str(work_unit_id),
+        }
+
+    def request_promotion(
+        self,
+        work_unit_id: str,
+        *,
+        reason: str,
+        requested_ownership: Sequence[str] = (),
+        requested_scope: Sequence[str] = (),
+        requested_authority: Sequence[str] = (),
+        proposed_outcome: str | None = None,
+        ownership: Sequence[str] | None = None,
+        dependencies: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Return an explicit promotion request; do not promote locally."""
+
+        self._unit(str(work_unit_id))
+        request = {
+            "type": "PromotionRequest",
+            "request_id": "promotion-" + uuid.uuid4().hex[:16],
+            "from_task": self.task_id,
+            "from_work_unit": str(work_unit_id),
+            "proposed_outcome": proposed_outcome,
+            "reason": str(reason),
+            "requested_scope": list(map(str, requested_scope)),
+            "requested_authority": list(map(str, requested_authority)),
+            "requested_ownership": list(map(str, ownership if ownership is not None else requested_ownership)),
+            "dependencies": list(map(str, dependencies)),
+            "user_decision_required": False,
+        }
+        self._promotion_requests.append(request)
+        return request
+
+    def synthesize(self, *, done_when: Sequence[str] = ()) -> dict[str, Any]:
+        """Summarize local work and retain promotion requests as boundary records."""
+
+        units = self._units()
+        terminal = {"completed", "failed", "cancelled", "blocked"}
+        status = "completed" if units and all(str(unit["state"]) in terminal for unit in units) else "verifying"
+        return {
+            "status": status,
+            "task_id": self.task_id,
+            "done_when": list(map(str, done_when)),
+            "promotion_requests": ["PromotionRequest" for _ in self._promotion_requests],
+        }
+
     def graph(self) -> dict[str, Any]:
         units = self._units()
-        deps = {str(unit["id"]): [str(item["depends_on_work_unit_id"]) for item in (self.store.get_work_unit(str(unit["id"])) or {}).get("dependencies", ())] for unit in units}
-        return {"task_id": self.task_id, "work_units": [self.store.get_work_unit(str(item["id"])) or item for item in units], "dependencies": deps, "cycle": list(detect_cycles(deps, deps))}
+        deps = {
+            str(unit["id"]): [
+                str(item.get("depends_on_work_unit_id") if isinstance(item, Mapping) else item)
+                for item in unit.get("dependencies", ())
+            ]
+            for unit in units
+        }
+        return {"task_id": self.task_id, "work_units": units, "dependencies": deps, "cycle": list(detect_cycles(deps, deps))}
 
 
 def _ownership(unit: Mapping[str, Any]) -> tuple[str, ...]:

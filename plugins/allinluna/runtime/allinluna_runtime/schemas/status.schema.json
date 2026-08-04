@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/status.schema.json",
+  "title": "All in Luna vNext Status Projection",
+  "description": "Human-readable projection exported from runtime.db. It is never the write authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "protocol",
+    "run_ref",
+    "projection_source",
+    "projection_revision",
+    "generated_at",
+    "status",
+    "summary",
+    "tasks",
+    "work_units",
+    "latest_signal_seq",
+    "blockers"
+  ],
+  "properties": {
+    "kind": {"const": "status"},
+    "schema_version": {"const": "1.0"},
+    "protocol": {"const": "status/v1"},
+    "run_ref": {"$ref": "#/$defs/run_ref"},
+    "projection_source": {"const": "runtime.db"},
+    "projection_revision": {"type": "integer", "minimum": 1},
+    "generated_at": {"$ref": "#/$defs/timestamp"},
+    "status": {"enum": ["created", "active", "paused", "blocked", "completed", "cancelled", "aborted"]},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "tasks": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/task_status"}
+    },
+    "work_units": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/work_unit_status"}
+    },
+    "latest_signal_seq": {"type": "integer", "minimum": 0},
+    "blockers": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/blocker"}
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/next_action"}
+    },
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_ref": {
+      "type": "string",
+      "pattern": "^run://[^\\s]+$"
+    },
+    "task_ref": {
+      "type": "string",
+      "pattern": "^task://[^\\s]+$"
+    },
+    "work_unit_ref": {
+      "type": "string",
+      "pattern": "^work-unit://[^\\s]+$"
+    },
+    "contract_ref": {
+      "type": "string",
+      "pattern": "^contract://[^\\s]+$"
+    },
+    "lane_attempt_ref": {
+      "type": "string",
+      "pattern": "^lane-attempt://[^\\s]+$"
+    },
+    "receipt_ref": {
+      "type": "string",
+      "pattern": "^receipt://[^\\s]+$"
+    },
+    "task_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_ref", "status", "contract_ref"],
+      "properties": {
+        "task_ref": {"$ref": "#/$defs/task_ref"},
+        "status": {
+          "enum": ["proposed", "ready", "dispatching", "active", "waiting", "verifying", "blocked", "completed", "superseded", "cancelled"]
+        },
+        "contract_ref": {"$ref": "#/$defs/contract_ref"},
+        "lane_attempt_ref": {"anyOf": [{"$ref": "#/$defs/lane_attempt_ref"}, {"type": "null"}]},
+        "requested_model": {"type": ["string", "null"], "minLength": 1},
+        "actual_model": {"type": ["string", "null"], "minLength": 1},
+        "actual_model_state": {"enum": ["resolved", "unresolved"]},
+        "receipt_ref": {"anyOf": [{"$ref": "#/$defs/receipt_ref"}, {"type": "null"}]},
+        "active_children": {"type": "integer", "minimum": 0},
+        "contract_revision": {"type": "integer", "minimum": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["actual_model_state"],
+            "properties": {"actual_model_state": {"const": "resolved"}}
+          },
+          "then": {
+            "required": ["actual_model"],
+            "properties": {"actual_model": {"type": "string", "minLength": 1}}
+          }
+        },
+        {
+          "if": {
+            "required": ["actual_model_state"],
+            "properties": {"actual_model_state": {"const": "unresolved"}}
+          },
+          "then": {
+            "properties": {"actual_model": {"type": "null"}}
+          }
+        }
+      ]
+    },
+    "work_unit_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_unit_ref", "status"],
+      "properties": {
+        "work_unit_ref": {"$ref": "#/$defs/work_unit_ref"},
+        "status": {"enum": ["proposed", "ready", "delegated", "active", "blocked", "completed", "failed", "cancelled"]},
+        "parent_work_unit_ref": {"anyOf": [{"$ref": "#/$defs/work_unit_ref"}, {"type": "null"}]},
+        "active_children": {"type": "integer", "minimum": 0},
+        "latest_artifact_ref": {"type": "string", "pattern": "^(artifact|git|file|connector|sha256):[^\\s]+$"}
+      }
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{1,63}$"},
+        "message": {"type": "string", "minLength": 1},
+        "owner_scope": {"type": "string", "minLength": 1},
+        "recoverable": {"type": "boolean"}
+      }
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "kind", "idempotency_key", "expected_receipt"],
+      "properties": {
+        "action_id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["create-top-level-task", "send-message", "wait", "read", "cancel", "ingest-receipt", "direct-execute"]},
+        "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,256}$"},
+        "expected_receipt": {"const": "host-receipt/v1"},
+        "tool": {"type": "string", "minLength": 1},
+        "arguments": {"type": "object", "additionalProperties": true}
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/pack-manifest.schema.json",
+  "title": "All in Luna vNext Workflow Pack Manifest",
+  "description": "Discovery and compatibility contract for a WorkflowPack. Pack data is not Core state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "protocol",
+    "pack_id",
+    "version",
+    "api_version",
+    "display_name",
+    "core_compatibility",
+    "hooks",
+    "contracts",
+    "store_access",
+    "capabilities",
+    "external_action_policy",
+    "created_at"
+  ],
+  "properties": {
+    "kind": {"const": "pack-manifest"},
+    "schema_version": {"const": "1.0"},
+    "protocol": {"const": "pack-manifest/v1"},
+    "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$"},
+    "version": {"$ref": "#/$defs/semver"},
+    "api_version": {"type": "integer", "minimum": 1},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "core_compatibility": {"$ref": "#/$defs/compatibility"},
+    "hooks": {"$ref": "#/$defs/hooks"},
+    "contracts": {"$ref": "#/$defs/contracts"},
+    "store_access": {"const": "core-api-only"},
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/capability"}
+    },
+    "external_action_policy": {"enum": ["ask", "deny", "allow"]},
+    "dependencies": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/dependency"}
+    },
+    "config_schema_ref": {"$ref": "#/$defs/schema_ref"},
+    "source": {"$ref": "#/$defs/source"},
+    "metadata": {"type": "object", "additionalProperties": true},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schema_ref": {
+      "type": "string",
+      "pattern": "^https?://[^\\s]+$"
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": {"$ref": "#/$defs/semver"},
+        "max": {"$ref": "#/$defs/semver"}
+      }
+    },
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "input_schema_ref", "output_schema_ref"],
+      "properties": {
+        "entrypoint": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.:-]*$"},
+        "input_schema_ref": {"$ref": "#/$defs/schema_ref"},
+        "output_schema_ref": {"$ref": "#/$defs/schema_ref"},
+        "optional": {"type": "boolean"}
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compile_goal", "enrich_context", "verifiers", "compose_result"],
+      "properties": {
+        "compile_goal": {"$ref": "#/$defs/hook"},
+        "enrich_context": {"$ref": "#/$defs/hook"},
+        "verifiers": {"$ref": "#/$defs/hook"},
+        "compose_result": {"$ref": "#/$defs/hook"}
+      }
+    },
+    "contract_ref": {
+      "type": "string",
+      "pattern": "^(https?://|contract://)[^\\s]+$"
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["imports", "exports"],
+      "properties": {
+        "imports": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/contract_ref"}
+        },
+        "exports": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/contract_ref"}
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "required"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{1,127}$"},
+        "kind": {"enum": ["tool", "skill", "plugin", "mcp", "host", "workspace"]},
+        "required": {"type": "boolean"},
+        "permissions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pack_ref", "version_range"],
+      "properties": {
+        "pack_ref": {"type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$"},
+        "version_range": {"type": "string", "minLength": 1}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": {"enum": ["repository", "artifact", "builtin"]},
+        "ref": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

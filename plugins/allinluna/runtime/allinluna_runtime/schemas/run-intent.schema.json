@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/run-intent.schema.json",
+  "title": "All in Luna vNext RunIntent",
+  "description": "Conversation or Pack input for compiling a Run. Runtime state is not accepted here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "protocol",
+    "intent_id",
+    "goal",
+    "done_when",
+    "repository",
+    "authorization_intent",
+    "resource_envelope",
+    "pack",
+    "created_at"
+  ],
+  "properties": {
+    "kind": {"const": "run-intent"},
+    "schema_version": {"const": "1.0"},
+    "protocol": {"const": "run-intent/v1"},
+    "intent_id": {"$ref": "#/$defs/identifier"},
+    "goal": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "done_when": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4000}
+    },
+    "repository": {"$ref": "#/$defs/repository"},
+    "authorization_intent": {"$ref": "#/$defs/authorization"},
+    "resource_envelope": {"$ref": "#/$defs/resource_envelope"},
+    "pack": {"$ref": "#/$defs/pack_ref"},
+    "constraints": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "source_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/ref"}
+    },
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^(run|task|work-unit|lane-attempt|contract|context|snapshot|artifact|receipt|host|capability|policy|decision|permission|git|file|connector)://[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*//).+$"
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "roots", "protected_paths"],
+      "properties": {
+        "mode": {
+          "enum": ["existing", "greenfield", "multi-repository", "projectless"]
+        },
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "git", "dirty_state"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "git": {"type": "boolean"},
+              "branch": {"type": ["string", "null"], "minLength": 1},
+              "head": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{7,64}$"},
+              "dirty_state": {"enum": ["clean", "dirty", "unknown"]}
+            }
+          }
+        },
+        "protected_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/path"}
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_writes",
+        "git_operations",
+        "destructive_operations",
+        "live_external_mutation",
+        "publication"
+      ],
+      "properties": {
+        "implementation_writes": {"type": "boolean"},
+        "git_operations": {"type": "boolean"},
+        "destructive_operations": {"type": "boolean"},
+        "live_external_mutation": {"type": "boolean"},
+        "publication": {"type": "boolean"},
+        "permission_intent_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/ref"}
+        }
+      }
+    },
+    "resource_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "top_level_slots",
+        "total_subagent_slots",
+        "subagent_slots_per_lane",
+        "model_policy",
+        "reasoning_policy",
+        "external_action_policy"
+      ],
+      "properties": {
+        "top_level_slots": {"$ref": "#/$defs/auto_or_positive_integer"},
+        "total_subagent_slots": {"$ref": "#/$defs/auto_or_nonnegative_integer"},
+        "subagent_slots_per_lane": {"$ref": "#/$defs/auto_or_nonnegative_integer"},
+        "model_policy": {"enum": ["auto", "explicit"]},
+        "model": {"type": ["string", "null"], "minLength": 1},
+        "reasoning_policy": {"enum": ["auto", "explicit"]},
+        "reasoning": {"type": ["string", "null"], "minLength": 1},
+        "time_budget": {"type": ["integer", "null"], "minimum": 0},
+        "token_or_credit_budget": {"type": ["integer", "null"], "minimum": 0},
+        "external_action_policy": {"enum": ["ask", "deny", "allow"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"model_policy": {"const": "explicit"}}},
+          "then": {"required": ["model"]}
+        },
+        {
+          "if": {"properties": {"reasoning_policy": {"const": "explicit"}}},
+          "then": {"required": ["reasoning"]}
+        }
+      ]
+    },
+    "auto_or_positive_integer": {
+      "anyOf": [
+        {"const": "auto"},
+        {"type": "integer", "minimum": 1}
+      ]
+    },
+    "auto_or_nonnegative_integer": {
+      "anyOf": [
+        {"const": "auto"},
+        {"type": "integer", "minimum": 0}
+      ]
+    },
+    "pack_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+        "config": {"type": "object", "additionalProperties": true}
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

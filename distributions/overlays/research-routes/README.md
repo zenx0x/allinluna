@@ -12,13 +12,7 @@ Research Routes 是一个独立的 Codex 研究发行版，不是跳转页，也
 
 ## 最短安装与使用
 
-```powershell
-python scripts/build_distributions.py --output dist
-python scripts/validate_distributions.py
-python scripts/validate_installations.py
-```
-
-安装 `dist/research-routes` 作为本地 Codex 插件；它使用独立的 `research-routes` 名称，可与 `allinluna` 同时安装。
+本仓库根目录本身就是可安装的 Research Routes 插件根目录：在 Codex Plugins 中选择从本地路径安装并选择此目录。无需在发行仓库再次运行源仓库构建器。插件入口位于 `skills/research-routes*`，插件清单是 `.codex-plugin/plugin.json`；共享契约位于 `shared/`。
 
 ## 科研边界
 
@@ -30,4 +24,4 @@ terrain map 不是 experiment authorization、implementation order、HumanDecisi
 - 保留相互矛盾的结果和失败区间，避免只留下正向结论。
 - 在实现前选择成本可控、可回滚、能区分假设的下一次 probe。
 
-高级契约见 `plugins/research-routes/skills/`、`distributions/distribution-manifest.json` 和 `scripts/validate_route_packet.py`。
+高级契约见 `skills/research-routes*/`、`shared/`、`.codex-plugin/plugin.json` 和根目录 `LICENSE`。

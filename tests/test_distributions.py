@@ -93,6 +93,35 @@ class DistributionTests(unittest.TestCase):
             ]
             self.assertEqual(garbage, [])
 
+    def test_release_readmes_use_real_package_paths_and_license_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            forbidden = (
+                "scripts/build_distributions.py",
+                "scripts/validate_distributions.py",
+                "scripts/validate_installations.py",
+                "plugins/research-routes/",
+                "scripts/validate_route_packet.py",
+            )
+            for distribution in ("all-in-luna", "research-routes"):
+                artifact = output / distribution
+                self.assertEqual((artifact / "LICENSE").read_bytes(), (ROOT / "LICENSE").read_bytes())
+            research = output / "research-routes"
+            for name in ("README.md", "README.en.md"):
+                readme = (research / name).read_text(encoding="utf-8")
+                self.assertTrue(readme)
+                self.assertFalse(any(path in readme for path in forbidden), name)
+            self.assertIn("skills/research-routes", (research / "README.en.md").read_text(encoding="utf-8"))
+            self.assertIn("shared/", (research / "README.en.md").read_text(encoding="utf-8"))
+            self.assertTrue((research / ".codex-plugin/plugin.json").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

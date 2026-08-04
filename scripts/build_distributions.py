@@ -103,6 +103,7 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         copy_tree(overlay_plugin / "skills", artifact / "skills")
     copy_tree(root / "tests", artifact / "tests")
     copy_tree(root / "evals", artifact / "evals")
+    copy_tree(root / "LICENSE", artifact / "LICENSE")
 
     overlay = root / spec["overlay"]
     if not overlay.is_dir():

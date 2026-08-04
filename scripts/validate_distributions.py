@@ -11,6 +11,15 @@ from pathlib import Path
 from build_distributions import ROOT, build, expand_sources, read_json, sha256, source_provenance
 
 
+SOURCE_ONLY_README_PATHS = (
+    "scripts/build_distributions.py",
+    "scripts/validate_distributions.py",
+    "scripts/validate_installations.py",
+    "plugins/research-routes/",
+    "scripts/validate_route_packet.py",
+)
+
+
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     manifest = read_json(root / "distributions" / "distribution-manifest.json")
     errors: list[str] = []
@@ -30,7 +39,9 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             built = build(root, Path(temp) / "built")
         inventories: list[dict] = []
         for artifact, spec in zip(built, specs, strict=True):
-            required = [artifact / ".codex-plugin/plugin.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json"]
+            required = [artifact / ".codex-plugin/plugin.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
+            if spec["id"] == "research-routes":
+                required.extend([artifact / "README.md", artifact / "README.en.md"])
             for path in required:
                 if not path.is_file():
                     errors.append(f"{spec['id']} missing {path.relative_to(artifact)}")
@@ -42,6 +53,14 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             provenance = read_json(artifact / ".source-provenance.json")
             if provenance != expected_provenance:
                 errors.append(f"{spec['id']} source provenance does not match current HEAD")
+            if (artifact / "LICENSE").read_bytes() != (root / "LICENSE").read_bytes():
+                errors.append(f"{spec['id']} LICENSE differs from source LICENSE")
+            if spec["id"] == "research-routes":
+                for readme_name in ("README.md", "README.en.md"):
+                    readme = (artifact / readme_name).read_text(encoding="utf-8")
+                    for source_only_path in SOURCE_ONLY_README_PATHS:
+                        if source_only_path in readme:
+                            errors.append(f"{spec['id']} {readme_name} contains source-only path {source_only_path}")
             inventories.append(read_json(artifact / "shared-files.json"))
         if len(inventories) == 2 and inventories[0] != inventories[1]:
             errors.append("shared file inventory differs between distributions")

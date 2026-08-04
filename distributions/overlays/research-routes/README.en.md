@@ -12,13 +12,7 @@ Research Routes is an independent Codex research distribution, not a jump page a
 
 ## Shortest install and use
 
-```powershell
-python scripts/build_distributions.py --output dist
-python scripts/validate_distributions.py
-python scripts/validate_installations.py
-```
-
-Install `dist/research-routes` as a local Codex plugin. It uses the distinct `research-routes` name and can coexist with `allinluna`.
+The repository root itself is the installable Research Routes plugin root: in Codex Plugins, choose installation from a local path and select this directory. Do not run the source-repository builder again inside the distribution repository. Plugin entry skills live under `skills/research-routes*`, the plugin manifest is `.codex-plugin/plugin.json`, and shared contracts live under `shared/`.
 
 ## Research boundary
 
@@ -30,4 +24,4 @@ A terrain map is not experiment authorization, implementation order, HumanDecisi
 - Preserve contradictory results and failure regimes instead of retaining only positive conclusions.
 - Choose a low-cost, reversible probe that can distinguish competing assumptions before implementation.
 
-Advanced contracts live under `plugins/research-routes/skills/`, `distributions/distribution-manifest.json`, and `scripts/validate_route_packet.py`.
+Advanced contracts live under `skills/research-routes*/`, `shared/`, `.codex-plugin/plugin.json`, and the root `LICENSE`.

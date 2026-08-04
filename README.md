@@ -1,97 +1,74 @@
 # All in Luna
 
-[简体中文（默认）](README.md) | [English](README.en.md)
+[English](README.en.md)
 
-**给 All in Luna 一句目标，得到的是一条真正执行到结果的 Codex 工作流，而不是一轮更长的方案讨论。**
+All in Luna 是一个分层执行运行时：把用户目标编译为全局 Task Graph，由 Global Coordinator 释放 Task Lanes；每个 Lane 递归调度有边界的 WorkUnits，并以 typed contract、artifact、receipt 和 handoff 持续推进到结果。
 
-All in Luna 把用户目标交给独立 Coordinator，再按依赖波次安排必要的 Owner。普通用户不需要先学习 schema、run-state 或多层治理。
+## 用户入口
 
-## 普通用户固定路径
+只有一个公开 Skill：`plugins/allinluna/skills/allinluna/SKILL.md`。用户可以直接提供：
 
-```text
-一句需求/已有计划 → 一次资源卡确认 → Coordinator → dependency waves → result
-```
+- idea / 一句话目标；
+- existing plan；
+- active run；
+- Research Routes route packet。
 
-1. **一句需求/已有计划**：直接说想得到什么，或提供已有计划、第三方计划、仓库/本地路径和已有上下文。
-2. **一次资源卡确认**：只确认一次交付模式、速度/模型偏好、并发、Coordinator，以及用户提供的 skills/plugins/MCP bindings。
-3. **Coordinator**：独立 Coordinator 接管依赖、Owner 派发、恢复和完成证据；Sponsor 保留方向与人的选择。
-4. **dependency waves**：Coordinator 释放依赖已满足且文件无冲突的 Owner 波次。
-5. **result**：返回完整范围、实际检查、工件/提交证据和剩余 blocker。
+Skill 会编译 `RunIntent` 与 `TaskContracts`，选择 Workflow Pack，调用 vNext runtime/CLI；用户不需要先学习内部 schema 或调度状态。
 
-### 三种交付模式
-
-| 模式 | 默认路径 | 治理边界 |
-| --- | --- | --- |
-| `quick` | Coordinator + 必要 Owner | 默认适合小而清楚的工作；默认不创建 Integration/Acceptance |
-| `standard` | Coordinator + 多个独立 Owner | 依赖图确实需要并行时使用；只有共享契约、真实跨 Owner 冲突或计划要求才做一次 Integration |
-| `full` | Coordinator + Owners + 风险所需路径 | 只用于高风险、大型跨契约或科研权威任务；显式提高证据边界，lean runtime 仍不物化 Acceptance/CounterPilot lane |
-
-模式改变拓扑和等待时间，不会缩小完成标准。All in Luna **不会默认多层治理、不会频繁打断、不会每次 real canary**。一次资源卡足够；只有实际风险、缺失授权或必要人的选择才会再次停下来。
-
-## 默认执行拓扑（重要）
-
-Sponsor 保持方向，独立 Coordinator 负责依赖波次，再派发侧边栏可见的顶层 Codex 任务 Owner。`quick` 只创建必要 Owner；`standard` 在依赖图有价值时并行多个 Owner；`full` 显式提高高风险、大型跨契约或科研权威任务的证据边界，lean runtime 仍不物化额外 Acceptance/CounterPilot lane。
-
-## 保留的兼容路径
-
-- 已有完整计划使用 `parallel-only`：保留原方向和完成标准，只规范安全执行所需的依赖、所有权、资源、恢复和派发。
-- `fast` 与 `ultra-fast` 仍然可用来提高并发目标；`all-luna` 与 `mad-luna` 仍然保留 Luna-family hard lock。它们是资源/速度选择，不会自动增加治理层。
-- 用户提供的 skills、plugins 和 MCP bindings 保持在资源卡与运行证据中。`requested`、`resolved`、`actual` 分开记录；主机没有 receipt 时显示 `unavailable`，不会假装调用成功。
-- Goal、push、发布、部署、凭据和 live external writes 均需单独授权，默认不会发生。
-
-## 资源模式（按需）
-
-以下 profile 仍可在资源卡中选择；它们调整分配、模型或速度，不改变完成标准，也不会单独添加治理层：`premium`、`balanced`、`economy`、`speed`、`fast`、`ultra-fast`、`all-luna`、`mad-luna`、`custom`。
-
-## 结果如何推进
-
-Coordinator 按 dependency waves 释放冲突隔离的 Owner。每个 Owner 有独占范围、自包含 brief、worktree/提交身份和定向检查；某一波阻塞时，不相关波次继续。完成不是首个切片、一次 dispatch、一个 commit 或一个 smoke test，而是用户授权范围真正闭环。
-
-`quick` 通常以 Owner 检查结束；`standard` 在确有共享结果时最多做一次机械 Integration；`full` 是显式风险/证据升级，不会让 lean runtime 物化额外治理 lane。产品/科研语义缺陷回到原 Owner。
-
-## Research Routes 的关系
-
-Research Routes 负责路线中立的 Claims、Evidence、unknowns、矛盾、failure regimes 和可逆 probe；它不把 terrain map 偷换成 experiment authorization、implementation order、HumanDecision 或 canonical state。准备进入产品交付时，把有边界的证据包交给 All in Luna，再走同一条一次资源卡确认和依赖波次路径。
-
-## 首次使用证据（按需）
-
-普通执行不要求每次 real canary。需要核验真实主机时，再查看 [`docs/first-use-protocol.md`](docs/first-use-protocol.md)：receipt 会区分 `requested`、`resolved`、`actual`；CI 只报告 `FIXTURE_PASS`，完整真实证据才可能是 `REAL_PASS`；缺失证据为 `BLOCKED`/`UNVERIFIED`，Integration 边界为 `mechanical-only`。
-
-## 最短入口示例
-
-只有需求时：
+## 执行模型
 
 ```text
-使用 All in Luna 完整实现这个目标：
-[一句目标、用户、约束和完成定义]
-请给我一次资源卡确认；确认后由 Coordinator 按依赖波次执行到 result。
+Conversation → Global Coordinator → Task Lanes → WorkUnits → tools/skills/plugins/MCP
 ```
 
-已有计划时：
+Coordinator 只维护跨 Lane 依赖、contract、资源与完成状态。Lane 拥有局部 WorkGraph、local scheduler、context slice、subagent receipts、局部综合和 handoff。子 WorkUnit 的 scope、authority、ownership、resource 只能收窄；跨 Lane 工作走 promotion request。
+
+## Workflow Packs
+
+- `delivery`：真实软件交付编译器，支持可配置 TaskGraph templates、contract expansion、done_when、handoff、promotion 与资源默认值。
+- `gsd`：可执行的 clarify → specify → decompose → implement → verify → integrate；支持动态 expansion、bounded lanes/work units 和失败恢复。
+- `research-routes-bridge`：路线中立地把 Claims、Evidence、unknowns、矛盾、failure regimes、HumanDecision 和 experiment authorization 编译为 RunIntent/TaskContracts；不会把研究输入伪装成实现授权或 canonical state。
+
+Pack 只能经公开 Core API 访问 Store/Context/Artifact/Host；manifest、entrypoint、capability、permission 和版本兼容性会在 registry loader 中验证。
+
+## 资源与权限
+
+语义工作使用 Luna-high。requested、resolved、actual 分开记录；actual host receipt 不可得时为 `unresolved`，不伪造成功或 fallback。明确 allowlist 的机械 README/措辞/格式/术语同步可交给 `gpt-5.3-codex-spark`，但必须有单独 receipt，并由 Luna owner 最终复核；Spark 不参与语义设计、manifest 行为、compat、packs、runtime 或合同。
+
+权限在动作边界 JIT 请求：credentials、push、deploy、publish、destructive work、live external mutation 默认不发生，只有到达动作并获得明确授权后才可继续。
+
+## CLI、状态与恢复
 
 ```text
-使用 All in Luna 的 parallel-only 执行这个已有计划：
-计划路径：[path 或粘贴内容]
-保留原方向和完成标准，只做一次资源确认，然后由 Coordinator 持续执行到结果。
+allinluna start --goal "..."
+allinluna status RUN_ID
+allinluna next-actions RUN_ID
+allinluna ingest-receipt RUN_ID RECEIPT.json
+allinluna pause RUN_ID
+allinluna resume RUN_ID
+allinluna retry RUN_ID --task TASK_ID
+allinluna cancel RUN_ID --task TASK_ID
+allinluna reconcile RUN_ID
 ```
 
-## 安装与按需深入
+runtime CLI 还提供 `set-policy`。legacy plan/run import 通过下方 read-only API 完成；恢复依据 SQLite state/journal、真实 host receipt、lease、Git/workspace identity 和 snapshot validity 重算 ready actions；不可恢复的问题返回 blocker，并保留 immutable artifacts。
 
-从 Codex Plugins 选择本地仓库根目录，或直接选择 `plugins/allinluna/`。构建双发行版：
+## Legacy import
 
-```powershell
-python scripts/build_distributions.py --output dist
-python scripts/validate_distributions.py
-python scripts/validate_installations.py
+`LegacyPlanImportAPI`、`LegacyRunStateImportAPI`、`LegacyResourceTranslator` 都是 read-only parse/validate/translate API：旧 plan/run-state 不回写，resource profiles 转成 `ResourceEnvelope`，loss、unknown、warnings 和 model evidence 都显式返回。没有 actual receipt 时 model evidence 保持 unresolved。
+
+## 安装与示例
+
+在 Codex Plugins 中选择 `plugins/allinluna/`。Python 入口示例：
+
+```python
+from allinluna_runtime.packs import SinglePublicSkillAPI
+
+compiled = SinglePublicSkillAPI().compile({
+    "goal": "Implement the requested software outcome",
+    "done_when": ["tests and changed-path evidence are available"],
+})
+print(compiled.task_graph.to_dict())
 ```
 
-普通用户可以停在本页。需要精确控制时再看：
-
-- [Conversation Intake](plugins/allinluna/skills/allinluna-intake/SKILL.md)：接收一句需求、上下文和已有计划；
-- [Launch Confirmation](plugins/allinluna/skills/allinluna-launch/SKILL.md)：生成唯一资源确认卡；
-- [Plan](plugins/allinluna/skills/allinluna-plan/SKILL.md)：把想法或不完整计划整理成可执行契约；
-- [Run](plugins/allinluna/skills/allinluna-run/SKILL.md)：短入口；深层规则从其 references 按需读取；
-- [First-use protocol](docs/first-use-protocol.md)：只读的真实 receipt/fixture 核验；
-- [Research Routes distribution](distributions/overlays/research-routes/README.md)：独立研究发行和边界。
-
-Apache License 2.0，详见 [`LICENSE`](LICENSE)。
+Apache License 2.0，详见 `LICENSE`。

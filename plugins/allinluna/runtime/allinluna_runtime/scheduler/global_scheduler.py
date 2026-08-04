@@ -15,6 +15,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ..resource import ResourceBroker, SlotAllocation
 from ..store import LeaseConflictError
 from ..adapters.host.base import HostAction, stable_digest
+from ..domain import ExportPort, TaskGraph, TaskState
 from .conflicts import critical_path_lengths, detect_cycles, filter_ownership_conflicts
 from .leases import LeaseRecoveryBehavior
 
@@ -67,6 +68,7 @@ class GlobalScheduler:
         self.last_decision: SchedulerDecision | None = None
         self.host = host
         self._compat_run_id: str | None = None
+        self._compat_graph: TaskGraph | None = None
         self._compat_exports: dict[str, set[str]] = {}
         self._compat_blocked: set[str] = set()
 
@@ -90,9 +92,26 @@ class GlobalScheduler:
         kind = str(condition.get("type", condition.get("condition", "completed")))
         if kind == "exports_available":
             required = set(map(str, condition.get("exports", ())))
-            available = self._compat_exports.get(str(upstream["id"]), set())
+            available = self._available_exports(str(upstream["id"]))
             return upstream["state"] in {"verifying", "completed"} and (not required or required.issubset(available))
         return upstream["state"] == "completed"
+
+    def _available_exports(self, task_id: str) -> set[str]:
+        """Read completed exports from the Store-backed contract projection."""
+
+        available = set(self._compat_exports.get(str(task_id), set()))
+        task = self.store.get_task(str(task_id))
+        if task is None:
+            return available
+        contract = self.store.get_contract(str(task["contract_id"]), int(task["contract_version"]))
+        for item in (contract or {}).get("exports", ()):
+            if isinstance(item, Mapping):
+                name = item.get("name")
+            else:
+                name = item
+            if name:
+                available.add(str(name))
+        return available
 
     def _graph(self, tasks: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Sequence[str]], tuple[str, ...]]:
         deps = {str(task["id"]): tuple(str(item["depends_on_task_id"]) for item in self._dependencies(task)) for task in tasks}
@@ -125,6 +144,146 @@ class GlobalScheduler:
             if self.store.get_run(self._compat_run_id) is None:
                 self.store.create_run(self._compat_run_id, "scheduler contract run", {}, f"contract://run/{self._compat_run_id}@1")
         return self._compat_run_id
+
+    @staticmethod
+    def _graph_dependency(dependency: Any) -> dict[str, Any]:
+        parent_id = str(dependency.task_ref).removeprefix("task://")
+        condition = {"type": str(getattr(dependency.condition, "value", dependency.condition))}
+        exports = tuple(str(item) for item in dependency.exports)
+        if exports:
+            condition["exports"] = list(exports)
+        return {"task_id": parent_id, "condition": condition}
+
+    def _sync_graph_exports(self, task_id: str, exports: Sequence[str]) -> None:
+        """Reflect Store-visible completion exports into the supplied domain graph."""
+
+        graph = self._compat_graph
+        if graph is None or str(graph.run_id) != str(self._compat_run_id):
+            return
+        task = graph.tasks.get(str(task_id))
+        if task is None:
+            return
+        contract = graph.contracts.get(str(task.contract_ref))
+        if contract is None:
+            return
+        known = {str(item.name) for item in contract.exports}
+        additions = [
+            ExportPort(name=name, kind="artifact", version=1, description=f"Completed export {name}")
+            for name in exports
+            if name not in known
+        ]
+        if additions:
+            object.__setattr__(contract, "exports", tuple(contract.exports) + tuple(additions))
+
+    def _sync_graph_state(self, task_id: str) -> None:
+        graph = self._compat_graph
+        if graph is None or str(graph.run_id) != str(self._compat_run_id):
+            return
+        task = graph.tasks.get(str(task_id))
+        stored = self.store.get_task(str(task_id))
+        if task is not None and stored is not None:
+            task.state = TaskState(str(stored["state"]))
+
+    def load_graph(self, graph: TaskGraph) -> TaskGraph:
+        """Load a validated domain graph into the existing Store facade.
+
+        The domain graph remains a caller-owned view.  SQLite remains the
+        scheduler authority for tasks, contracts, dependencies, ownership,
+        attempts, leases, and receipts.
+        """
+
+        if not isinstance(graph, TaskGraph):
+            raise TypeError("load_graph expects allinluna_runtime.domain.TaskGraph")
+        graph.validate()
+        canonical = graph.to_dict()
+        run_id = str(canonical["run_id"])
+        tasks = graph.tasks
+        contracts = graph.contracts
+        ownership = graph.ownership
+
+        if self.store.get_run(run_id) is None:
+            self.store.create_run(
+                run_id,
+                f"TaskGraph {run_id}",
+                {},
+                f"contract://run/{run_id}@1",
+            )
+
+        for contract_ref in sorted(contracts):
+            contract = contracts[contract_ref]
+            self.store.put_contract(contract.to_dict())
+
+        # Create all task nodes before adding edges so foreign-key enforcement
+        # does not depend on the graph's insertion order.
+        for task_id in sorted(tasks):
+            task = tasks[task_id]
+            contract = contracts[str(task.contract_ref)]
+            task_value = task.to_dict()
+            task_value.update(
+                {
+                    "id": str(task.id),
+                    "run_id": run_id,
+                    "outcome": str(task.outcome),
+                    "state": str(getattr(task.state, "value", task.state)),
+                    "priority": int(task.priority),
+                    "required": bool(task.required),
+                    "contract_ref": str(task.contract_ref),
+                    "contract": contract.to_dict(),
+                    "ownership": ownership[task_id].to_dict(),
+                    "dependencies": (),
+                }
+            )
+            stored = self.store.create_task(task_value, run_id=run_id)
+            if str(stored.get("run_id")) != run_id or str(stored.get("contract_id")) != str(task.contract_id):
+                raise ValueError(f"Store task identity disagrees for {task_id}")
+
+        with self.store.transaction():
+            for task_id in sorted(tasks):
+                task_ownership = ownership[task_id]
+                existing = self.store.get_task(task_id) or {}
+                existing_paths = {str(item.get("path")): item for item in existing.get("ownership", ())}
+                for path in task_ownership.paths:
+                    path_text = str(path)
+                    current = existing_paths.get(path_text)
+                    if current is not None and str(current.get("access")) != "write":
+                        raise ValueError(f"Store ownership disagrees for {task_id}:{path_text}")
+                    if current is None:
+                        self.store._execute(
+                            "INSERT INTO task_ownership (task_id, path, access, source) VALUES (?, ?, 'write', 'contract')",
+                            (task_id, path_text),
+                        )
+                existing_dependencies = {
+                    str(item["depends_on_task_id"]): item.get("condition") or {}
+                    for item in existing.get("dependencies", ())
+                }
+                for dependency in graph.dependencies.get(task_id, ()):
+                    row = self._graph_dependency(dependency)
+                    parent_id = str(row["task_id"])
+                    current = existing_dependencies.get(parent_id)
+                    if current is not None and current != row["condition"]:
+                        raise ValueError(f"Store dependency disagrees for {task_id}:{parent_id}")
+                    if current is None:
+                        self.store._execute(
+                            "INSERT INTO task_dependencies (task_id, depends_on_task_id, condition_json) VALUES (?, ?, ?)",
+                            (task_id, parent_id, json.dumps(row["condition"], sort_keys=True)),
+                        )
+
+        self._compat_run_id = run_id
+        self._compat_graph = graph
+        self._compat_blocked.clear()
+        for task_id in sorted(tasks):
+            self._sync_graph_state(task_id)
+            stored_task = self.store.get_task(task_id)
+            if stored_task is None:
+                continue
+            contract = self.store.get_contract(str(stored_task["contract_id"]), int(stored_task["contract_version"]))
+            stored_exports = tuple(
+                str(item.get("name")) if isinstance(item, Mapping) else str(item)
+                for item in (contract or {}).get("exports", ())
+                if (item.get("name") if isinstance(item, Mapping) else item)
+            )
+            self._sync_graph_exports(task_id, stored_exports)
+        return graph
 
     def add_task(self, task_id: str, *, priority: int = 0, ownership: Sequence[str] = (), lane_id: str | None = None, **kwargs: Any) -> dict[str, Any]:
         run_id = self._ensure_compat_run()
@@ -184,16 +343,44 @@ class GlobalScheduler:
 
     def complete(self, task_id: str, *, exports: Sequence[str] = ()) -> dict[str, Any]:
         task = self._task(task_id)
-        self._compat_exports.setdefault(task_id, set()).update(map(str, exports))
+        completed_exports = tuple(sorted({str(item) for item in exports}))
+        self._compat_exports.setdefault(task_id, set()).update(completed_exports)
         self._compat_blocked.discard(task_id)
         # The graph facade represents a deterministic fake host completion; it
         # does not manufacture a host receipt for the real engine path.
-        self.store._execute("UPDATE tasks SET state = 'completed', updated_at = ? WHERE id = ?", (_now(), task_id))
+        def finish() -> dict[str, Any]:
+            self.store._execute("UPDATE tasks SET state = 'completed', updated_at = ? WHERE id = ?", (_now(), task_id))
+            if completed_exports:
+                contract = self.store.get_contract(str(task["contract_id"]), int(task["contract_version"]))
+                existing_exports = list((contract or {}).get("exports", ()))
+                known = {
+                    str(item.get("name")) if isinstance(item, Mapping) else str(item)
+                    for item in existing_exports
+                }
+                existing_exports.extend(
+                    {
+                        "name": name,
+                        "kind": "artifact",
+                        "version": 1,
+                        "description": f"Completed export {name}",
+                    }
+                    for name in completed_exports
+                    if name not in known
+                )
+                self.store._execute(
+                    "UPDATE contracts SET exports_json = ? WHERE id = ? AND version = ?",
+                    (json.dumps(existing_exports, sort_keys=True, separators=(",", ":")), task["contract_id"], task["contract_version"]),
+                )
+            return self._task(task_id)
+
+        completed = self.store._write(finish)
+        self._sync_graph_exports(task_id, completed_exports)
+        self._sync_graph_state(task_id)
         self.resource_broker.release(task_id)
         lease = self.store._fetchone("SELECT id FROM leases WHERE scope_type = 'task' AND scope_id = ? AND state = 'active' ORDER BY acquired_at DESC LIMIT 1", (task_id,))
         if lease:
             self.store.release_lease(str(lease["id"]))
-        return self._task(task_id)
+        return completed
 
     def expire_lease(self, lease_id: str) -> dict[str, Any] | None:
         self.store._execute("UPDATE leases SET expires_at = '1970-01-01T00:00:00Z' WHERE id = ?", (lease_id,))

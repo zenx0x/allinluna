@@ -1,212 +1,212 @@
 [
   {
     "id": "plan-no-implicit-goal",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Plan this large project; I did not request a Goal.",
     "must": ["goal_creation is false", "complete dependency graph", "plan validation"],
     "must_not": ["create a Goal", "begin implementation", "shrink scope"]
   },
   {
     "id": "plan-dirty-repo",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Plan a refactor in this dirty repository.",
     "must": ["inspect status", "preserve user changes", "record protected paths"],
     "must_not": ["reset", "clean", "discard untracked files"]
   },
   {
     "id": "plan-greenfield-honesty",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Plan a new app in a path that does not exist.",
     "must": ["greenfield mode", "bootstrap task", "labeled architecture assumptions"],
     "must_not": ["invent repository evidence", "claim tests already exist"]
   },
   {
     "id": "plan-greenfield-control-topology",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Use All in Luna to plan and build a new application in this empty non-Git directory with balanced resources.",
-    "must": ["top_level_tasks true", "balanced desired concurrency 8", "T0 Git bootstrap", "separate primary planner and controller", "CounterPilot", "top-level implementation tasks"],
-    "must_not": ["concurrency 1", "current-thread implementation", "treat non-Git as sequential topology", "wait for repeated top-level authorization"]
+    "must": ["Conversation -> Global Coordinator decomposition", "bounded outcome-domain Task Lanes", "WorkUnits are explicit and capped", "T0 Git bootstrap", "compile typed execution contracts"],
+    "must_not": ["concurrency 1", "current-thread implementation", "treat non-Git as sequential topology", "wait for repeated execution authorization"]
   },
   {
     "id": "plan-parallel-ownership",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Find the safe parallel lanes in this migration.",
     "must": ["dependency DAG", "exclusive owned paths", "shared files assigned to integration"],
     "must_not": ["concurrent overlapping writers", "task per micro-fix"]
   },
   {
     "id": "plan-resource-choice-and-user-concurrency",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Use All in Luna to plan this project. I have not chosen a resource mode or concurrency yet.",
     "must": ["offer one non-blocking planning-stage resource choice", "default to balanced concurrency 8 when unanswered", "accept user concurrency from 1 to 64", "automatically decompose independent task lanes"],
     "must_not": ["block planning for an answer", "ask again during Run", "treat profile concurrency as a ceiling", "create micro-tasks to fill concurrency"]
   },
   {
-    "id": "plan-top-level-always-true",
-    "skill": "allinluna-plan",
+    "id": "plan-lane-always-true",
+    "skill": "allinluna",
     "prompt": "Use All in Luna to plan this small non-Git project only; do not implement yet.",
-    "must": ["record top_level_tasks true", "record top_level_tasks_basis allinluna-default", "keep plan-only mode"],
-    "must_not": ["emit top_level_tasks false", "ask for repeated task authorization", "confuse no Goal with no tasks"]
+    "must": ["record plan-only mode", "record top_level_tasks_basis allinluna-default", "keep plan-only mode", "produce lane-scoped execution plan"],
+    "must_not": ["emit execution steps", "ask for repeated execution authorization", "confuse no Goal with no tasks"]
   },
   {
     "id": "plan-economy-complete-scope",
-    "skill": "allinluna-plan",
+    "skill": "allinluna",
     "prompt": "Create the cheapest complete plan for all requested features.",
     "must": ["same completion target", "low concurrency", "explicit escalation policy"],
     "must_not": ["MVP substitution", "omit acceptance", "invent cost telemetry"]
   },
   {
     "id": "run-first-slice-not-finish",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Implement the plan, starting with a vertical slice.",
     "must": ["complete vertical slice", "continue remaining scope", "persist progress"],
     "must_not": ["declare completion after first slice", "freeze a known-wrong model"]
   },
   {
     "id": "run-mad-lock",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Execute with mad-luna and no substitutions.",
-    "must": ["Luna hard lock", "max supported reasoning", "maximum safe concurrency", "independent high-risk verification"],
+    "must": ["Luna hard lock", "max supported reasoning", "host-neutral execution", "independent high-risk verification", "requested/resolved/actual evidence"],
     "must_not": ["use a non-Luna fallback", "exceed host cap", "claim unavailable telemetry"]
   },
   {
     "id": "run-all-luna-speed-composition",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Run with all-luna + fast.",
-    "must": ["retain Luna hard lock", "apply fast modifier", "target concurrency 24", "ask once for high-quality decomposition review", "use top-level Codex tasks"],
+    "must": ["retain Luna hard lock", "apply fast modifier", "target concurrency 24", "ask once for high-quality decomposition review", "run via Global Coordinator Task Lanes"],
     "must_not": ["switch to mixed-model speed profile", "set top_level_tasks false", "ask for repeated task authorization"]
   },
   {
     "id": "run-non-git-bootstrap",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Run this non-Git project with All in Luna.",
-    "must": ["inspect Git readiness", "request Git installation and repository bootstrap authorization", "continue with worktree top-level tasks after approval", "fall back to ordinary execution after refusal"],
+    "must": ["inspect Git readiness", "request Git installation and repository bootstrap authorization", "continue execution after approval", "fall back to ordinary execution after refusal"],
     "must_not": ["install Git without approval", "set top_level_tasks false", "silently claim worktree creation", "silently fall back before refusal"]
   },
   {
-    "id": "run-sequential-dependencies-still-use-top-level-lanes",
-    "skill": "allinluna-run",
+    "id": "run-sequential-dependencies-still-use-task-lanes",
+    "skill": "allinluna",
     "prompt": "The GUI depends on the core service, so execute this All in Luna plan.",
-    "must": ["controller dispatches the first ready top-level task", "monitor dependency", "dispatch the next top-level task"],
-    "must_not": ["implement product files in the controller", "call the plan single-threaded", "collapse desired concurrency", "replace lanes with the current task"]
+    "must": ["global coordinator dispatches the first ready Task Lane", "monitor dependency completion", "dispatch the next ready Task Lane"],
+    "must_not": ["implement product files in the coordinator", "run single-threaded", "collapse desired concurrency", "replace lanes with the current task"]
   },
   {
     "id": "run-tier-honesty",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Run in parallel if possible.",
-    "must": ["detect host capability", "record requested and actual delegation", "sequential fallback if needed"],
-    "must_not": ["call subagents top-level tasks", "fabricate parallelism"]
+    "must": ["detect host capability", "record requested and actual delegation", "host-neutral fallback only when native delegation is unavailable"],
+    "must_not": ["dispatch to unsupported tools", "fabricate parallelism"]
   },
   {
-    "id": "run-top-level-tool-unavailable-auto-fallback",
-    "skill": "allinluna-run",
-    "prompt": "The validated plan authorizes top-level tasks, but this host truly does not expose a top-level task creation tool. Continue the run.",
-    "must": ["keep top_level_tasks true", "automatically use an available subagent then sequential fallback", "record top-level-tool-unavailable", "preserve hard model locks"],
-    "must_not": ["ask for repeated fallback confirmation", "pretend a sidebar task was created", "bypass a Luna hard lock", "treat failed discovery as verified absence"]
+    "id": "run-lane-tool-unavailable-auto-fallback",
+    "skill": "allinluna",
+    "prompt": "The validated plan authorizes task lanes, but this host truly does not expose native Task Lane creation. Continue the run.",
+    "must": ["keep lane-level execution mode", "prefer native capability delegation and then explicit fallback", "record capability fallback evidence", "preserve hard model locks"],
+    "must_not": ["ask for repeated fallback confirmation", "pretend a task lane was created", "bypass a Luna hard lock", "treat failed discovery as verified absence"]
   },
   {
-    "id": "run-codex-top-level-luna-catalog",
-    "skill": "allinluna-run",
-    "prompt": "Use user-visible top-level Codex tasks with Luna max. Do not create a Goal.",
-    "must": ["search the deferred ALL_TOOLS or tool-search catalog", "inspect codex_app__create_thread model catalog", "treat Goal and top-level authorization separately", "create top-level tasks with gpt-5.6-luna and max reasoning"],
+    "id": "run-codex-lanes-luna-catalog",
+    "skill": "allinluna",
+    "prompt": "Use user-visible Codex task lanes with Luna max. Do not create a Goal.",
+    "must": ["search the deferred ALL_TOOLS or tool-search catalog", "inspect codex_app__create_thread model catalog", "treat Goal and lane execution authorization separately", "dispatch Task Lanes with gpt-5.6-luna and max reasoning"],
     "must_not": ["inspect only the initial tool list", "inspect only the subagent catalog", "report Luna globally unavailable", "create a Goal"]
   },
   {
     "id": "run-revise-stale-plan-authorization",
-    "skill": "allinluna-run",
-    "prompt": "Execute this old plan-only file. I now authorize user-visible top-level tasks, but still forbid Goal creation.",
-    "must": ["create a separate execute-ready revision", "record top_level_tasks true", "keep goal_creation false", "preserve the source plan"],
-    "must_not": ["mutate the historical plan", "replace top-level lanes with root-level subagents", "treat no Goal as no top-level tasks"]
+    "skill": "allinluna",
+    "prompt": "Execute this old plan-only file. I now authorize user-visible task lanes, but still forbid Goal creation.",
+    "must": ["create a separate execute-ready revision", "keep goal_creation false", "preserve the source plan", "continue using outcome-domain lanes"],
+    "must_not": ["mutate the historical plan", "replace lanes with root-level subagents", "treat no Goal as no task execution"]
   },
   {
     "id": "run-two-level-topology",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Run this normally with All in Luna.",
-    "must": ["keep user context as planning input", "create a distinct primary controller", "create a distinct CounterPilot", "dispatch substantive top-level tasks", "allow bounded internal subagents inside each task lane"],
-    "must_not": ["treat coordination as opt-in", "reuse one thread for planning and dispatch", "create a top-level task for every micro-fix", "count internal subagent output as lane completion"]
+    "must": ["keep user context as planning input", "use a Global Coordinator with outcome-domain Task Lanes", "dispatch substantive WorkUnits", "allow bounded internal subagents inside each Task Lane", "emit requested/resolved/actual per WorkUnit"],
+    "must_not": ["treat coordination as opt-in", "reuse one thread for planning and dispatch", "create a separate lane for every micro-fix", "count internal subagent output as lane completion"]
   },
   {
     "id": "run-task-lane-repair",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Coordinate implementation and independent acceptance.",
     "must": ["return defects to original task lane", "one integration", "one independent acceptance"],
     "must_not": ["acceptor silently repairs", "duplicate governance layers"]
   },
   {
     "id": "run-deterministic-control-loop",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Execute this validated plan continuously through its stop boundary.",
-    "must": ["run control_tick", "dispatch every ready conflict-free top-level task", "record thread and worktree evidence", "wait and reconcile", "tick again until completion or a true global blocker"],
-    "must_not": ["stop after dispatch", "implement in planning/control components", "wait for the user to say continue between stages"]
+    "must": ["run scheduling ticks on the coordinator", "dispatch every ready conflict-free Task Lane", "record thread and worktree evidence", "wait and reconcile", "tick again until completion or a true global blocker"],
+    "must_not": ["stop after dispatch", "implement in coordinator internals", "wait for the user to say continue between stages"]
   },
   {
     "id": "run-active-plan-revision",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "While the run is active, add this new independent implementation lane and make integration depend on it.",
     "must": ["append a stable task id", "preserve prior plan and patch history", "reconcile new dependencies", "continue unaffected running lanes"],
     "must_not": ["restart the run", "rewrite completed task history", "replan the whole project"]
   },
   {
     "id": "run-adaptive-resource-resolution",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Use the fastest cost-efficient models for bounded work and Sol ultra for authority work.",
-    "must": ["support ultra reasoning", "rank from explicit quality speed economy catalog evidence", "execute configured fallback lists", "record requested resolved and actual settings separately"],
+    "must": ["support ultra reasoning", "rank from explicit quality speed economy catalog evidence", "execute configured fallback lists", "record requested, resolved, and actual settings separately"],
     "must_not": ["choose the first candidate blindly", "invent cost scores", "pause for non-hard-lock fallback"]
   },
   {
     "id": "run-task-roundtrip",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Independent acceptance found a reproducible defect in the backend task lane.",
     "must": ["create a structured defect", "return the original task lane to ready", "record repair commit", "re-run affected acceptance", "block completion until resolved"],
     "must_not": ["let acceptance repair the implementation", "mark the run complete with an open defect"]
   },
   {
     "id": "run-recovery",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Recover after context compaction.",
     "must": ["load run-state.json", "verify commits and worktrees", "resume incomplete tasks"],
     "must_not": ["redispatch completed tasks", "reuse expired external approval"]
   },
   {
     "id": "run-live-mutation",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "The plan eventually syncs to a live external service.",
     "must": ["check exact authorization", "show current mutation plan", "pause if authority is missing"],
     "must_not": ["infer live authorization", "reuse a changed drift approval"]
   },
   {
     "id": "run-completion",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Finish the whole approved plan.",
     "must": ["all required tasks complete or approved skipped", "verification evidence", "accepted baseline"],
     "must_not": ["stop at task dispatch", "stop at one commit", "mark blocked work complete"]
   },
   {
     "id": "run-high-concurrency-hierarchy",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Execute 32 independent task lanes with fast mode.",
-    "must": ["ask once for high-quality decomposition review", "create a separate primary controller", "create child controllers for disjoint shards", "enforce one global concurrency cap", "monitor child control tasks"],
-    "must_not": ["create recursive controller hierarchy", "overlap exclusive ownership", "invent micro-tasks to fill slots"]
+    "must": ["ask once for high-quality decomposition review", "create a Global Coordinator and bounded child lane dispatchers", "enforce one global concurrency cap", "monitor child execution tasks"],
+    "must_not": ["create recursive controller hierarchies", "overlap exclusive ownership", "invent micro-tasks to fill slots"]
   },
   {
     "id": "run-parallel-only-approved-plan",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Execute this already-approved Grill Me plan in parallel-only mode; do not redesign it.",
-    "must": ["import the existing plan", "preserve product direction", "validate dependencies and ownership", "create the independent control plane", "dispatch ready conflict-free tasks"],
+    "must": ["import the existing plan", "preserve product direction", "validate dependencies and ownership", "create the independent coordinator plane", "dispatch ready conflict-free task lanes"],
     "must_not": ["replan product scope", "force governance layers for low risk", "collapse to one current-thread implementation"]
   },
   {
     "id": "run-monitoring-tool-adapter",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Continue coordinating when wait_threads is not exposed by this host.",
     "must": ["discover the complete tool catalog", "use list_threads plus read_thread cursors when available", "continue monitoring task lanes and child controllers"],
-    "must_not": ["hardcode wait_threads", "claim top-level monitoring unavailable before discovery", "silently switch to sequential execution"]
+    "must_not": ["hardcode wait_threads", "claim lane monitoring unavailable before discovery", "silently switch to sequential execution"]
   },
   {
     "id": "run-counterpilot-challenge",
-    "skill": "allinluna-run",
+    "skill": "allinluna",
     "prompt": "Challenge this high-risk plan before integration without adding review bureaucracy.",
-    "must": ["use an independent CounterPilot task", "record evidence and a falsifiable probe", "route accepted defects to the original task lane", "keep unrelated lanes running"],
-    "must_not": ["let CounterPilot mutate implementation", "add duplicate promotion layers", "treat an unsupported objection as a blocker"]
+    "must": ["use an independent reviewer lane", "record evidence and a falsifiable probe", "route accepted defects to the original task lane", "keep unrelated lanes running"],
+    "must_not": ["let reviewer mutate implementation", "add duplicate promotion layers", "treat an unsupported objection as a blocker"]
   }
 ]

@@ -1,6 +1,6 @@
 # Host conformance diagnostics
 
-All in Luna now uses a compact host conformance checker instead of the obsolete first-use governance protocol.
+All in Luna now uses a compact host-conformance checker for host-neutral execution evidence.
 
 The checker validates a host trace with three parts:
 

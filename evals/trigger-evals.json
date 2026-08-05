@@ -3,70 +3,70 @@
     "id": "plan-existing-repo",
     "prompt": "Inspect this repository and give me a complete dependency-aware implementation plan with model and concurrency choices, but do not code yet.",
     "should_trigger": true,
-    "expected_skill": "allinluna-plan",
+    "expected_skill": "allinluna",
     "reason": "Explicit repository planning with resource allocation."
   },
   {
     "id": "plan-greenfield",
     "prompt": "I only have an idea for a desktop research app. Plan it from zero and show which agent roles can work in parallel.",
     "should_trigger": true,
-    "expected_skill": "allinluna-plan",
+    "expected_skill": "allinluna",
     "reason": "Greenfield planning and parallel decomposition."
   },
   {
     "id": "plan-resource-comparison",
     "prompt": "Compare premium, balanced, and low-cost model allocations for this migration and produce the same complete-scope plan for each.",
     "should_trigger": true,
-    "expected_skill": "allinluna-plan",
-    "reason": "Resource-profile planning without implementation."
+    "expected_skill": "allinluna",
+    "reason": "Resource-envelope planning without implementation."
   },
   {
     "id": "plan-small",
     "prompt": "Use All in Luna to make a short plan for adding one CLI flag. No agents and no Goal.",
     "should_trigger": true,
-    "expected_skill": "allinluna-plan",
+    "expected_skill": "allinluna",
     "reason": "Small plan-only workflow is explicitly supported."
   },
   {
     "id": "plan-long-running",
     "prompt": "Prepare an executable handoff for a multi-week refactor with worktree ownership, integration, and acceptance.",
     "should_trigger": true,
-    "expected_skill": "allinluna-plan",
+    "expected_skill": "allinluna",
     "reason": "Persistent large-program plan."
   },
   {
     "id": "run-approved-plan",
     "prompt": "Execute the approved plan completely and keep monitoring all independent lanes through acceptance.",
     "should_trigger": true,
-    "expected_skill": "allinluna-run",
+    "expected_skill": "allinluna",
     "reason": "Explicit plan execution."
   },
   {
     "id": "run-mad-luna",
     "prompt": "Run this in mad-luna mode: every role Luna, max reasoning, maximum safe parallelism, no silent model substitution.",
     "should_trigger": true,
-    "expected_skill": "allinluna-run",
+    "expected_skill": "allinluna",
     "reason": "Explicit specialized execution profile."
   },
   {
     "id": "run-resume",
     "prompt": "Resume the interrupted All in Luna run from its saved state and do not redispatch completed tasks.",
     "should_trigger": true,
-    "expected_skill": "allinluna-run",
+    "expected_skill": "allinluna",
     "reason": "Persistent run recovery."
   },
   {
     "id": "run-goal",
     "prompt": "Create a long-running Goal for this approved plan and coordinate user-visible tasks until the milestone passes.",
     "should_trigger": true,
-    "expected_skill": "allinluna-run",
-    "reason": "Goal and top-level task authorization are explicit."
+    "expected_skill": "allinluna",
+    "reason": "Goal and Task Lane authorization are explicit."
   },
   {
     "id": "run-economy",
     "prompt": "Implement all requirements in economy mode. Prefer Luna and ask me before escalating, but do not reduce scope.",
     "should_trigger": true,
-    "expected_skill": "allinluna-run",
+    "expected_skill": "allinluna",
     "reason": "Resource-constrained complete execution."
   },
   {

@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 from .artifacts import ArtifactError, ArtifactStore
 from .core.protocol import LANE_HANDOFF_PROTOCOL
 from .evidence import EvidenceCollectionError, EvidenceCollector
+from .verification import VerificationSpec, VerificationSpecError, verification_specs
 
 
 class HandoffVerificationError(ValueError):
@@ -25,6 +26,35 @@ def _artifact_ref(value: Any) -> str | None:
         raw = value.get("artifact_ref") or value.get("ref") or value.get("uri")
         return str(raw) if raw else None
     return None
+
+
+def _pack_spec_satisfied(spec: VerificationSpec, evidence: Mapping[str, Any], task_id: str) -> bool:
+    """Evaluate the fixed declarative Pack verifier vocabulary.
+
+    Packs may select assertions but cannot smuggle in a Python lambda.  New
+    assertion semantics therefore require an explicit runtime change and test.
+    """
+    assertion = spec.assertion
+    if assertion == "task_id_matches":
+        return str(evidence.get("task_id")) == task_id
+    if assertion == "done_when_satisfied":
+        return all(isinstance(item, Mapping) and item.get("satisfied") is True for item in evidence.get("done_when", ()))
+    if assertion == "checks_passed":
+        checks = evidence.get("checks", ())
+        return bool(checks) and all(isinstance(item, Mapping) and item.get("status") == "pass" for item in checks)
+    if assertion == "no_blockers":
+        return not evidence.get("blockers")
+    if assertion == "declared_export_present":
+        name = str(spec.details.get("name") or "")
+        return bool(name) and name in {str(item.get("name")) for item in evidence.get("exports", ()) if isinstance(item, Mapping)}
+    if assertion == "field_true":
+        field = str(spec.details.get("field") or "")
+        return bool(field) and evidence.get(field) is True
+    if assertion == "gsd_lane_recipe":
+        recipe = evidence.get("lane_recipe") or evidence.get("recipe")
+        phases = recipe.get("phases", ()) if isinstance(recipe, Mapping) else ()
+        return isinstance(recipe, Mapping) and recipe.get("id", "gsd") == "gsd" and {"clarify", "specify", "decompose", "implement", "verify", "integrate"}.issubset(set(map(str, phases)))
+    return False
 
 
 class HandoffProcessor:
@@ -148,7 +178,11 @@ class HandoffProcessor:
         # boundary; passing a different alias here would reject valid scoped
         # tasks after persistence prefixes are applied.
         task_view = SimpleNamespace(id=str(value.get("task_id")))
-        if any(not bool(verifier(value)) for verifier in pack.verifiers(task_view)):
+        try:
+            verifiers = verification_specs(pack.verifiers(task_view))
+        except (VerificationSpecError, TypeError) as exc:
+            raise HandoffVerificationError("pack", f"{pack_id} must return typed VerifierSpec values: {exc}") from exc
+        if any(spec.kind != "pack" or not _pack_spec_satisfied(spec, value, str(value.get("task_id"))) for spec in verifiers):
             raise HandoffVerificationError("pack", f"{pack_id} verifier rejected the handoff")
         return value
 

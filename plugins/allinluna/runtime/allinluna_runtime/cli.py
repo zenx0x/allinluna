@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .engine.coordinator import CoordinatorEngine
+from .engine.coordinator_driver import CoordinatorDriver
+from .engine.lane_driver import LaneDriver
 from .adapters.host.codex_app_server import assemble_app_server_receipt
 from .packs.public_skill import SinglePublicSkillAPI
 from .resource import ResourceBroker
@@ -72,6 +74,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     dispatch = sub.add_parser("dispatch")
     dispatch.add_argument("run_id")
+
+    drive = sub.add_parser("drive", help="continue the persistent CoordinatorDriver loop")
+    drive.add_argument("run_id")
+    drive.add_argument("--max-cycles", type=int, default=64)
+    drive.add_argument("--no-monitor", action="store_true")
+
+    lane = sub.add_parser("lane", help="operate one independently bootstrapped Task Lane")
+    lane_sub = lane.add_subparsers(dest="lane_command", required=True)
+    lane_start = lane_sub.add_parser("start")
+    lane_start.add_argument("run_id")
+    lane_start.add_argument("task_id")
+    lane_start.add_argument("--bootstrap", help="LaneBootstrapEnvelope JSON or path; defaults to the persisted top-level action")
+    for name in ("status", "tick", "drive", "handoff"):
+        command = lane_sub.add_parser(name)
+        command.add_argument("run_id")
+        command.add_argument("task_id")
+        if name == "drive":
+            command.add_argument("--max-cycles", type=int, default=64)
+            command.add_argument("--no-monitor", action="store_true")
+        if name == "tick":
+            command.add_argument("--no-monitor", action="store_true")
+        if name == "handoff":
+            command.add_argument("--ingest", help="optional lane or work handoff JSON/path to ingest before synthesis")
+    lane_receipt = lane_sub.add_parser("ingest-receipt")
+    lane_receipt.add_argument("run_id")
+    lane_receipt.add_argument("task_id")
+    lane_receipt.add_argument("receipt")
 
     inspect = sub.add_parser("inspect")
     inspect_sub = inspect.add_subparsers(dest="inspect_kind", required=True)
@@ -165,6 +194,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "dispatch":
             tick = engine.tick(args.run_id, dispatch=True)
             result = {"run_id": args.run_id, "actions": list(tick.actions), "receipts": list(tick.receipts), "status": tick.status}
+        elif args.command == "drive":
+            result = CoordinatorDriver(store, engine=engine).drive(
+                args.run_id, max_cycles=args.max_cycles, monitor=not args.no_monitor
+            )
         elif args.command == "pause":
             result = engine.pause(args.run_id)
         elif args.command == "resume":
@@ -181,6 +214,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = engine.reconcile(args.run_id)
         elif args.command == "ingest-receipt":
             result = engine.ingest_receipt(_load_json(args.receipt))
+        elif args.command == "lane":
+            bootstrap = _load_json(args.bootstrap) if getattr(args, "bootstrap", None) else None
+            lane_driver = LaneDriver(
+                store,
+                getattr(args, "task_id", None),
+                run_id=getattr(args, "run_id", None),
+                bootstrap=bootstrap,
+            )
+            if args.lane_command == "start":
+                result = lane_driver.start()
+            elif args.lane_command == "status":
+                result = lane_driver.status()
+            elif args.lane_command == "tick":
+                result = lane_driver.tick(monitor=not args.no_monitor)
+            elif args.lane_command == "drive":
+                result = lane_driver.drive(max_cycles=args.max_cycles, monitor=not args.no_monitor)
+            elif args.lane_command == "ingest-receipt":
+                result = lane_driver.ingest_receipt(_load_json(args.receipt))
+            elif args.lane_command == "handoff":
+                if args.ingest:
+                    lane_driver.ingest_handoff(_load_json(args.ingest))
+                result = lane_driver.handoff()
+            else:  # pragma: no cover - argparse enforces lane command set.
+                parser.error(f"unknown lane command {args.lane_command}")
+                return 2
         elif args.command == "inspect":
             identity = getattr(args, "identity", None)
             if args.inspect_kind == "run":

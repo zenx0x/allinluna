@@ -83,19 +83,18 @@ def test_gsd_domain_contracts_export_lane_result_not_phase_contracts():
     assert set(PHASE_EXPORTS) == set(PHASE_RECIPES)
 
 
-def test_integrate_verifier_fails_closed_until_lane_recipe_is_evidenced():
+def test_integrate_verifier_is_a_typed_spec_and_requires_the_recipe_evidence():
     graph = _compile().task_graph
     task = graph.tasks[0]
-    verifier = GSDPack().verifiers(task)[0]
+    verifiers = GSDPack().verifiers(task)
     evidence = {
         "checks": [{"name": "integration", "status": "pass"}],
         "exports": [{"name": "IntegratedResult"}],
         "blockers": [],
         "lane_recipe": graph.metadata["lane_recipe"],
     }
-    assert verifier(evidence)
-    assert not verifier({**evidence, "lane_recipe": {"id": "gsd", "phases": ["clarify"]}})
-    assert not verifier({**evidence, "blockers": [{"code": "blocked"}]})
+    assert all(item.kind == "pack" for item in verifiers)
+    assert {item.assertion for item in verifiers} >= {"checks_passed", "no_blockers", "gsd_lane_recipe"}
 
 
 def test_explicit_phase_configuration_stays_inside_each_domain_lane():

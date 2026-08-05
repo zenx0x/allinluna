@@ -21,6 +21,7 @@ from typing import Any, Protocol
 
 from .adapters.workspace.base import stable_digest
 from .artifacts import ArtifactError, ArtifactStore
+from .verification import VerificationSpec, VerificationSpecError, verification_specs
 
 
 def _now() -> str:
@@ -148,7 +149,9 @@ class CheckRunner:
         task_id: str | None = None,
         scope: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        value = {"name": str(check)} if isinstance(check, str) else _raw(check)
+        if isinstance(check, str):
+            raise ValueError("natural-language checks are not executable; declare a typed command VerificationSpec")
+        value = _raw(check)
         name = str(value.get("name") or value.get("id") or value.get("command") or "unnamed-check")
         command_value = value.get("command")
         runner = value.get("runner") or value.get("run")
@@ -218,7 +221,7 @@ class CheckRunner:
             "stderr_ref": stderr_ref,
             "observed_at": observed,
         })
-        satisfies = tuple(str(item) for item in value.get("satisfies", value.get("done_when", ())) or ())
+        satisfies = tuple(str(item) for item in value.get("satisfies", ()) or ())
         return CheckReceipt(
             name=name,
             status=status,
@@ -350,9 +353,18 @@ class EvidenceCollector:
         selected = self.selected_profile(task_value, profile)
         contract = self.store.get_contract(str(task_value.get("contract_id") or ""), int(task_value.get("contract_version", 1))) or {}
         done_conditions = tuple(str(item) for item in contract.get("done_when", ()) or ())
-        check_specs = list(checks if checks is not None else handoff_value.get("check_specs") or ())
-        if not check_specs:
-            check_specs = [{"name": condition} for condition in done_conditions]
+        try:
+            declared_specs = verification_specs(contract.get("verification_specs", ()))
+            supplied_specs = verification_specs(checks) if checks is not None else verification_specs(handoff_value.get("verification_specs", ()))
+        except VerificationSpecError as exc:
+            raise EvidenceCollectionError(str(exc)) from exc
+        if checks is None and supplied_specs and tuple(spec.to_dict() for spec in supplied_specs) != tuple(spec.to_dict() for spec in declared_specs):
+            raise EvidenceCollectionError("handoff cannot replace contract verification_specs")
+        # ``checks=`` is a direct Collector compatibility seam for callers
+        # that already provide typed procedures.  It never accepts language as
+        # a command and the Lane handoff path cannot use it to alter a contract.
+        active_specs = declared_specs or supplied_specs
+        check_specs = tuple(spec for spec in active_specs if spec.kind == "command")
         run_check = getattr(self.check_runner, "run", None) or getattr(self.check_runner, "run_check", None)
         if not callable(run_check):
             raise TypeError("check_runner must expose run or run_check")
@@ -360,23 +372,29 @@ class EvidenceCollector:
         for item in check_specs:
             try:
                 check_receipts.append(
-                    dict(run_check(item, task_id=str(task_value["id"]), scope=workspace_scope))
+                    dict(run_check(item.to_dict(), task_id=str(task_value["id"]), scope=workspace_scope))
                 )
             except Exception as exc:
                 check_receipts.append(self._check_error_receipt(item, str(task_value["id"]), exc))
         errors: list[str] = []
-        if selected.checks_required and (not check_receipts or any(not self._valid_check(item) for item in check_receipts)):
+        workspace = self._collect_workspace(task_value, handoff_value, workspace_scope, selected, errors)
+        observation_receipts = self._observe_specs(active_specs, workspace)
+        check_receipts.extend(observation_receipts)
+        automatable_specs = tuple(spec for spec in active_specs if spec.kind in {"command", "artifact", "workspace"})
+        manual_evidence_required = not automatable_specs or any(spec.kind == "human" for spec in active_specs)
+        if manual_evidence_required:
+            errors.append("manual_evidence_required")
+        if selected.checks_required and automatable_specs and (not check_receipts or any(not self._valid_check(item) for item in check_receipts)):
             errors.append("checks_not_verified")
 
         done_evidence = []
         for condition in done_conditions:
-            matching = [item for item in check_receipts if condition in {str(name) for name in item.get("satisfies", ())} or str(item.get("name")) == condition]
+            matching = [item for item in check_receipts if condition in {str(name) for name in item.get("satisfies", ())}]
             satisfied = bool(matching) and all(self._valid_check(item) for item in matching)
             done_evidence.append({"condition": condition, "satisfied": satisfied, "source_receipts": [item.get("receipt_id") for item in matching]})
             if not satisfied:
                 errors.append(f"done_when:{condition}")
 
-        workspace = self._collect_workspace(task_value, handoff_value, workspace_scope, selected, errors)
         artifact_values = list(artifacts if artifacts is not None else handoff_value.get("artifacts") or ())
         export_values = list(exports if exports is not None else handoff_value.get("exports") or ())
         artifact_refs = self._verified_artifacts(artifact_values, errors)
@@ -406,6 +424,8 @@ class EvidenceCollector:
             "contract_revision": int(task_value.get("contract_version", 1)),
             "profile": selected.name,
             "checks": check_receipts,
+            "verification_specs": [spec.to_dict() for spec in active_specs],
+            "manual_evidence_required": manual_evidence_required,
             "done_when": done_evidence,
             "artifacts": artifact_refs,
             "exports": collected_exports,
@@ -422,6 +442,15 @@ class EvidenceCollector:
     def verify(self, task: Mapping[str, Any], bundle: Mapping[str, Any]) -> dict[str, Any]:
         value = dict(bundle)
         errors: list[str] = []
+        contract = self.store.get_contract(str(task.get("contract_id") or ""), int(task.get("contract_version", 1))) or {}
+        try:
+            declared_specs = verification_specs(contract.get("verification_specs", ()))
+            bundled_specs = verification_specs(value.get("verification_specs", ()))
+        except VerificationSpecError as exc:
+            errors.append(f"verification_specs:{exc}")
+            declared_specs = bundled_specs = ()
+        if declared_specs and tuple(item.to_dict() for item in declared_specs) != tuple(item.to_dict() for item in bundled_specs):
+            errors.append("verification_specs_contract_mismatch")
         if value.get("kind") != "evidence-bundle" or value.get("protocol") != "evidence-bundle/v1" or value.get("collector") != self.COLLECTOR:
             errors.append("collector_provenance")
         if value.get("verified") is not True:
@@ -436,6 +465,8 @@ class EvidenceCollector:
             errors.append("evidence_digest")
         if value.get("errors"):
             errors.extend(str(item) for item in value.get("errors", ()))
+        if value.get("manual_evidence_required") is True:
+            errors.append("manual_evidence_required")
         if not value.get("checks") or any(not self._valid_check(item) for item in value.get("checks", ())):
             errors.append("checks_not_verified")
         if not all(isinstance(item, Mapping) and item.get("satisfied") is True for item in value.get("done_when", ())):
@@ -483,6 +514,50 @@ class EvidenceCollector:
         value["source"] = self.COLLECTOR
         return value
 
+    def _observe_specs(
+        self,
+        specs: Sequence[VerificationSpec],
+        workspace: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Produce receipts for non-command observable procedures.
+
+        This deliberately contains no interpretation of ``done_when``.  A
+        procedure only satisfies conditions which its typed ``satisfies`` list
+        declares.
+        """
+        receipts: list[dict[str, Any]] = []
+        for spec in specs:
+            if spec.kind == "command" or spec.kind == "human" or spec.kind == "pack":
+                continue
+            status = "pass"
+            details: dict[str, Any] = {"verification_kind": spec.kind}
+            if spec.kind == "artifact":
+                try:
+                    self.artifacts.verify(str(spec.artifact_ref))
+                except ArtifactError as exc:
+                    status = "failed"
+                    details["error"] = str(exc)
+            elif spec.kind == "workspace":
+                if workspace.get("valid") is not True or workspace.get("ownership_valid", True) is not True or workspace.get("protected_unchanged", True) is not True:
+                    status = "failed"
+                    details["error"] = "workspace evidence is not valid"
+            observed = _now()
+            receipt_id = "observation-receipt-" + stable_digest({"id": spec.id, "kind": spec.kind, "status": status, "observed_at": observed})
+            receipts.append(
+                CheckReceipt(
+                    name=spec.id,
+                    status=status,
+                    receipt_id=receipt_id,
+                    command=f"observe:{spec.kind}",
+                    exit_code=0 if status == "pass" else None,
+                    source=self.COLLECTOR,
+                    observed_at=observed,
+                    satisfies=spec.satisfies,
+                    details=details,
+                ).to_dict()
+            )
+        return receipts
+
     def _verified_artifacts(self, values: Sequence[Any], errors: list[str]) -> list[str]:
         refs: list[str] = []
         for item in values:
@@ -522,7 +597,7 @@ class EvidenceCollector:
             source=self.COLLECTOR,
             observed_at=_now(),
             stderr_ref=stderr_ref,
-            satisfies=tuple(str(item) for item in value.get("satisfies", value.get("done_when", ())) or ()),
+            satisfies=tuple(str(item) for item in value.get("satisfies", ()) or ()),
             details={"error": error, "error_code": "runner-exception"},
         ).to_dict()
 

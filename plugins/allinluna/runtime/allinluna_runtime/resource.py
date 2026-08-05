@@ -1,21 +1,23 @@
-"""Deterministic resource allocation for the vNext runtime.
+"""Store-backed resource allocation over capability-class policy resolution.
 
-The broker owns budgets and policy resolution only.  It never claims that a
-host used a model or reasoning level: that fact can only come from a real
-host receipt.  Defaults provide a useful starting point, but callers may
-select any non-empty model and reasoning identifier.  External actions remain
-denied unless a caller supplies a separate, explicit policy object.
+Core runtime code requests a capability class such as ``work.implementation``
+instead of embedding a product-model name.  Deployment or host policy can map
+that class to a concrete route; absent a mapping the route stays unresolved and
+the host is free to use its own default.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .resource_observation import ResourceObservation
+from .resource_policy import ResourcePolicyResolver, ResourceResolution, RouteAssurance
 
-DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_REASONING = "high"
+
+# Compatibility exports: intentionally no Core-owned concrete model names.
+DEFAULT_MODEL: str | None = None
+DEFAULT_REASONING: str | None = None
 DEFAULT_EXTERNAL_ACTION_POLICY = "deny"
 
 
@@ -26,7 +28,9 @@ def _mapping(value: Any) -> dict[str, Any]:
         return dict(value)
     method = getattr(value, "to_dict", None)
     if callable(method):
-        return dict(method())
+        candidate = method()
+        if isinstance(candidate, Mapping):
+            return dict(candidate)
     return dict(vars(value))
 
 
@@ -39,11 +43,9 @@ def _slot(value: Any, default: int) -> int:
     return result
 
 
-def _resource_text(value: Any, *, name: str, default: str | None = None) -> str:
+def _optional_resource_text(value: Any, *, name: str) -> str | None:
     if value is None:
-        if default is None:
-            raise ValueError(f"resource {name} must be a non-empty string")
-        return default
+        return None
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"resource {name} must be a non-empty string")
     return value.strip()
@@ -54,8 +56,8 @@ class SlotAllocation:
     scope: str
     entity_id: str
     slots: int
-    model: str
-    reasoning: str
+    model: str | None
+    reasoning: str | None
     external_action_policy: str
     receipt: ResourceObservation
 
@@ -72,17 +74,14 @@ class SlotAllocation:
 
 
 class ResourceBroker:
-    """Resource policy resolver backed by durable, run-scoped Store claims.
+    """Durable slot authority plus capability-class route resolution.
 
-    A bound broker has no process-local occupancy counters.  Every allocation
-    delegates the capacity check and claim write to one Store transaction, so
-    restarts and independent scheduler processes observe the same authority.
-    An unbound broker remains useful for read-only/advisory policy resolution;
-    its allocation methods do not retain occupancy and must not be used as the
-    runtime authority.
+    ``ResourcePolicyResolver`` owns requested/resolved policy.  The broker only
+    claims Store capacity and transports that policy onto dispatch actions.
+    ``actual`` remains unavailable until a host receipt proves it.
     """
 
-    API_VERSION = 1
+    API_VERSION = 2
 
     def __init__(
         self,
@@ -94,24 +93,37 @@ class ResourceBroker:
     ) -> None:
         raw = _mapping(envelope)
         self.requested = dict(raw)
-        self.model = _resource_text(raw.get("model"), name="model", default=DEFAULT_MODEL)
-        self.reasoning = _resource_text(
-            raw.get("reasoning", raw.get("thinking")), name="reasoning", default=DEFAULT_REASONING
-        )
-        self.external_action_policy = str(
-            raw.get("external_action_policy") or DEFAULT_EXTERNAL_ACTION_POLICY
-        )
+        # Preserve the historic boundary: explicit empty identifiers are
+        # invalid, while omitted auto fields remain host-resolved.
+        _optional_resource_text(raw.get("model"), name="model")
+        _optional_resource_text(raw.get("reasoning", raw.get("thinking")), name="reasoning")
+        self.external_action_policy = str(raw.get("external_action_policy") or DEFAULT_EXTERNAL_ACTION_POLICY)
         if self.external_action_policy not in {"deny", "ask", "allow"}:
             raise ValueError("external_action_policy must be deny, ask, or allow")
         self.top_level_budget = _slot(raw.get("top_level_slots"), 4)
-        self.total_subagent_budget = _slot(
-            raw.get("total_subagent_slots", raw.get("subagent_slots")), 16
-        )
+        self.total_subagent_budget = _slot(raw.get("total_subagent_slots", raw.get("subagent_slots")), 16)
         self.default_lane_budget = _slot(raw.get("subagent_slots_per_lane"), 4)
         self._lane_limits: dict[str, int] = {}
-        self._capabilities = capabilities
         self._store = store
         self._run_id = str(run_id) if run_id is not None else None
+        self.policy_resolver = ResourcePolicyResolver(
+            raw,
+            store=store,
+            run_id=self._run_id,
+            capabilities=capabilities,
+        )
+
+    @property
+    def model(self) -> str | None:
+        return self.policy_resolver.resolve(operation="lane").resolved.get("model")
+
+    @property
+    def reasoning(self) -> str | None:
+        return self.policy_resolver.resolve(operation="lane").resolved.get("reasoning")
+
+    @property
+    def route_assurance(self) -> str:
+        return self.policy_resolver.default_route_assurance
 
     @property
     def store_backed(self) -> bool:
@@ -128,9 +140,16 @@ class ResourceBroker:
             raise ValueError("resource authority requires a non-empty run_id")
         self._store = store
         self._run_id = run_id.strip()
+        self.policy_resolver.bind(store, self._run_id)
         return self
 
     bind_store = bind
+
+    def refresh_host_capabilities(self, host: Any) -> Mapping[str, Any] | None:
+        return self.policy_resolver.refresh_host_capabilities(host)
+
+    def set_host_capabilities(self, capabilities: Any) -> Mapping[str, Any]:
+        return self.policy_resolver.set_host_capabilities(capabilities)
 
     def _occupancy(self) -> dict[str, Any]:
         if not self.store_backed:
@@ -150,63 +169,74 @@ class ResourceBroker:
         self._lane_limits[str(lane_id)] = value
         return value
 
-    def _resolved_request(
-        self, requested: Mapping[str, Any] | None = None
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        req = dict(self.requested if requested is None else requested)
-        model = _resource_text(req.get("model"), name="model", default=self.model)
-        reasoning = _resource_text(
-            req.get("reasoning", req.get("thinking")), name="reasoning", default=self.reasoning
-        )
-        resolved = {
-            "model": model,
-            "reasoning": reasoning,
-            "external_action_policy": self.external_action_policy,
-        }
-        return req, resolved
+    def resolve_policy(self, request: Any = None, *, operation: str | None = None) -> ResourceResolution:
+        return self.policy_resolver.resolve(request, operation=operation)
 
-    def _receipt(self, requested: Mapping[str, Any] | None = None) -> ResourceObservation:
-        req, resolved = self._resolved_request(requested)
-        return ResourceObservation(req, resolved)
+    def _receipt(
+        self, requested: Mapping[str, Any] | None = None, *, operation: str | None = None
+    ) -> ResourceObservation:
+        return self.resolve_policy(requested, operation=operation).receipt
 
-    def resolve(self, request: Any = None, *, actual_receipt: Any = None) -> ResourceObservation:
-        raw = _mapping(request) if request is not None else dict(self.requested)
-        requested, resolved = self._resolved_request(raw)
+    def resolve(
+        self,
+        request: Any = None,
+        *,
+        actual_receipt: Any = None,
+        operation: str | None = None,
+    ) -> ResourceObservation:
+        resolution = self.resolve_policy(request, operation=operation)
         raw_actual = _mapping(actual_receipt)
         return ResourceObservation(
-            requested,
-            resolved,
+            resolution.requested,
+            resolution.resolved,
             actual={
                 "model": raw_actual.get("model") or raw_actual.get("actual_model"),
                 "reasoning": raw_actual.get("reasoning") or raw_actual.get("thinking"),
-            } if raw_actual else None,
+            }
+            if raw_actual
+            else None,
             actual_state=str(raw_actual.get("actual_state", "unresolved")),
             evidence_source=raw_actual.get("evidence_source"),
             observed_at=raw_actual.get("observed_at"),
         )
 
-    def allocate_top_level_slots(self, ready: Sequence[Any]) -> list[SlotAllocation]:
-        candidates = list(ready)
+    def assess_route(self, receipt: Any, *, mode: str | None = None) -> RouteAssurance:
+        return self.policy_resolver.assess(receipt, mode=mode)
+
+    def _prepared(
+        self, ready: Sequence[Any], *, identity_names: tuple[str, ...], operation: str
+    ) -> list[tuple[str, ResourceObservation]]:
         prepared: list[tuple[str, ResourceObservation]] = []
-        for item in candidates:
+        for item in list(ready):
             raw = _mapping(item)
-            identity = raw.get("id") or raw.get("task_id") or raw.get("entity_id")
+            identity = next((raw.get(name) for name in identity_names if raw.get(name) is not None), None)
             if identity is None or not str(identity).strip():
                 continue
-            entity_id = str(identity).strip()
-            receipt = self._receipt(raw.get("resource_envelope"))
-            prepared.append((entity_id, receipt))
+            prepared.append((str(identity).strip(), self._receipt(raw.get("resource_envelope"), operation=operation)))
+        return prepared
+
+    @staticmethod
+    def _allocation(
+        scope: str, entity_id: str, receipt: ResourceObservation, external_action_policy: str
+    ) -> SlotAllocation:
+        return SlotAllocation(
+            scope,
+            entity_id,
+            1,
+            _optional_resource_text(receipt.resolved.get("model"), name="model"),
+            _optional_resource_text(receipt.resolved.get("reasoning"), name="reasoning"),
+            external_action_policy,
+            receipt,
+        )
+
+    def allocate_top_level_slots(self, ready: Sequence[Any]) -> list[SlotAllocation]:
+        prepared = self._prepared(ready, identity_names=("id", "task_id", "entity_id"), operation="create-top-level-task")
         if self.store_backed:
             claims = self._store.claim_resources(
                 self._run_id,
                 "top-level",
                 [
-                    {
-                        "entity_id": entity_id,
-                        "slots": 1,
-                        "requested": receipt.requested,
-                        "resolved": receipt.resolved,
-                    }
+                    {"entity_id": entity_id, "slots": 1, "requested": receipt.requested, "resolved": receipt.resolved}
                     for entity_id, receipt in prepared
                 ],
                 top_level_limit=self.top_level_budget,
@@ -215,42 +245,18 @@ class ResourceBroker:
             prepared = [item for item in prepared if item[0] in acquired]
         else:
             prepared = prepared[: self.top_level_budget]
-        return [
-                SlotAllocation(
-                    "top-level",
-                    entity_id,
-                    1,
-                    str(receipt.resolved["model"]),
-                    str(receipt.resolved["reasoning"]),
-                    self.external_action_policy,
-                    receipt,
-                )
-            for entity_id, receipt in prepared
-        ]
+        return [self._allocation("top-level", entity_id, receipt, self.external_action_policy) for entity_id, receipt in prepared]
 
     def allocate_lane_slots(self, lane_id: str, ready: Sequence[Any]) -> list[SlotAllocation]:
         lane = str(lane_id)
         limit = self._lane_limits.get(lane, self.default_lane_budget)
-        prepared: list[tuple[str, ResourceObservation]] = []
-        for item in list(ready):
-            raw = _mapping(item)
-            identity = raw.get("id") or raw.get("work_unit_id") or raw.get("entity_id")
-            if identity is None or not str(identity).strip():
-                continue
-            entity_id = str(identity).strip()
-            receipt = self._receipt(raw.get("resource_envelope"))
-            prepared.append((entity_id, receipt))
+        prepared = self._prepared(ready, identity_names=("id", "work_unit_id", "entity_id"), operation="spawn-subagent")
         if self.store_backed:
             claims = self._store.claim_resources(
                 self._run_id,
                 "lane",
                 [
-                    {
-                        "entity_id": entity_id,
-                        "slots": 1,
-                        "requested": receipt.requested,
-                        "resolved": receipt.resolved,
-                    }
+                    {"entity_id": entity_id, "slots": 1, "requested": receipt.requested, "resolved": receipt.resolved}
                     for entity_id, receipt in prepared
                 ],
                 lane_id=lane,
@@ -261,18 +267,7 @@ class ResourceBroker:
             prepared = [item for item in prepared if item[0] in acquired]
         else:
             prepared = prepared[: min(limit, self.total_subagent_budget)]
-        return [
-                SlotAllocation(
-                    "lane",
-                    entity_id,
-                    1,
-                    str(receipt.resolved["model"]),
-                    str(receipt.resolved["reasoning"]),
-                    self.external_action_policy,
-                    receipt,
-                )
-            for entity_id, receipt in prepared
-        ]
+        return [self._allocation("lane", entity_id, receipt, self.external_action_policy) for entity_id, receipt in prepared]
 
     def release(self, entity_id: str, *, scope: str = "top-level", lane_id: str | None = None) -> None:
         if self.store_backed:
@@ -288,8 +283,8 @@ class ResourceBroker:
         raw = _mapping(receipt)
         if isinstance(raw.get("resource_receipt"), Mapping):
             return ResourceObservation.from_value(raw["resource_receipt"])
-        requested, resolved = self._resolved_request(raw.get("requested"))
-        return ResourceObservation.from_value(raw, requested=requested, resolved=resolved)
+        resolution = self.resolve_policy(raw.get("requested"), operation=raw.get("operation"))
+        return ResourceObservation.from_value(raw, requested=resolution.requested, resolved=resolution.resolved)
 
     @staticmethod
     def is_external_action(action: Any) -> bool:
@@ -299,8 +294,6 @@ class ResourceBroker:
         return any(token in kind or token in tool for token in ("push", "publish", "deploy", "external", "connector"))
 
     def authorize_action(self, action: Any) -> bool:
-        """Return whether an action may cross the runtime's external boundary."""
-
         return not self.is_external_action(action) or self.external_action_policy == "allow"
 
     def recover(self) -> Mapping[str, Any]:
@@ -317,6 +310,9 @@ __all__ = [
     "DEFAULT_REASONING",
     "ResourceBroker",
     "ResourceBrokerAPI",
+    "ResourcePolicyResolver",
+    "ResourceResolution",
     "ResourceObservation",
+    "RouteAssurance",
     "SlotAllocation",
 ]

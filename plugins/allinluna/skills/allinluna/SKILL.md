@@ -19,6 +19,37 @@ vNext runtime/CLI to persist the graph, release ready Lanes, ingest real host
 receipts, and continue until the root result is complete or a concrete blocker
 is returned.
 
+## Highest-priority exact Action Relay
+
+When the runtime emits a `HostAction`, `HostAction.tool` is an opcode:
+
+1. Invoke that exact tool with `HostAction.arguments`.
+2. Never translate, approximate, or substitute another capability.
+3. A `top_level_task` may never fall back to a subagent, the current thread, or direct execution.
+4. Ingest the raw receipt immediately, then tick again.
+5. If the exact tool/capability is unavailable, return `HOST_CAPABILITY_BLOCKED`.
+
+The receipt must preserve the action's `action_contract_hash`, `actual_tool`,
+and `actual_capability`. A wrong actual tool is `HOST_PROTOCOL_VIOLATION`, not
+evidence that a Task started.
+
+## Lane bootstrap and persistent drivers
+
+Every public `codex_app__create_thread` dispatch embeds a complete
+`lane-bootstrap/v1` object in both its durable action payload and the child
+prompt. It includes the run/task/attempt identities, TaskEnvelope digest,
+runtime SQLite path, Contract/Context/WorkGraph references, workspace,
+allowed local capabilities, forbidden global capabilities, and the required
+`lane-handoff/v1` response. A child Lane must reopen that same Store and load
+these objects itself; its prompt is never only a natural-language outcome.
+
+`CoordinatorDriver` is the durable outer loop: schedule exact actions, ingest
+receipts, wait/read top-level threads, ingest typed Lane handoffs, reconcile,
+and immediately release newly-ready Tasks. `LaneDriver` performs the matching
+local WorkGraph loop, including snapshots, dynamic local expansion, worker
+handoffs, same-worker corrections, and lane handoff synthesis. A wave is only
+a UI grouping: dependency-ready work is released immediately.
+
 ## Runtime shape
 
 ```text
@@ -87,6 +118,13 @@ allinluna resume RUN_ID
 allinluna retry RUN_ID --task TASK_ID
 allinluna cancel RUN_ID --task TASK_ID
 allinluna reconcile RUN_ID
+allinluna drive RUN_ID
+allinluna lane start RUN_ID TASK_ID
+allinluna lane status RUN_ID TASK_ID
+allinluna lane tick RUN_ID TASK_ID
+allinluna lane drive RUN_ID TASK_ID
+allinluna lane ingest-receipt RUN_ID TASK_ID RECEIPT.json
+allinluna lane handoff RUN_ID TASK_ID
 ```
 
 The runtime CLI exposes `start`, `status`, `next-actions`, `ingest-receipt`,

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/lane-bootstrap.schema.json",
+  "title": "All in Luna LaneBootstrapEnvelope",
+  "description": "The complete top-level Task Lane bootstrap passed through the public create_thread prompt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "run_ref", "task_id", "task_ref", "lane_attempt_ref",
+    "task_envelope_ref", "task_envelope_digest", "runtime_db", "contract_ref",
+    "context_ref", "work_graph_ref", "workspace", "allowed_local_capabilities",
+    "forbidden_global_capabilities", "response_contract"
+  ],
+  "properties": {
+    "protocol": {"const": "lane-bootstrap/v1"},
+    "run_ref": {"type": "string", "pattern": "^run://[^\\s]+$"},
+    "task_id": {"type": "string", "minLength": 1},
+    "task_ref": {"type": "string", "pattern": "^task://[^\\s]+$"},
+    "lane_attempt_ref": {"type": "string", "pattern": "^lane-attempt://[^\\s]+$"},
+    "task_envelope_ref": {"type": "string", "pattern": "^task-envelope://[^\\s]+$"},
+    "task_envelope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime_db": {"type": "string", "minLength": 1},
+    "contract_ref": {"type": "string", "pattern": "^contract://task/[^\\s@]+@[1-9][0-9]*$"},
+    "context_ref": {"type": "string", "pattern": "^context://[^\\s]+$"},
+    "work_graph_ref": {"type": "string", "pattern": "^runtime-db://work-graph/[^\\s]+$"},
+    "workspace": {"type": "string", "minLength": 1},
+    "allowed_local_capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "forbidden_global_capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "response_contract": {"const": "lane-handoff/v1"}
+  }
+}

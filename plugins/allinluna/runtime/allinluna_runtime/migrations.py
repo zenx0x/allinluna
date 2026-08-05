@@ -20,10 +20,10 @@ import sqlite3
 from typing import Any, Final
 
 
-SCHEMA_VERSION: Final[int] = 5
+SCHEMA_VERSION: Final[int] = 8
 LATEST_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
 CURRENT_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
-SCHEMA_VERSION_STRING: Final[str] = "5.0"
+SCHEMA_VERSION_STRING: Final[str] = "8.0"
 DATABASE_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
 
 
@@ -421,6 +421,38 @@ CREATE INDEX IF NOT EXISTS idx_host_receipts_resource_route
 PRAGMA user_version = 5;
 """
 
+DB_SCHEMA_V6_SQL: Final[str] = """-- All in Luna vNext runtime database schema v6.
+-- Persistent driver cursors and idempotent handoff ingestion for restart-safe lanes.
+
+CREATE TABLE IF NOT EXISTS driver_checkpoints (
+    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('coordinator','lane')),
+    scope_id TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    cursor TEXT,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (driver_kind, scope_id)
+);
+
+CREATE TABLE IF NOT EXISTS driver_handoffs (
+    driver_kind TEXT NOT NULL CHECK (driver_kind IN ('coordinator','lane')),
+    scope_id TEXT NOT NULL,
+    handoff_id TEXT NOT NULL,
+    source_thread_id TEXT,
+    status TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    ingested_at TEXT NOT NULL,
+    PRIMARY KEY (driver_kind, scope_id, handoff_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_driver_checkpoints_run_kind
+    ON driver_checkpoints(run_id, driver_kind, updated_at);
+CREATE INDEX IF NOT EXISTS idx_driver_handoffs_scope
+    ON driver_handoffs(driver_kind, scope_id, ingested_at);
+
+PRAGMA user_version = 6;
+"""
+
 # Compatibility aliases make the frozen schema easy for sibling lanes to
 # discover without introducing another source of SQL truth.
 SCHEMA_V1_SQL: Final[str] = DB_SCHEMA_V1_SQL
@@ -452,6 +484,9 @@ SCHEMA_TABLES: Final[tuple[str, ...]] = (
     "promotion_requests",
     "corrections",
     "resource_claims",
+    "driver_checkpoints",
+    "driver_handoffs",
+    "host_capability_cache",
 )
 TABLE_NAMES: Final[tuple[str, ...]] = SCHEMA_TABLES
 
@@ -481,6 +516,7 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "context_policy_json",
         "created_at",
         "supersedes_id",
+        "verification_specs_json",
     ),
     "tasks": (
         "id",
@@ -657,6 +693,18 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "requested_json", "resolved_json", "state", "acquired_at",
         "released_at", "release_reason",
     ),
+    "driver_checkpoints": (
+        "driver_kind", "scope_id", "run_id", "cursor", "state_json", "updated_at",
+    ),
+    "driver_handoffs": (
+        "driver_kind", "scope_id", "handoff_id", "source_thread_id", "status",
+        "payload_json", "ingested_at",
+    ),
+    "host_capability_cache": (
+        "host_fingerprint", "host_id", "host_version", "plugin_version",
+        "tool_catalog_digest", "checked_at", "capabilities_json", "conformance_status",
+        "conformance_json", "invalidated_at", "invalidation_reason",
+    ),
 }
 
 
@@ -724,12 +772,42 @@ class Migration:
 
 MigrationDefinition = Migration
 
+DB_SCHEMA_V7_SQL: Final[str] = """-- Typed VerificationSpec persistence.
+ALTER TABLE contracts ADD COLUMN verification_specs_json TEXT NOT NULL DEFAULT '[]';
+PRAGMA user_version = 7;
+"""
+
+DB_SCHEMA_V8_SQL: Final[str] = """-- Host capability snapshots and conformance cache.
+CREATE TABLE IF NOT EXISTS host_capability_cache (
+    host_fingerprint TEXT PRIMARY KEY,
+    host_id TEXT,
+    host_version TEXT,
+    plugin_version TEXT,
+    tool_catalog_digest TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    conformance_status TEXT NOT NULL CHECK (conformance_status IN ('unknown','pass','fail','blocked')),
+    conformance_json TEXT NOT NULL DEFAULT '{}',
+    invalidated_at TEXT,
+    invalidation_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_host_capability_cache_match
+    ON host_capability_cache(host_version, plugin_version, tool_catalog_digest, invalidated_at);
+
+PRAGMA user_version = 8;
+"""
+
+
 MIGRATIONS: Final[tuple[Migration, ...]] = (
     Migration(1, "create the vNext runtime schema", DB_SCHEMA_V1_SQL),
     Migration(2, "add scoped identities, durable dispatch, exports, and context lineage", DB_SCHEMA_V2_SQL),
     Migration(3, "add durable run-scoped resource claims", DB_SCHEMA_V3_SQL),
     Migration(4, "persist canonical host resource receipt evidence", DB_SCHEMA_V4_SQL),
     Migration(5, "persist requested and resolved host resource evidence", DB_SCHEMA_V5_SQL),
+    Migration(6, "persist driver checkpoints and handoff idempotency", DB_SCHEMA_V6_SQL),
+    Migration(7, "persist typed verification specifications", DB_SCHEMA_V7_SQL),
+    Migration(8, "persist host capability cache and conformance snapshots", DB_SCHEMA_V8_SQL),
 )
 MIGRATION_MAP: Final[dict[int, Migration]] = {migration.version: migration for migration in MIGRATIONS}
 MIGRATION_DEFINITIONS: Final[tuple[Migration, ...]] = MIGRATIONS
@@ -1139,6 +1217,9 @@ __all__ = [
     "DB_SCHEMA_V3_SQL",
     "DB_SCHEMA_V4_SQL",
     "DB_SCHEMA_V5_SQL",
+    "DB_SCHEMA_V6_SQL",
+    "DB_SCHEMA_V7_SQL",
+    "DB_SCHEMA_V8_SQL",
     "LATEST_SCHEMA_VERSION",
     "MIGRATION_1_SQL",
     "MIGRATION_DEFINITIONS",

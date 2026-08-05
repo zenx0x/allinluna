@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Small neutral host conformance diagnostics.
+"""Operation-specific host conformance diagnostics.
 
-The checker validates host-facing traces for bounded task tools. It intentionally
-covers a small surface: identity, create/read/wait/cancel operations, and
-idempotency.
+The checker consumes a durable-receipt-shaped trace or a fixture.  It validates
+the tool actually used for each operation; it does not require Git/worktree
+metadata from projectless hosts and is intentionally diagnostic unless a caller
+explicitly selects a strict route-assurance policy.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 PROTOCOL = "allinluna.host_conformance"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", SCHEMA_VERSION})
 REQUIRED_ACTIONS = ("create", "read", "wait", "cancel")
 ACTION_FIELDS = (
     "op",
@@ -30,8 +32,15 @@ ACTION_FIELDS = (
     "identity",
     "idempotency",
 )
-REQUIRED_IDENTITY_FIELDS = ("thread_id", "host_id", "worktree", "repo", "branch", "commit")
+REQUIRED_IDENTITY_FIELDS = ("thread_id", "host_id")
+OPTIONAL_IDENTITY_FIELDS = ("worktree", "repo", "branch", "commit")
 VALID_IDEMPOTENCY = {"no-op", "reuse", "wait"}
+_TOOLS = {
+    "create": "codex_app__create_thread",
+    "read": "codex_app__read_thread",
+    "wait": "codex_app__wait_threads",
+    "cancel": "codex_app__cancel_thread",
+}
 
 
 def _issue(class_name: str, message: str, *, path: str) -> dict[str, str]:
@@ -39,26 +48,20 @@ def _issue(class_name: str, message: str, *, path: str) -> dict[str, str]:
 
 
 def _identity(*, thread_suffix: str, host: str) -> dict[str, str]:
-    return {
-        "thread_id": f"host-thread-{thread_suffix}",
-        "host_id": host,
-        "worktree": f"host-worktree/{thread_suffix}",
-        "repo": "D:/repos/allinluna",
-        "branch": "main",
-        "commit": "local-host-conformance-commit",
-    }
+    return {"thread_id": f"host-thread-{thread_suffix}", "host_id": host}
 
 
-def _operation(name: str, identity: dict[str, str], *, idempotency: str) -> dict[str, str]:
+def _operation(name: str, identity: dict[str, str], *, idempotency: str) -> dict[str, Any]:
+    tool = _TOOLS[name]
     return {
         "op": name,
         "thread_id": identity["thread_id"],
-        "requested_tool": "codex_app__create_thread",
-        "resolved_tool": "codex_app__create_thread",
-        "actual_tool": "codex_app__create_thread",
-        "requested_capability": "top-level-task",
-        "resolved_capability": "top-level-task",
-        "actual_capability": "top-level-task",
+        "requested_tool": tool,
+        "resolved_tool": tool,
+        "actual_tool": tool,
+        "requested_capability": tool,
+        "resolved_capability": tool,
+        "actual_capability": tool,
         "identity": dict(identity),
         "idempotency": idempotency,
     }
@@ -88,78 +91,87 @@ def _validate_identity(value: Any, *, path: str, failures: list[dict[str, str]])
     for field in REQUIRED_IDENTITY_FIELDS:
         if not isinstance(value.get(field), str) or not value[field].strip():
             failures.append(_issue("schema", f"{path}.{field} must be a non-empty string", path=f"{path}.{field}"))
-    return {field: str(value.get(field, "")) for field in REQUIRED_IDENTITY_FIELDS}
+    result = {field: str(value.get(field, "")) for field in REQUIRED_IDENTITY_FIELDS}
+    for field in OPTIONAL_IDENTITY_FIELDS:
+        if field in value and value[field] is not None:
+            if not isinstance(value[field], str) or not value[field].strip():
+                failures.append(_issue("schema", f"{path}.{field} must be a non-empty string when supplied", path=f"{path}.{field}"))
+            else:
+                result[field] = value[field]
+    return result
+
+
+def _validate_route(operation: dict[str, Any], *, index: int, failures: list[dict[str, str]]) -> None:
+    path = f"operations[{index}]"
+    op_name = str(operation.get("op") or "")
+    expected_tool = _TOOLS.get(op_name)
+    for field in ("requested_tool", "resolved_tool", "actual_tool"):
+        if not isinstance(operation.get(field), str) or not operation[field].strip():
+            continue
+        if expected_tool and operation[field] != expected_tool:
+            failures.append(_issue("operation", f"{op_name} must use {expected_tool}, got {operation[field]!r}", path=f"{path}.{field}"))
+    if operation.get("actual_tool") != operation.get("resolved_tool"):
+        failures.append(_issue("operation", "actual_tool must match resolved_tool", path=f"{path}.actual_tool"))
+    if operation.get("actual_capability") != operation.get("resolved_capability"):
+        failures.append(_issue("operation", "actual_capability must match resolved_capability", path=f"{path}.actual_capability"))
 
 
 def validate(trace: Any, *, mode: str) -> list[dict[str, str]]:
     failures: list[dict[str, str]] = []
     if not isinstance(trace, dict):
-        failures.append(_issue("schema", "trace must be a JSON object", path="$"))
-        return failures
-
+        return [_issue("schema", "trace must be a JSON object", path="$")]
     if trace.get("protocol") != PROTOCOL:
         failures.append(_issue("schema", "invalid protocol", path="protocol"))
-    if trace.get("schema_version") != SCHEMA_VERSION:
+    if trace.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
         failures.append(_issue("schema", "invalid schema_version", path="schema_version"))
     if trace.get("verification_mode") != mode:
         failures.append(_issue("schema", "verification_mode must match execution mode", path="verification_mode"))
-
     top_identity = _validate_identity(trace.get("identity"), path="identity", failures=failures)
-
     checked_at = trace.get("checked_at")
     if not isinstance(checked_at, str):
         failures.append(_issue("schema", "checked_at must be a string", path="checked_at"))
     else:
         try:
             parsed = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
-        except ValueError:
-            failures.append(_issue("schema", "checked_at must be iso8601", path="checked_at"))
-        else:
             if parsed.tzinfo is None:
-                failures.append(_issue("schema", "checked_at must include timezone", path="checked_at"))
-
+                raise ValueError("timezone")
+        except ValueError:
+            failures.append(_issue("schema", "checked_at must be iso8601 with timezone", path="checked_at"))
     operations = trace.get("operations")
     if not isinstance(operations, list) or len(operations) < len(REQUIRED_ACTIONS):
         failures.append(_issue("schema", "operations must contain create/read/wait/cancel", path="operations"))
         return failures
-
     seen_ops: set[str] = set()
     for index, operation in enumerate(operations):
+        path = f"operations[{index}]"
         if not isinstance(operation, dict):
-            failures.append(_issue("schema", "operation must be an object", path=f"operations[{index}]"))
+            failures.append(_issue("schema", "operation must be an object", path=path))
             continue
         op_name = operation.get("op")
         if not isinstance(op_name, str) or not op_name.strip():
-            failures.append(_issue("schema", "operation.op must be a non-empty string", path=f"operations[{index}].op"))
+            failures.append(_issue("schema", "operation.op must be a non-empty string", path=f"{path}.op"))
             continue
         seen_ops.add(op_name)
         if op_name not in REQUIRED_ACTIONS:
-            failures.append(_issue("schema", f"unsupported operation {op_name}", path=f"operations[{index}].op"))
+            failures.append(_issue("schema", f"unsupported operation {op_name}", path=f"{path}.op"))
             continue
         for field in ACTION_FIELDS:
             if not operation.get(field):
-                failures.append(_issue("schema", f"operation.{field} is required", path=f"operations[{index}].{field}"))
-        op_identity = _validate_identity(operation.get("identity"), path=f"operations[{index}].identity", failures=failures)
-        if top_identity and op_identity:
+                failures.append(_issue("schema", f"operation.{field} is required", path=f"{path}.{field}"))
+        operation_identity = _validate_identity(operation.get("identity"), path=f"{path}.identity", failures=failures)
+        if top_identity and operation_identity:
             for field in REQUIRED_IDENTITY_FIELDS:
-                if op_identity.get(field) != top_identity.get(field):
-                    failures.append(
-                        _issue(
-                            "schema",
-                            "operation identity must match trace identity",
-                            path=f"operations[{index}].identity.{field}",
-                        )
-                    )
-        if isinstance(operation.get("idempotency"), str):
-            if operation.get("idempotency") not in VALID_IDEMPOTENCY:
-                failures.append(_issue("schema", f"unsupported idempotency for operation {op_name}", path=f"operations[{index}].idempotency"))
-        else:
-            failures.append(_issue("schema", f"operation {op_name} idempotency is required", path=f"operations[{index}].idempotency"))
-
-    missing = [action for action in REQUIRED_ACTIONS if action not in seen_ops]
-    for action in missing:
-        failures.append(_issue("schema", f"required action missing: {action}", path="operations"))
-
+                if operation_identity.get(field) != top_identity.get(field):
+                    failures.append(_issue("schema", "operation identity must match trace identity", path=f"{path}.identity.{field}"))
+            for field in OPTIONAL_IDENTITY_FIELDS:
+                if field in top_identity and field in operation_identity and operation_identity[field] != top_identity[field]:
+                    failures.append(_issue("schema", "operation optional identity must match trace identity when supplied", path=f"{path}.identity.{field}"))
+        if operation.get("idempotency") not in VALID_IDEMPOTENCY:
+            failures.append(_issue("schema", f"unsupported idempotency for operation {op_name}", path=f"{path}.idempotency"))
+        _validate_route(operation, index=index, failures=failures)
+    for action in REQUIRED_ACTIONS:
+        if action not in seen_ops:
+            failures.append(_issue("schema", f"required action missing: {action}", path="operations"))
     return failures
 
 
@@ -167,11 +179,7 @@ def evaluate(trace: Any, *, mode: str) -> dict[str, Any]:
     failures = validate(trace, mode=mode)
     operations = trace.get("operations") if isinstance(trace, dict) else []
     checks = {
-        "identity": bool(
-            isinstance(trace, dict)
-            and isinstance(trace.get("identity"), dict)
-            and all(bool(trace["identity"].get(field)) for field in REQUIRED_IDENTITY_FIELDS)
-        ),
+        "identity": bool(isinstance(trace, dict) and isinstance(trace.get("identity"), dict) and all(bool(trace["identity"].get(field)) for field in REQUIRED_IDENTITY_FIELDS)),
         "idempotency": not any(failure["path"].endswith("idempotency") for failure in failures),
     }
     if isinstance(operations, list):
@@ -219,11 +227,7 @@ def run(mode: str, *, trace_path: Path | None = None) -> dict[str, Any]:
         report = evaluate({}, mode=mode)
         report["status"] = "BLOCKED"
         report["failures"] = read_failures
-        report["summary"] = {
-            "sufficient": False,
-            "missing": [item["message"] for item in read_failures],
-            "stop_reason": "blocked waiting for host trace",
-        }
+        report["summary"] = {"sufficient": False, "missing": [item["message"] for item in read_failures], "stop_reason": "blocked waiting for host trace"}
         return report
     return evaluate(trace, mode=mode)
 
@@ -234,7 +238,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trace", type=Path, help="host trace JSON path for real mode")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
-
     report = run(args.mode, trace_path=args.trace)
     encoded = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
     if args.output:

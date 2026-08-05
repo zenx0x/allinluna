@@ -57,7 +57,7 @@ def test_evidence_collector_exposes_pack_profiles_and_real_check_receipt(tmp_pat
             profile="projectless-analysis",
         ).collect(
             store.get_task("task-collector") or {},
-            checks=[{"name": "the evidence check passes", "command": [sys.executable, "-c", "print('ok')"], "satisfies": ["the evidence check passes"]}],
+            checks=[{"id": "evidence-check", "kind": "command", "command": [sys.executable, "-c", "print('ok')"], "satisfies": ["the evidence check passes"]}],
         )
         assert evidence["verified"] is True
         assert evidence["collector"] == "allinluna.evidence-collector/v1"
@@ -77,7 +77,7 @@ def test_check_timeout_is_explicit_failure_evidence_not_a_hanging_or_passing_che
         ).collect(
             store.get_task("task-timeout") or {},
             checks=[{
-                "name": "quick check", "command": [sys.executable, "-c", "import time; time.sleep(1)"],
+                "id": "quick-check", "kind": "command", "command": [sys.executable, "-c", "import time; time.sleep(1)"],
                 "timeout_seconds": 0.02, "satisfies": ["quick check"],
             }],
         )

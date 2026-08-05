@@ -25,11 +25,12 @@ from uuid import uuid4
 
 from .core.policy import contains as path_contains, contains_all as paths_contained, overlaps as paths_overlap
 from .core.model import (
-    ArtifactKind, ArtifactVisibility, AuthorityAction, DependencyCondition,
+    ArtifactKind, ArtifactVisibility, AuthorityAction, CapabilityClass, DependencyCondition,
     LaneAttemptState, LeaseScope, LeaseState, ModelState, PortKind,
-    ReceiptStatus, RepositoryMode, ResourcePolicy, RunStatus, ScopeType,
+    ReceiptStatus, RepositoryMode, ResourcePolicy, RouteAssuranceMode, RunStatus, ScopeType,
     SignalType, SnapshotValidity, TaskState, WorkUnitAttemptState, WorkUnitState,
 )
+from .verification import VerificationSpec, verification_specs
 
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "AuthorizationIntent",
     "AttemptNumber",
     "CapabilityRef",
+    "CapabilityClass",
     "Contract",
     "ContractId",
     "ContractRef",
@@ -87,6 +89,7 @@ __all__ = [
     "RepositoryMode",
     "RepositoryRoot",
     "ResourceEnvelope",
+    "RouteAssuranceMode",
     "Run",
     "RunId",
     "RunIntent",
@@ -111,6 +114,7 @@ __all__ = [
     "TaskGraph",
     "TaskState",
     "ValidationError",
+    "VerificationSpec",
     "WorkUnit",
     "WorkUnitAttempt",
     "WorkUnitAttemptId",
@@ -642,6 +646,8 @@ class ResourceEnvelope(Serializable):
     model: str | None = None
     reasoning_policy: ResourcePolicy | str = ResourcePolicy.AUTO
     reasoning: str | None = None
+    capability_class: CapabilityClass | str | None = None
+    route_assurance: RouteAssuranceMode | str = RouteAssuranceMode.OBSERVE_IF_EXPOSED
     time_budget: int | None = None
     token_or_credit_budget: int | None = None
     external_action_policy: str = "ask"
@@ -651,6 +657,17 @@ class ResourceEnvelope(Serializable):
         object.__setattr__(self, "model_policy", _enum(ResourcePolicy, self.model_policy, "model_policy"))
         object.__setattr__(
             self, "reasoning_policy", _enum(ResourcePolicy, self.reasoning_policy, "reasoning_policy")
+        )
+        if self.capability_class is not None:
+            object.__setattr__(
+                self,
+                "capability_class",
+                _enum(CapabilityClass, self.capability_class, "capability_class"),
+            )
+        object.__setattr__(
+            self,
+            "route_assurance",
+            _enum(RouteAssuranceMode, self.route_assurance, "route_assurance"),
         )
         if self.external_action_policy not in {"ask", "deny", "allow"}:
             raise ValidationError("external_action_policy must be ask, deny, or allow")
@@ -892,6 +909,7 @@ class Contract(Serializable):
     exports: tuple[ExportPort | Mapping[str, Any], ...] = ()
     dependencies: tuple[TaskDependency | Mapping[str, Any], ...] = ()
     done_when: tuple[str, ...] = ()
+    verification_specs: tuple[VerificationSpec | Mapping[str, Any], ...] = ()
     ownership: Ownership | Mapping[str, Any] = field(default_factory=Ownership)
     permissions: Permissions | Mapping[str, Any] = field(default_factory=Permissions)
     context_policy: ContextPolicy | Mapping[str, Any] = field(default_factory=ContextPolicy)
@@ -929,6 +947,7 @@ class Contract(Serializable):
             ),
         )
         object.__setattr__(self, "done_when", _string_tuple(self.done_when, "contract.done_when", min_items=1))
+        object.__setattr__(self, "verification_specs", verification_specs(self.verification_specs))
         if not isinstance(self.ownership, Ownership):
             object.__setattr__(self, "ownership", Ownership.from_dict(self.ownership))
         if not isinstance(self.permissions, Permissions):
@@ -963,10 +982,11 @@ class Contract(Serializable):
         result["imports_json"] = json.dumps(_serialize(self.imports), sort_keys=True, separators=(",", ":"))
         result["exports_json"] = json.dumps(_serialize(self.exports), sort_keys=True, separators=(",", ":"))
         result["done_when_json"] = json.dumps(list(self.done_when), separators=(",", ":"))
+        result["verification_specs_json"] = json.dumps([item.to_dict() for item in self.verification_specs], sort_keys=True, separators=(",", ":"))
         result["ownership_json"] = json.dumps(_serialize(self.ownership), sort_keys=True, separators=(",", ":"))
         result["permissions_json"] = json.dumps(_serialize(self.permissions), sort_keys=True, separators=(",", ":"))
         result["context_policy_json"] = json.dumps(_serialize(self.context_policy), sort_keys=True, separators=(",", ":"))
-        for name in ("imports", "exports", "dependencies", "done_when", "ownership", "permissions", "context_policy"):
+        for name in ("imports", "exports", "dependencies", "done_when", "verification_specs", "ownership", "permissions", "context_policy"):
             result.pop(name, None)
         return result
 
@@ -1238,7 +1258,7 @@ class Task(Serializable):
 _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PROPOSED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.READY: frozenset({TaskState.DISPATCHING, TaskState.CANCELLED}),
-    TaskState.DISPATCHING: frozenset({TaskState.ACTIVE}),
+    TaskState.DISPATCHING: frozenset({TaskState.ACTIVE, TaskState.BLOCKED}),
     TaskState.ACTIVE: frozenset({TaskState.WAITING, TaskState.VERIFYING, TaskState.BLOCKED, TaskState.SUPERSEDED}),
     TaskState.WAITING: frozenset({TaskState.ACTIVE, TaskState.BLOCKED}),
     TaskState.VERIFYING: frozenset({TaskState.COMPLETED, TaskState.BLOCKED}),

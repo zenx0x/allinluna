@@ -23,6 +23,19 @@ from .manifest import PackRegistry, builtin_registry
 from .research_routes import ResearchRoutesBridge
 
 
+EXACT_ACTION_RELAY_CONTRACT: Mapping[str, Any] = {
+    "protocol": "allinluna-action-relay/v1",
+    "priority": "highest",
+    "rules": (
+        "Invoke HostAction.tool exactly with HostAction.arguments.",
+        "Never translate, approximate, or substitute a host tool.",
+        "A top_level_task never falls back to a subagent, current thread, or direct execution.",
+        "Ingest the raw receipt immediately, then tick again.",
+        "If the exact capability is unavailable, return HOST_CAPABILITY_BLOCKED.",
+    ),
+}
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -58,6 +71,7 @@ class SkillCompilation:
     input_kind: str
     compatibility: Mapping[str, Any] = field(default_factory=dict)
     permission_intents: tuple[PermissionIntent, ...] = ()
+    action_relay_contract: Mapping[str, Any] = field(default_factory=lambda: EXACT_ACTION_RELAY_CONTRACT)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +80,7 @@ class SkillCompilation:
             "task_graph": self.task_graph.to_dict(),
             "compatibility": dict(self.compatibility),
             "permission_intents": [item.to_dict() for item in self.permission_intents],
+            "action_relay_contract": dict(self.action_relay_contract),
         }
 
 
@@ -119,7 +134,7 @@ class SinglePublicSkillAPI:
         # Permissions are intentionally absent at compile time. The Action
         # Bridge persists a PermissionIntent only when a concrete external
         # action reaches the dispatch boundary.
-        return SkillCompilation(intent, graph, input_kind, compatibility, ())
+        return SkillCompilation(intent, graph, input_kind, compatibility, (), EXACT_ACTION_RELAY_CONTRACT)
 
     def start(self, request: str | Mapping[str, Any] | RunIntent, *, store: Store | None = None, db_path: str | Path | None = None, repository: Mapping[str, Any] | None = None, pack: str | None = None, dispatch: bool = False, host: Any = None) -> Mapping[str, Any]:
         compilation = self.compile(request, repository=repository, pack=pack)
@@ -185,4 +200,4 @@ class SinglePublicSkillAPI:
         )
 
 
-__all__ = ["GoalCompiler", "JITPermissionRouter", "PermissionIntent", "RepositoryContextInspector", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]
+__all__ = ["EXACT_ACTION_RELAY_CONTRACT", "GoalCompiler", "JITPermissionRouter", "PermissionIntent", "RepositoryContextInspector", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]

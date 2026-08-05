@@ -361,6 +361,17 @@ class VNextE2ETests(unittest.TestCase):
         self.assertTrue(flow.get("protected_unchanged"))
         self.assertIn("exports_available", flow.get("dependency_condition", ""))
         self.assertEqual(flow.get("run_status"), "completed", flow)
+        self.assertEqual(flow.get("child_bootstraps_loaded"), 2)
+        self.assertEqual(
+            flow.get("public_create_thread_fields"),
+            ["model", "prompt", "target", "thinking", "title"],
+        )
+        self.assertEqual(flow.get("requested_resources"), [("gpt-5.6-luna", "max")])
+        self.assertFalse(flow.get("public_create_thread_hidden_payload"))
+        self.assertTrue(flow.get("parent_lane_engine_closure"))
+        self.assertTrue(flow.get("dependency_released_next_wave"))
+        self.assertEqual(flow.get("restart_duplicate_dispatches"), 0)
+        self.assertTrue(flow.get("telemetry_missing_non_blocking"))
 
     def test_blocked_lane_does_not_stop_unrelated_lanes(self) -> None:
         result = self.execute("blocked_lane_continuation")

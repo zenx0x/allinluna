@@ -66,8 +66,13 @@ def validate() -> tuple[list[str], list[str]]:
         if len(prompts) < 2:
             errors.append("allinluna manifest needs its public prompts")
         research = ROOT / "plugins/research-routes/.codex-plugin/plugin.json"
-        if not research.is_file() or json.loads(research.read_text(encoding="utf-8")).get("name") != "research-routes":
+        research_manifest = json.loads(research.read_text(encoding="utf-8")) if research.is_file() else {}
+        if not research.is_file() or research_manifest.get("name") != "research-routes":
             errors.append("research-routes plugin metadata is missing or invalid")
+        if research_manifest.get("runtime", {}).get("source") != "./runtime/research_routes_runtime":
+            errors.append("research-routes manifest must point at the Pack-local runtime")
+        if not (ROOT / "plugins/research-routes/runtime/research_routes_runtime/__init__.py").is_file():
+            errors.append("research-routes Pack-local runtime is missing")
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"invalid plugin metadata: {exc}")
 

@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any, Mapping
 
 from ..domain import Run, RunIntent, Task
+from ..verification import VerifierSpec
 from .base import CompiledRunGraph, PackManifest, contract_for, task_for
 
 
@@ -80,8 +81,8 @@ class ResearchRoutesBridge:
         result.setdefault("known_facts", []).append(additions)
         return result
 
-    def verifiers(self, task: Task) -> list[Any]:
-        return [lambda evidence: isinstance(evidence, Mapping) and evidence.get("route_neutral") is True]
+    def verifiers(self, task: Task) -> list[VerifierSpec]:
+        return [VerifierSpec(id="route-neutral", kind="pack", assertion="field_true", details={"field": "route_neutral"})]
 
     def compose_result(self, run: Run) -> Mapping[str, Any]:
         return {"kind": "result", "run_id": str(run.id), "status": run.status.value, "pack": self.id, "route_neutral": True}

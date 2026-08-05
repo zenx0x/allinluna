@@ -2,7 +2,9 @@
 
 from .action_bridge import ActionBridge, ActionBridgeAPI
 from .coordinator import CoordinatorEngine, CoordinatorEngineAPI, CoordinatorTick
+from .coordinator_driver import CoordinatorDriver, CoordinatorDriverAPI
 from .lane import LaneEngine, LaneEngineAPI
+from .lane_driver import LaneDriver, LaneDriverAPI
 
 __all__ = [
     "ActionBridge",
@@ -10,6 +12,10 @@ __all__ = [
     "CoordinatorEngine",
     "CoordinatorEngineAPI",
     "CoordinatorTick",
+    "CoordinatorDriver",
+    "CoordinatorDriverAPI",
     "LaneEngine",
     "LaneEngineAPI",
+    "LaneDriver",
+    "LaneDriverAPI",
 ]

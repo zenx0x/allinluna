@@ -1,8 +1,12 @@
 [
   "route-neutral terrain maps",
   "Claims and Evidence separation",
-  "contradictory evidence",
+  "evidence polarity and contradiction preservation",
   "failure regimes and unknowns",
-  "reversible probes",
+  "mature-method comparators",
+  "FailureRecord and RewindProposal",
+  "Lesson and ReopenedProblem",
+  "canonical downgrade",
+  "Human route authorization",
   "implementation and canonical-state boundaries"
 ]

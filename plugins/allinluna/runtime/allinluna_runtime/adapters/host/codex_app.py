@@ -9,6 +9,7 @@ thread receipt.
 
 from __future__ import annotations
 
+import inspect
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
@@ -359,6 +360,11 @@ def _normalise_thread_payload(payload: Any, *, action: HostAction | None = None,
         raw.setdefault("actual_tool", action.tool if action and action.tool else CREATE_THREAD_TOOL)
     raw.setdefault("source", source)
     raw.setdefault("host_id", host_id)
+    raw.setdefault("action_contract_hash", action.action_contract_hash if action else None)
+    raw.setdefault(
+        "actual_capability",
+        action.host_capability_required if action and action.host_capability_required else raw.get("actual_tool"),
+    )
     return HostReceipt.from_value(raw, action=action, default_source=source, default_host_id=host_id)
 
 
@@ -453,6 +459,28 @@ class CodexAppHost(HostAdapter):
             CANCEL_THREAD_TOOL: "cancel_task",
         }.get(tool)
         method = getattr(host, semantic, None) if semantic else None
+        if tool == CREATE_THREAD_TOOL and action is not None:
+            public_method = getattr(host, "create_thread", None)
+            if callable(public_method):
+                public = {
+                    key: arguments[key]
+                    for key in ("target", "prompt", "model", "thinking", "title")
+                    if key in arguments
+                }
+                # Some compatibility hosts model the public API with required
+                # model/thinking parameters.  Supplying ``None`` preserves an
+                # unresolved host-default route without inventing a model
+                # name; real optional tool signatures continue to omit them.
+                try:
+                    signature = inspect.signature(public_method)
+                except (TypeError, ValueError):
+                    signature = None
+                if signature is not None:
+                    for name in ("model", "thinking"):
+                        parameter = signature.parameters.get(name)
+                        if parameter is not None and parameter.default is inspect.Parameter.empty and name not in public:
+                            public[name] = None
+                return public_method(**public)
         if callable(method):
             if tool == CREATE_THREAD_TOOL and action is not None:
                 return method(action.to_dict() | dict(action.payload))
@@ -500,6 +528,50 @@ class CodexAppHost(HostAdapter):
 
     def create_top_level_task(self, action: HostAction | Mapping[str, Any]) -> HostReceipt:
         value = as_host_action(action, kind="create-top-level-task")
+        if (
+            value.execution_class != "top_level_task"
+            or value.tool != CREATE_THREAD_TOOL
+            or value.tool_policy.get("exact_tool") != CREATE_THREAD_TOOL
+            or value.tool_policy.get("substitutions")
+            or value.host_capability_required != CREATE_THREAD_TOOL
+        ):
+            return HostReceipt(
+                receipt_id="receipt-" + stable_digest({"action": value.to_dict(), "error": "HOST_PROTOCOL_VIOLATION"}),
+                status="failed",
+                source=CODEX_APP_SOURCE,
+                host_id=self.host_id,
+                action_id=value.action_id,
+                action_kind=value.kind,
+                idempotency_key=value.idempotency_key,
+                dispatch_id=value.dispatch_id,
+                task_id=value.task_id,
+                fallback="HOST_PROTOCOL_VIOLATION",
+                action_contract_hash=value.action_contract_hash,
+                payload={"code": "HOST_PROTOCOL_VIOLATION", "reason": "top-level action contract is not exact"},
+                action=value.to_dict(),
+            )
+        capabilities = self.discover()
+        if not capabilities.available or not capabilities.has_tool(CREATE_THREAD_TOOL):
+            return HostReceipt(
+                receipt_id="receipt-" + stable_digest({"action": value.to_dict(), "error": "HOST_CAPABILITY_BLOCKED"}),
+                status="blocked",
+                source=CODEX_APP_SOURCE,
+                host_id=capabilities.host_id,
+                action_id=value.action_id,
+                action_kind=value.kind,
+                idempotency_key=value.idempotency_key,
+                dispatch_id=value.dispatch_id,
+                task_id=value.task_id,
+                fallback="HOST_CAPABILITY_BLOCKED",
+                actual_capability=CREATE_THREAD_TOOL,
+                action_contract_hash=value.action_contract_hash,
+                payload={
+                    "code": "HOST_CAPABILITY_BLOCKED",
+                    "required_capability": CREATE_THREAD_TOOL,
+                    "capabilities": capabilities.to_dict(),
+                },
+                action=value.to_dict(),
+            )
         existing = self._receipts.get(value.idempotency_key)
         if existing is not None:
             return HostReceipt.from_value(existing.to_dict() | {"duplicate_of": existing.receipt_id}, action=value)
@@ -507,8 +579,11 @@ class CodexAppHost(HostAdapter):
         self._invocations.append(value)
         tool = value.tool or CREATE_THREAD_TOOL
         args = dict(value.arguments)
-        args.setdefault("model", value.model or DEFAULT_MODEL)
-        if not isinstance(args.get("model"), str) or not str(args["model"]).strip():
+        if value.model and "model" not in args:
+            args["model"] = value.model
+        if args.get("model") is not None and (
+            not isinstance(args.get("model"), str) or not str(args["model"]).strip()
+        ):
             return self._remember(value, HostReceipt(receipt_id="receipt-" + stable_digest(value.to_dict()), status="unresolved", source=CODEX_APP_SOURCE, host_id=self.host_id, action_id=value.action_id, action_kind=value.kind, idempotency_key=value.idempotency_key, dispatch_id=value.dispatch_id, task_id=value.task_id, fallback="invalid-model-request", action=value.to_dict()))
         if value.reasoning:
             args.setdefault("thinking", value.reasoning)

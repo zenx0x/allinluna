@@ -17,6 +17,12 @@ from ..store import LeaseConflictError
 from ..adapters.host.base import HostAction, stable_digest
 from ..domain import ExportPort, TaskGraph, TaskState
 from ..handoff import HandoffProcessor, HandoffVerificationError
+from ..protocols.lane_bootstrap import (
+    DEFAULT_FORBIDDEN_GLOBAL_CAPABILITIES,
+    DEFAULT_LOCAL_CAPABILITIES,
+    LaneBootstrapEnvelope,
+    render_lane_bootstrap_prompt,
+)
 from .conflicts import critical_path_lengths, detect_cycles, filter_ownership_conflicts
 from .leases import LeaseRecoveryBehavior
 
@@ -473,6 +479,10 @@ class GlobalScheduler:
         })
         attempt_id = "lane-attempt-" + stable_digest({"dispatch_key": key})
         ownership = [str(item.get("path")) for item in task.get("ownership", ()) if str(item.get("access", "write")) == "write"]
+        resource_receipt = allocation.get("receipt") if isinstance(allocation.get("receipt"), Mapping) else {}
+        resolved_route = resource_receipt.get("resolved") if isinstance(resource_receipt.get("resolved"), Mapping) else {}
+        resolved_model = allocation.get("model")
+        resolved_reasoning = allocation.get("reasoning")
         envelope = {
             "kind": "task-envelope",
             "schema_version": "1.0",
@@ -487,10 +497,12 @@ class GlobalScheduler:
             "ownership": ownership,
             "resource_envelope": {
                 "subagent_slots": int(getattr(self.resource_broker, "default_lane_budget", 1)),
-                "model_policy": "explicit",
-                "model": str(allocation.get("model", self.resource_broker.model)),
-                "reasoning_policy": "explicit",
-                "reasoning": str(allocation.get("reasoning", self.resource_broker.reasoning)),
+                "model_policy": "explicit" if resolved_model else "auto",
+                "model": resolved_model,
+                "reasoning_policy": "explicit" if resolved_reasoning else "auto",
+                "reasoning": resolved_reasoning,
+                "capability_class": resolved_route.get("capability_class"),
+                "route_assurance": resolved_route.get("route_assurance", self.resource_broker.route_assurance),
                 "external_action_policy": str(allocation.get("external_action_policy", self.resource_broker.external_action_policy)),
             },
             "response_contract": "lane-handoff/v1",
@@ -499,15 +511,27 @@ class GlobalScheduler:
             "extensions": {
                 "local_graph_ref": f"runtime-db://work-graph/{task_id}",
                 "local_work_units": [str(item["id"]) for item in self.store._fetchall("SELECT id FROM work_units WHERE task_id = ? ORDER BY created_at", (task_id,))],
+                "allowed_local_capabilities": list(DEFAULT_LOCAL_CAPABILITIES),
+                "forbidden_global_capabilities": list(DEFAULT_FORBIDDEN_GLOBAL_CAPABILITIES),
             },
         }
+        task_envelope_ref = f"task-envelope://{task['run_id']}/{task_id}/{dispatch_id}"
+        envelope["task_envelope_ref"] = task_envelope_ref
+        # The bootstrap is assembled before the exact public action is hashed
+        # and persisted.  It is therefore visible both in the public prompt
+        # and in the durable dispatch payload that a restarting Lane reopens.
+        bootstrap = LaneBootstrapEnvelope.for_task(self.store, task, envelope)
+        envelope["extensions"]["lane_bootstrap"] = bootstrap.to_dict()
+        envelope["extensions"]["task_envelope_digest"] = bootstrap.task_envelope_digest
         arguments = {
             "target": {"type": "project", "task_id": task_id},
-            "prompt": str(task["outcome"]),
-            "model": str(allocation.get("model", self.resource_broker.model)),
-            "thinking": str(allocation.get("reasoning", self.resource_broker.reasoning)),
+            "prompt": render_lane_bootstrap_prompt(outcome=str(task["outcome"]), bootstrap=bootstrap),
             "title": f"All in Luna lane {task_id}",
         }
+        if resolved_model:
+            arguments["model"] = resolved_model
+        if resolved_reasoning:
+            arguments["thinking"] = resolved_reasoning
         return HostAction(
             action_id=f"action-{stable_digest({'task': task_id, 'dispatch': dispatch_id})}",
             kind="create-top-level-task",
@@ -517,10 +541,24 @@ class GlobalScheduler:
             task_id=task_id,
             dispatch_id=dispatch_id,
             host_id=self.adapter,
-            model=str(allocation.get("model", self.resource_broker.model)),
-            reasoning=str(allocation.get("reasoning", self.resource_broker.reasoning)),
+            model=resolved_model,
+            reasoning=resolved_reasoning,
+            execution_class="top_level_task",
+            tool_policy={
+                "exact_tool": "codex_app__create_thread",
+                "substitutions": [],
+                "on_unavailable": "block",
+            },
+            host_capability_required="codex_app__create_thread",
+            task_envelope_ref=task_envelope_ref,
             identity={"run_id": str(task["run_id"]), "task_id": task_id},
-            payload={"task_envelope": envelope, "resource_receipt": allocation.get("receipt"), "attempt_id": attempt_id},
+            payload={
+                "task_envelope": envelope,
+                "task_envelope_ref": task_envelope_ref,
+                "lane_bootstrap": bootstrap.to_dict(),
+                "resource_receipt": resource_receipt,
+                "attempt_id": attempt_id,
+            },
         )
 
     def _pending_actions(self, run_id: str) -> list[HostAction]:
@@ -544,10 +582,10 @@ class GlobalScheduler:
         actions: list[HostAction] = []
         for task in ready:
             requested = task.get("resource_envelope") or policy
-            receipt = self.resource_broker._receipt(requested)
+            receipt = self.resource_broker._receipt(requested, operation="create-top-level-task")
             allocation = {
-                "model": receipt.resolved["model"],
-                "reasoning": receipt.resolved["reasoning"],
+                "model": receipt.resolved.get("model"),
+                "reasoning": receipt.resolved.get("reasoning"),
                 "external_action_policy": receipt.resolved["external_action_policy"],
                 "receipt": receipt.to_dict(),
             }

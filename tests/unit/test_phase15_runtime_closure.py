@@ -69,7 +69,9 @@ def test_next_actions_is_read_only_and_dispatch_uses_durable_outbox(tmp_path):
         action = scheduler.step(run_id)[0]
         assert len(store.pending_outbox(run_id)) == 1
         result = ActionBridge(store).dispatch(action)
-        assert result["status"] == "pending-host-dispatch"
+        assert result["status"] == "HOST_CAPABILITY_BLOCKED"
+        assert result["dispatch_intent_preserved"] is True
+        assert store.get_task(action.task_id)["state"] == "blocked"
         assert store.count_receipts() == 0
 
 
@@ -147,7 +149,7 @@ def test_completed_lane_handoff_is_verified_before_exports_and_completion(tmp_pa
             profile="projectless-analysis",
         ).collect(
             store.get_task("deliver") or {},
-            checks=[{"name": "check passes", "command": [sys.executable, "-c", "print('pass')"], "satisfies": ["check passes"]}],
+            checks=[{"id": "check-passes", "kind": "command", "command": [sys.executable, "-c", "print('pass')"], "satisfies": ["check passes"]}],
             exports=[{"name": "Result", "artifact_ref": artifact.ref, "version": 1}],
         )
         assert evidence["verified"] is True

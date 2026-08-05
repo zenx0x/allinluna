@@ -34,7 +34,12 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             plugin_root = plugin_root_for(artifact, spec)
             required = [plugin_root / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "canonical-files.json", artifact / "LICENSE", plugin_root / "runtime/allinluna_runtime/__init__.py", plugin_root / "skills/allinluna/SKILL.md"]
             if spec["id"] == "research-routes":
-                required.extend([artifact / "README.md", artifact / "README.en.md"])
+                required.extend([
+                    artifact / "README.md",
+                    artifact / "README.en.md",
+                    plugin_root / "runtime/research_routes_runtime/__init__.py",
+                    plugin_root / "runtime/research_routes_runtime/schemas/research-pack.schema.json",
+                ])
             for path in required:
                 if not path.is_file():
                     errors.append(f"{spec['id']} missing {path.relative_to(artifact)}")
@@ -49,6 +54,8 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             expected_skills = "./skills/allinluna" if spec["id"] == "all-in-luna" else "./skills/"
             if plugin.get("skills") != expected_skills:
                 errors.append(f"{spec['id']} skill entrypoint is not canonical: {plugin.get('skills')!r}")
+            if spec["id"] == "research-routes" and plugin.get("runtime", {}).get("source") != "./runtime/research_routes_runtime":
+                errors.append("research-routes Pack runtime entrypoint is not canonical")
             marketplace = read_json(artifact / ".agents/plugins/marketplace.json")
             entries = marketplace.get("plugins", [])
             if marketplace.get("name") != spec["plugin_name"] or len(entries) != 1:

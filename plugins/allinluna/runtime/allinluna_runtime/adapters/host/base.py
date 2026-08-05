@@ -26,8 +26,15 @@ from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, H
 from ...resource_observation import ResourceObservation
 
 
-DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_REASONING = "max"
+# Host adapters may leave a route unspecified and let the host choose its
+# current default.  Concrete model names belong in host/deployment policy,
+# never in Core adapter defaults.
+DEFAULT_MODEL: str | None = None
+DEFAULT_REASONING: str | None = None
+TOP_LEVEL_TASK_EXECUTION_CLASS = "top_level_task"
+LOCAL_SUBAGENT_EXECUTION_CLASS = "local_subagent"
+DIRECT_EXECUTION_CLASS = "direct"
+TOP_LEVEL_CREATE_THREAD_TOOL = "codex_app__create_thread"
 
 
 def _text(value: Any) -> str | None:
@@ -60,6 +67,35 @@ def canonical_json(value: Any) -> str:
 
 def stable_digest(value: Any, *, length: int = 20) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()[:length]
+
+
+def action_contract_material(
+    *,
+    kind: str,
+    tool: str | None,
+    arguments: Mapping[str, Any],
+    task_id: str | None,
+    dispatch_id: str | None,
+    execution_class: str,
+    task_envelope_ref: str | None,
+) -> dict[str, Any]:
+    """Return the immutable material that defines a host execution opcode."""
+
+    return {
+        "kind": kind,
+        "tool": tool,
+        "arguments": _copy(dict(arguments)),
+        "task_id": task_id,
+        "dispatch_id": dispatch_id,
+        "execution_class": execution_class,
+        "task_envelope_ref": task_envelope_ref,
+    }
+
+
+def action_contract_digest(**material: Any) -> str:
+    """Return the full deterministic SHA-256 for an exact host action contract."""
+
+    return hashlib.sha256(canonical_json(material).encode("utf-8")).hexdigest()
 
 
 def mapping_from(value: Any) -> dict[str, Any]:
@@ -225,7 +261,13 @@ class HostCapabilities(_MappingRecord):
 
 @dataclass(frozen=True, slots=True)
 class HostAction(_MappingRecord):
-    """An action/intention sent to a host or Action Bridge."""
+    """An action/intention sent to a host or Action Bridge.
+
+    ``tool`` is an execution opcode, not a hint.  In particular, a
+    ``top_level_task`` must remain a ``codex_app__create_thread`` action until
+    it is either receipted or explicitly blocked.  It may never be translated
+    into a local subagent or direct/current-thread execution.
+    """
 
     action_id: str
     kind: str
@@ -240,10 +282,85 @@ class HostAction(_MappingRecord):
     identity: Mapping[str, Any] | None = None
     model: str | None = None
     reasoning: str | None = None
+    execution_class: str | None = None
+    tool_policy: Mapping[str, Any] = field(default_factory=dict)
+    host_capability_required: str | None = None
+    task_envelope_ref: str | None = None
+    action_contract_hash: str | None = None
 
     def __post_init__(self) -> None:
         if not _text(self.action_id) or not _text(self.kind) or not _text(self.idempotency_key):
             raise ValueError("host action requires action_id, kind, and idempotency_key")
+        execution_class = _text(self.execution_class)
+        if execution_class is None:
+            execution_class = (
+                TOP_LEVEL_TASK_EXECUTION_CLASS
+                if self.kind == "create-top-level-task"
+                else LOCAL_SUBAGENT_EXECUTION_CLASS
+                if self.kind == "spawn-subagent"
+                else DIRECT_EXECUTION_CLASS
+            )
+            object.__setattr__(self, "execution_class", execution_class)
+        if execution_class not in {
+            TOP_LEVEL_TASK_EXECUTION_CLASS,
+            LOCAL_SUBAGENT_EXECUTION_CLASS,
+            DIRECT_EXECUTION_CLASS,
+        }:
+            raise ValueError(f"unknown execution_class: {execution_class!r}")
+
+        tool = _text(self.tool)
+        if execution_class == TOP_LEVEL_TASK_EXECUTION_CLASS and tool is None:
+            tool = TOP_LEVEL_CREATE_THREAD_TOOL
+            object.__setattr__(self, "tool", tool)
+        policy = dict(self.tool_policy) if isinstance(self.tool_policy, Mapping) else {}
+        exact_tool = _text(policy.get("exact_tool", policy.get("exactTool"))) or tool
+        substitutions = policy.get("substitutions", ())
+        if isinstance(substitutions, str):
+            substitutions = (substitutions,)
+        if not isinstance(substitutions, Sequence):
+            raise ValueError("tool_policy.substitutions must be a sequence")
+        normalized_policy = {
+            "exact_tool": exact_tool,
+            "substitutions": [str(item) for item in substitutions if str(item).strip()],
+            "on_unavailable": _text(policy.get("on_unavailable", policy.get("onUnavailable")))
+            or ("block" if execution_class == TOP_LEVEL_TASK_EXECUTION_CLASS else "adapter-policy"),
+        }
+        if execution_class == TOP_LEVEL_TASK_EXECUTION_CLASS:
+            if self.kind != "create-top-level-task":
+                raise ValueError("top_level_task actions must use kind=create-top-level-task")
+            if tool != TOP_LEVEL_CREATE_THREAD_TOOL:
+                raise ValueError("top_level_task actions must use codex_app__create_thread exactly")
+            if normalized_policy["exact_tool"] != tool or normalized_policy["substitutions"]:
+                raise ValueError("top_level_task actions forbid tool substitutions")
+            if normalized_policy["on_unavailable"] != "block":
+                raise ValueError("top_level_task actions must block when the exact tool is unavailable")
+            required = _text(self.host_capability_required) or tool
+            if required != tool:
+                raise ValueError("top_level_task required capability must equal its exact tool")
+            object.__setattr__(self, "host_capability_required", required)
+        object.__setattr__(self, "tool_policy", normalized_policy)
+
+        task_envelope_ref = _text(self.task_envelope_ref)
+        if task_envelope_ref is None and isinstance(self.payload, Mapping):
+            task_envelope_ref = _text(self.payload.get("task_envelope_ref"))
+            if task_envelope_ref is None and isinstance(self.payload.get("task_envelope"), Mapping):
+                task_envelope_ref = _text(self.payload["task_envelope"].get("task_envelope_ref"))
+            if task_envelope_ref is not None:
+                object.__setattr__(self, "task_envelope_ref", task_envelope_ref)
+        material = action_contract_material(
+            kind=self.kind,
+            tool=tool,
+            arguments=self.arguments,
+            task_id=self.task_id,
+            dispatch_id=self.dispatch_id,
+            execution_class=execution_class,
+            task_envelope_ref=task_envelope_ref,
+        )
+        digest = action_contract_digest(**material)
+        supplied = _text(self.action_contract_hash)
+        if supplied is not None and supplied != digest:
+            raise ValueError("action_contract_hash does not match immutable action contract material")
+        object.__setattr__(self, "action_contract_hash", digest)
 
     def _raw_dict(self) -> dict[str, Any]:
         arguments = _copy(dict(self.arguments))
@@ -261,6 +378,11 @@ class HostAction(_MappingRecord):
             "identity": _copy(self.identity),
             "model": self.model,
             "reasoning": self.reasoning,
+            "execution_class": self.execution_class,
+            "tool_policy": _copy(dict(self.tool_policy)),
+            "host_capability_required": self.host_capability_required,
+            "task_envelope_ref": self.task_envelope_ref,
+            "action_contract_hash": self.action_contract_hash,
             "payload": _copy(dict(self.payload)),
         }
         return result
@@ -283,6 +405,8 @@ class HostAction(_MappingRecord):
         idem = first_text(raw, "idempotency_key", "idempotencyKey")
         if not idem:
             idem = "intent:" + stable_digest({"action_id": action_id, "arguments": arguments})
+        raw_dispatch = raw.get("dispatch_id", raw.get("dispatchId", ...))
+        dispatch_id = _text(raw_dispatch) if raw_dispatch is not ... else action_id
         return cls(
             action_id=action_id,
             kind=first_text(raw, "kind") or kind,
@@ -290,7 +414,7 @@ class HostAction(_MappingRecord):
             tool=first_text(raw, "tool"),
             arguments=_copy(dict(arguments)),
             task_id=first_text(raw, "task_id", "taskId"),
-            dispatch_id=first_text(raw, "dispatch_id", "dispatchId") or action_id,
+            dispatch_id=dispatch_id,
             host_id=first_text(raw, "host_id", "hostId"),
             expected_receipt=first_text(raw, "expected_receipt", "expectedReceipt") or HOST_RECEIPT_PROTOCOL,
             payload=_copy(raw.get("payload", raw)),
@@ -298,6 +422,11 @@ class HostAction(_MappingRecord):
             model=first_text(raw, "model") or first_text(arguments, "model"),
             reasoning=first_text(raw, "reasoning", "thinking")
             or first_text(arguments, "reasoning", "thinking"),
+            execution_class=first_text(raw, "execution_class", "executionClass"),
+            tool_policy=_copy(raw.get("tool_policy", raw.get("toolPolicy", {}))),
+            host_capability_required=first_text(raw, "host_capability_required", "hostCapabilityRequired"),
+            task_envelope_ref=first_text(raw, "task_envelope_ref", "taskEnvelopeRef"),
+            action_contract_hash=first_text(raw, "action_contract_hash", "actionContractHash"),
         )
 
 
@@ -318,6 +447,8 @@ class HostReceipt(_MappingRecord):
     client_thread_id: str | None = None
     actual: bool = False
     actual_tool: str | None = None
+    actual_capability: str | None = None
+    action_contract_hash: str | None = None
     model: str | None = None
     reasoning: str | None = None
     duplicate_of: str | None = None
@@ -330,6 +461,13 @@ class HostReceipt(_MappingRecord):
     worktree: str | None = None
     branch: str | None = None
     base_commit: str | None = None
+
+    def __post_init__(self) -> None:
+        action = HostAction.from_value(self.action) if isinstance(self.action, Mapping) else None
+        if _text(self.action_contract_hash) is None and action is not None:
+            object.__setattr__(self, "action_contract_hash", action.action_contract_hash)
+        if _text(self.actual_capability) is None and _text(self.actual_tool) is not None:
+            object.__setattr__(self, "actual_capability", self.actual_tool)
 
     @property
     def is_active_identity(self) -> bool:
@@ -351,6 +489,8 @@ class HostReceipt(_MappingRecord):
             "client_thread_id": self.client_thread_id,
             "actual": self.actual,
             "actual_tool": self.actual_tool,
+            "actual_capability": self.actual_capability,
+            "action_contract_hash": self.action_contract_hash,
             "model": self.model,
             "reasoning": self.reasoning,
             "duplicate_of": self.duplicate_of,
@@ -423,18 +563,30 @@ class HostReceipt(_MappingRecord):
             if action_obj and isinstance(action_obj.payload.get("resource_receipt"), Mapping)
             else {}
         )
-        baseline_requested = _resource_values(action_resource_receipt.get("requested"))
-        baseline_requested = baseline_requested or _resource_values(runtime_requested_resource)
+        baseline_requested_metadata = (
+            dict(action_resource_receipt.get("requested"))
+            if isinstance(action_resource_receipt.get("requested"), Mapping)
+            else dict(runtime_requested_resource) if isinstance(runtime_requested_resource, Mapping) else {}
+        )
+        baseline_requested = _resource_values(baseline_requested_metadata)
         baseline_requested = baseline_requested or _resource_values(
             {"model": action_obj.model, "reasoning": action_obj.reasoning}
             if action_obj else None
         )
-        baseline_resolved = _resource_values(action_resource_receipt.get("resolved"))
-        baseline_resolved = baseline_resolved or _resource_values(resolved_resource)
+        if baseline_requested:
+            baseline_requested_metadata.update(baseline_requested)
+        baseline_resolved_metadata = (
+            dict(action_resource_receipt.get("resolved"))
+            if isinstance(action_resource_receipt.get("resolved"), Mapping)
+            else dict(resolved_resource) if isinstance(resolved_resource, Mapping) else {}
+        )
+        baseline_resolved = _resource_values(baseline_resolved_metadata)
         baseline_resolved = baseline_resolved or _resource_values(
             {"model": action_obj.model, "reasoning": action_obj.reasoning}
             if action_obj else None
         )
+        if baseline_resolved:
+            baseline_resolved_metadata.update(baseline_resolved)
         reported_requested = _resource_values(resource_raw.get("requested"))
         reported_resolved = _resource_values(resource_raw.get("resolved"))
         diagnostics = resource_raw.get("diagnostics")
@@ -452,6 +604,15 @@ class HostReceipt(_MappingRecord):
             first_text(raw, "actual_tool", "actualTool")
             or first_text(actual_payload, "actual_tool", "actualTool", "tool")
             or first_text(runtime, "actual_tool", "actualTool", "tool")
+        )
+        reported_actual_capability = (
+            first_text(raw, "actual_capability", "actualCapability")
+            or first_text(actual_payload, "actual_capability", "actualCapability", "capability")
+            or reported_actual_tool
+        )
+        reported_action_contract_hash = (
+            first_text(raw, "action_contract_hash", "actionContractHash")
+            or (action_obj.action_contract_hash if action_obj is not None else None)
         )
         effective_resolved = reported_resolved or baseline_resolved
         verified_model_receipt = bool(
@@ -473,8 +634,8 @@ class HostReceipt(_MappingRecord):
         else:
             model_receipt = reported_model_receipt
         canonical_resource_receipt = ResourceObservation(
-            requested=baseline_requested or {"model": None, "reasoning": None},
-            resolved=effective_resolved or {"model": None, "reasoning": None},
+            requested=baseline_requested_metadata or {"model": None, "reasoning": None},
+            resolved=(baseline_resolved_metadata | (effective_resolved or {})) or {"model": None, "reasoning": None},
             actual={"model": actual_model, "reasoning": actual_reasoning} if verified_model_receipt else None,
             actual_state="resolved" if verified_model_receipt else "unresolved",
             evidence_source=evidence_source if verified_model_receipt else None,
@@ -495,6 +656,8 @@ class HostReceipt(_MappingRecord):
             client_thread_id=client_id if not thread_id else client_id,
             actual=actual,
             actual_tool=reported_actual_tool,
+            actual_capability=reported_actual_capability,
+            action_contract_hash=reported_action_contract_hash,
             model=actual_model if verified_model_receipt else None,
             reasoning=actual_reasoning if verified_model_receipt else None,
             duplicate_of=first_text(raw, "duplicate_of", "duplicateOf"),
@@ -602,6 +765,7 @@ HostReceiptAPI = HostReceipt
 
 __all__ = [
     "ACTION_BRIDGE_PROTOCOL",
+    "DIRECT_EXECUTION_CLASS",
     "DISPATCH_INTENT_PROTOCOL",
     "DispatchIntent",
     "HOST_RECEIPT_PROTOCOL",
@@ -617,6 +781,11 @@ __all__ = [
     "HostReceiptAPI",
     "HostReceiptError",
     "HostUnavailableError",
+    "LOCAL_SUBAGENT_EXECUTION_CLASS",
+    "TOP_LEVEL_CREATE_THREAD_TOOL",
+    "TOP_LEVEL_TASK_EXECUTION_CLASS",
+    "action_contract_digest",
+    "action_contract_material",
     "as_host_action",
     "canonical_json",
     "dispatch_intent",

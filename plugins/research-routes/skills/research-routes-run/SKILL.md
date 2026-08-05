@@ -14,5 +14,7 @@ Execute the approved route graph through the shared control plane and preserve r
 - Treat `implementation` as distinct from `canonical`. A HumanDecision is required before canonical promotion or setting current continuation.
 - Use lifecycle events to rewind or recover; never rewrite or delete prior route history.
 - Reject missing, cross-context, or ambiguous IDs rather than defaulting to GraphPE, a repository, or a preferred route.
+- Route authorization is a Pack record bound to a confirmed HumanDecision; route authorization alone does not authorize implementation or canonical promotion.
+- A canonical downgrade is an explicit append-only transition that keeps the previous canonical reference and its failure evidence.
 
 Use the shared control-plane, resource, recovery, and router contracts under `shared/` together with the existing All in Luna execution machinery. This overlay changes the semantic vocabulary and entry points, not the shared orchestration behavior.

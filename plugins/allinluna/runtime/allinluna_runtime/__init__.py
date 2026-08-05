@@ -53,6 +53,7 @@ from .evidence import (
     EvidenceCollector,
     EvidenceProfile,
 )
+from .verification import VerificationSpec, VerificationSpecError, VerifierSpec
 from .store import (
     LeaseConflictError,
     ReceiptIngestionAPI,
@@ -78,5 +79,6 @@ __all__ = [
     "SignalJournalError", "Store", "StoreError",
     "StoreTransactionRules", "Task", "TaskDependency", "TaskGraph",
     "TaskStoreAPI", "ValidationError", "WorkGraph", "apply_migrations",
+    "VerificationSpec", "VerificationSpecError", "VerifierSpec",
     "validate_contract", "validate_schema",
 ]

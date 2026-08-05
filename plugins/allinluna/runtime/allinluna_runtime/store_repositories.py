@@ -128,6 +128,7 @@ class StoreRepositories:
             "imports_json": _json(value.get("imports", [])),
             "exports_json": _json(value.get("exports", [])),
             "done_when_json": _json(value.get("done_when", [])),
+            "verification_specs_json": _json(value.get("verification_specs", [])),
             "ownership_json": _json(value.get("ownership", {})),
             "permissions_json": _json(value.get("permissions", {})),
             "context_policy_json": _json(value.get("context_policy", {})),
@@ -140,9 +141,9 @@ class StoreRepositories:
             self._execute(
                 """INSERT INTO contracts
                    (id, version, task_id, outcome, imports_json, exports_json,
-                    done_when_json, ownership_json, permissions_json,
+                    done_when_json, verification_specs_json, ownership_json, permissions_json,
                     context_policy_json, created_at, supersedes_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     contract_id,
                     contract_version,
@@ -151,6 +152,7 @@ class StoreRepositories:
                     data["imports_json"],
                     data["exports_json"],
                     data["done_when_json"],
+                    data["verification_specs_json"],
                     data["ownership_json"],
                     data["permissions_json"],
                     data["context_policy_json"],
@@ -182,6 +184,7 @@ class StoreRepositories:
             "imports_json",
             "exports_json",
             "done_when_json",
+            "verification_specs_json",
             "ownership_json",
             "permissions_json",
             "context_policy_json",
@@ -209,6 +212,7 @@ class StoreRepositories:
             "imports": value.get("imports", base.get("imports", [])),
             "exports": value.get("exports", base.get("exports", [])),
             "done_when": value.get("done_when", base.get("done_when", [])),
+            "verification_specs": value.get("verification_specs", base.get("verification_specs", [])),
             "ownership": value.get("ownership", base.get("ownership", {})),
             "permissions": value.get("permissions", base.get("permissions", {})),
             "context_policy": value.get("context_policy", base.get("context_policy", {})),
@@ -266,6 +270,7 @@ class StoreRepositories:
                         "imports": value.get("imports", []),
                         "exports": value.get("exports", []),
                         "done_when": value.get("done_when", [outcome]),
+                        "verification_specs": value.get("verification_specs", []),
                         "ownership": value.get("ownership", {}),
                         "permissions": value.get("permissions", {}),
                         "context_policy": value.get("context_policy", {}),

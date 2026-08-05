@@ -29,6 +29,7 @@ from ..domain import (
     TaskGraph,
     WorkGraph,
 )
+from ..verification import VerifierSpec
 
 
 class PackError(ValueError):
@@ -93,7 +94,7 @@ class WorkflowPack(Protocol):
 
     def compile_goal(self, run_intent: RunIntent) -> TaskGraph: ...
     def enrich_context(self, scope: Any, bundle: Any) -> Any: ...
-    def verifiers(self, task: Task) -> list[Any]: ...
+    def verifiers(self, task: Task) -> list[VerifierSpec]: ...
     def compose_result(self, run: Run) -> Mapping[str, Any]: ...
 
 
@@ -102,6 +103,7 @@ def contract_for(
     contract_id: str,
     outcome: str,
     done_when: Sequence[str],
+    verification_specs: Sequence[Any] = (),
     ownership: Sequence[str] = (),
     imports: Sequence[Mapping[str, Any]] = (),
     exports: Sequence[Mapping[str, Any]] = (),
@@ -115,6 +117,7 @@ def contract_for(
         exports=tuple(ExportPort.from_dict(item) if not isinstance(item, ExportPort) else item for item in exports),
         dependencies=tuple(dependencies),
         done_when=tuple(done_when),
+        verification_specs=tuple(verification_specs),
         ownership={"paths": tuple(ownership), "non_file_scope": (), "exclusive": True},
         permissions={"read_paths": tuple(ownership), "write_paths": tuple(ownership), "external_actions": ()},
         context_policy={"exclude_categories": ("raw_tool_logs", "child_transcripts", "unrelated_lanes")},

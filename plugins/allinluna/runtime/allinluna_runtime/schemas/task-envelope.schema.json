@@ -95,6 +95,8 @@
         "model": {"type": ["string", "null"], "minLength": 1},
         "reasoning_policy": {"enum": ["auto", "explicit"]},
         "reasoning": {"type": ["string", "null"], "minLength": 1},
+        "capability_class": {"enum": ["control.relay", "planning.semantic", "lane.synthesis", "work.mechanical", "work.implementation", "work.deep-debug", "verify.independent", null]},
+        "route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]},
         "time_budget": {"type": ["integer", "null"], "minimum": 0},
         "token_or_credit_budget": {"type": ["integer", "null"], "minimum": 0},
         "external_action_policy": {"enum": ["ask", "deny", "allow"]}

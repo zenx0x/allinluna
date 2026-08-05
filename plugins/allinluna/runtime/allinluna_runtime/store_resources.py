@@ -22,6 +22,144 @@ from .store_support import (
 
 
 class StoreResources:
+    @staticmethod
+    def _host_capability_cache_result(row: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(row)
+        result["capabilities"] = _loads(result.pop("capabilities_json", None), {})
+        result["conformance"] = _loads(result.pop("conformance_json", None), {})
+        return result
+
+    def get_host_capability_cache(
+        self,
+        host_fingerprint: str,
+        *,
+        host_version: str | None = None,
+        plugin_version: str | None = None,
+        tool_catalog_digest: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return an active cache entry only when its invalidation keys match."""
+
+        fingerprint = str(host_fingerprint or "").strip()
+        if not fingerprint:
+            raise ValueError("host_fingerprint is required")
+        row = self._fetchone(
+            "SELECT * FROM host_capability_cache WHERE host_fingerprint = ? AND invalidated_at IS NULL",
+            (fingerprint,),
+        )
+        if row is None:
+            return None
+        expected = {
+            "host_version": host_version,
+            "plugin_version": plugin_version,
+            "tool_catalog_digest": tool_catalog_digest,
+        }
+        if any(value is not None and str(row.get(key) or "") != str(value) for key, value in expected.items()):
+            return None
+        return self._host_capability_cache_result(row)
+
+    def put_host_capability_cache(
+        self,
+        profile: Mapping[str, Any],
+        *,
+        conformance_status: str = "unknown",
+        conformance: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a discovery snapshot once and invalidate only changed profiles."""
+
+        value = dict(profile)
+        fingerprint = str(value.get("host_fingerprint") or "").strip()
+        catalog_digest = str(value.get("tool_catalog_digest") or "").strip()
+        if not fingerprint or not catalog_digest:
+            raise ValueError("capability cache requires host_fingerprint and tool_catalog_digest")
+        status = str(conformance_status).lower()
+        if status not in {"unknown", "pass", "fail", "blocked"}:
+            raise ValueError("invalid conformance_status")
+        capabilities = value.get("capabilities") if isinstance(value.get("capabilities"), Mapping) else {}
+        conformance_value = dict(conformance or {})
+        host_id = value.get("host_id")
+        host_version = value.get("host_version")
+        plugin_version = value.get("plugin_version")
+
+        def persist() -> dict[str, Any]:
+            existing = self._fetchone(
+                "SELECT * FROM host_capability_cache WHERE host_fingerprint = ?", (fingerprint,)
+            )
+            if existing is not None and existing.get("invalidated_at") is None and all(
+                str(existing.get(key) or "") == str(candidate or "")
+                for key, candidate in {
+                    "host_version": host_version,
+                    "plugin_version": plugin_version,
+                    "tool_catalog_digest": catalog_digest,
+                }.items()
+            ):
+                return self._host_capability_cache_result(existing)
+            if host_id:
+                self._execute(
+                    """UPDATE host_capability_cache
+                       SET invalidated_at = ?, invalidation_reason = 'capability-profile-changed'
+                       WHERE host_id = ? AND host_fingerprint <> ? AND invalidated_at IS NULL""",
+                    (_now(), str(host_id), fingerprint),
+                )
+            if existing is None:
+                self._execute(
+                    """INSERT INTO host_capability_cache
+                       (host_fingerprint, host_id, host_version, plugin_version,
+                        tool_catalog_digest, checked_at, capabilities_json,
+                        conformance_status, conformance_json, invalidated_at,
+                        invalidation_reason)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)""",
+                    (
+                        fingerprint, host_id, host_version, plugin_version, catalog_digest,
+                        _now(), _json(dict(capabilities)), status, _json(conformance_value),
+                    ),
+                )
+            else:
+                self._execute(
+                    """UPDATE host_capability_cache
+                       SET host_id = ?, host_version = ?, plugin_version = ?,
+                           tool_catalog_digest = ?, checked_at = ?, capabilities_json = ?,
+                           conformance_status = ?, conformance_json = ?,
+                           invalidated_at = NULL, invalidation_reason = NULL
+                       WHERE host_fingerprint = ?""",
+                    (
+                        host_id, host_version, plugin_version, catalog_digest, _now(),
+                        _json(dict(capabilities)), status, _json(conformance_value), fingerprint,
+                    ),
+                )
+            row = self._fetchone(
+                "SELECT * FROM host_capability_cache WHERE host_fingerprint = ?", (fingerprint,)
+            )
+            return self._host_capability_cache_result(row or {})
+
+        return self._write(persist)
+
+    def record_host_conformance(
+        self,
+        host_fingerprint: str,
+        *,
+        status: str,
+        report: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        value = str(status).lower()
+        if value not in {"unknown", "pass", "fail", "blocked"}:
+            raise ValueError("invalid conformance status")
+
+        def record() -> dict[str, Any]:
+            self._execute(
+                """UPDATE host_capability_cache
+                   SET conformance_status = ?, conformance_json = ?, checked_at = ?
+                   WHERE host_fingerprint = ? AND invalidated_at IS NULL""",
+                (value, _json(dict(report)), _now(), str(host_fingerprint)),
+            )
+            row = self._fetchone(
+                "SELECT * FROM host_capability_cache WHERE host_fingerprint = ?", (str(host_fingerprint),)
+            )
+            if row is None:
+                raise KeyError(host_fingerprint)
+            return self._host_capability_cache_result(row)
+
+        return self._write(record)
+
     # Resource claims are run-scoped scheduling facts.  The whole
     # occupancy-check + claim batch runs under BEGIN IMMEDIATE so independent
     # Store connections cannot oversubscribe a shared database.
@@ -288,11 +426,23 @@ class StoreResources:
                 entity_resource = _loads(row.get("resource_json"), {})
                 requested = entity_resource or task_resource or run_policy
                 resolved = {
-                    "model": requested.get("model") or run_policy.get("model") or "gpt-5.6-luna",
-                    "reasoning": requested.get("reasoning") or requested.get("thinking")
-                    or run_policy.get("reasoning") or run_policy.get("thinking") or "high",
+                    "capability_class": requested.get("capability_class")
+                    or run_policy.get("capability_class")
+                    or ("lane.synthesis" if scope == "top-level" else "work.implementation"),
+                    "route_assurance": requested.get("route_assurance")
+                    or run_policy.get("route_assurance")
+                    or "observe_if_exposed",
                     "external_action_policy": run_policy.get("external_action_policy") or "deny",
                 }
+                model = requested.get("model") or run_policy.get("model")
+                reasoning = (
+                    requested.get("reasoning") or requested.get("thinking")
+                    or run_policy.get("reasoning") or run_policy.get("thinking")
+                )
+                if model:
+                    resolved["model"] = model
+                if reasoning:
+                    resolved["reasoning"] = reasoning
                 self._execute(
                     """INSERT INTO resource_claims
                        (id, run_id, scope, lane_id, entity_id, slots,

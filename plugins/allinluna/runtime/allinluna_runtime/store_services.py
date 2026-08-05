@@ -23,6 +23,111 @@ from .store_support import (
 
 
 class StoreServices:
+    # ------------------------------------------------------------------
+    # Persistent driver recovery state.  Drivers are intentionally restartable
+    # processes, not a second in-memory scheduler, so their host cursors and
+    # handoff de-duplication live beside the Task/WorkUnit authority.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _driver_kind(driver_kind: str) -> str:
+        value = str(driver_kind).strip()
+        if value not in {"coordinator", "lane"}:
+            raise ValueError("driver_kind must be coordinator or lane")
+        return value
+
+    def get_driver_checkpoint(self, driver_kind: str, scope_id: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            "SELECT * FROM driver_checkpoints WHERE driver_kind = ? AND scope_id = ?",
+            (self._driver_kind(driver_kind), str(scope_id)),
+        )
+        if row is not None:
+            row["state"] = _loads(row.pop("state_json", None), {})
+        return row
+
+    def save_driver_checkpoint(
+        self,
+        driver_kind: str,
+        scope_id: str,
+        run_id: str,
+        *,
+        cursor: str | None = None,
+        state: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        kind = self._driver_kind(driver_kind)
+        scope = str(scope_id)
+        run = str(run_id)
+        if self.get_run(run) is None:
+            raise KeyError(run)
+        if kind == "lane":
+            task = self.get_task(scope)
+            if task is None or str(task["run_id"]) != run:
+                raise ValueError("lane checkpoint must be scoped to a task in its run")
+
+        def save() -> dict[str, Any]:
+            existing = self.get_driver_checkpoint(kind, scope) or {}
+            merged_state = dict(existing.get("state") or {})
+            if state is not None:
+                merged_state.update(dict(state))
+            next_cursor = cursor if cursor is not None else existing.get("cursor")
+            self._execute(
+                """INSERT INTO driver_checkpoints
+                   (driver_kind, scope_id, run_id, cursor, state_json, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(driver_kind, scope_id) DO UPDATE SET
+                     run_id = excluded.run_id,
+                     cursor = excluded.cursor,
+                     state_json = excluded.state_json,
+                     updated_at = excluded.updated_at""",
+                (kind, scope, run, next_cursor, _json(merged_state), _now()),
+            )
+            return self.get_driver_checkpoint(kind, scope) or {}
+
+        return self._write(save)
+
+    def get_driver_handoff(self, driver_kind: str, scope_id: str, handoff_id: str) -> dict[str, Any] | None:
+        row = self._fetchone(
+            "SELECT * FROM driver_handoffs WHERE driver_kind = ? AND scope_id = ? AND handoff_id = ?",
+            (self._driver_kind(driver_kind), str(scope_id), str(handoff_id)),
+        )
+        if row is not None:
+            row["payload"] = _loads(row.pop("payload_json", None), {})
+        return row
+
+    def record_driver_handoff(
+        self,
+        driver_kind: str,
+        scope_id: str,
+        handoff: Mapping[str, Any],
+        *,
+        source_thread_id: str | None = None,
+    ) -> dict[str, Any]:
+        kind = self._driver_kind(driver_kind)
+        scope = str(scope_id)
+        handoff_id = str(handoff.get("handoff_id") or "").strip()
+        if not handoff_id:
+            raise ValueError("handoff_id is required for durable driver ingestion")
+        payload = dict(handoff)
+
+        def record() -> dict[str, Any]:
+            existing = self.get_driver_handoff(kind, scope, handoff_id)
+            if existing is not None:
+                existing["idempotent"] = True
+                return existing
+            self._execute(
+                """INSERT INTO driver_handoffs
+                   (driver_kind, scope_id, handoff_id, source_thread_id, status, payload_json, ingested_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    kind, scope, handoff_id, source_thread_id,
+                    str(payload.get("status") or "received"), _json(payload), _now(),
+                ),
+            )
+            result = self.get_driver_handoff(kind, scope, handoff_id) or {}
+            result["idempotent"] = False
+            return result
+
+        return self._write(record)
+
     def install_task_exports(
         self,
         task_id: str,

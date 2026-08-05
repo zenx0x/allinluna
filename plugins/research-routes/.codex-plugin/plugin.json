@@ -1,7 +1,7 @@
 {
   "name": "research-routes",
-  "version": "0.1.0",
-  "description": "Evidence-backed, route-neutral research planning, exploration, and execution with explicit Claims, Evidence, lifecycle, and reversible-probe semantics.",
+  "version": "0.2.0",
+  "description": "Evidence-backed, route-neutral research planning, exploration, and execution with explicit Claims, Evidence, failure polarity, recovery, lifecycle, and human-controlled promotion boundaries.",
   "author": {
     "name": "zenx0x",
     "url": "https://github.com/zenx0x"
@@ -16,9 +16,18 @@
     "experiments",
     "reversible-exploration",
     "failure-regimes",
+    "failure-polarity",
+    "rewind",
+    "human-decision",
     "software"
   ],
   "skills": "./skills/",
+  "runtime": {
+    "source": "./runtime/research_routes_runtime",
+    "protocol": "research-pack/v1",
+    "store_access": "core-api-only",
+    "external_action_policy": "deny"
+  },
   "interface": {
     "displayName": "Research Routes",
     "shortDescription": "Compare evidence-backed routes and explore reversibly",
@@ -27,9 +36,9 @@
     "category": "Research",
     "capabilities": ["Interactive", "Read", "Write"],
     "defaultPrompt": [
-      "Use Research Routes to map a question, problem, or repository into concurrent research routes.",
-      "Use Research Routes to explore hypotheses and probes while preserving unknowns and evidence polarity.",
-      "Use Research Routes to run an approved route with explicit HumanDecision and recovery semantics."
+      "Use Research Routes to build a route-neutral terrain map before choosing a route.",
+      "Preserve Claims, Evidence polarity, contradictions, unknowns, failure regimes, and mature comparators as separate records.",
+      "Record failures, rewind proposals, lessons, reopened problems, and canonical downgrades; require HumanDecision for route authorization or promotion."
     ]
   }
 }

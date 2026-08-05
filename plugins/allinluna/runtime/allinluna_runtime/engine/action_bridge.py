@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
+from datetime import datetime, timezone
 import json
 from typing import Any, Mapping, Sequence
 
@@ -20,6 +21,10 @@ def _raw(value: Any) -> dict[str, Any]:
     return dict(vars(value))
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
 class ActionBridge:
     """Separates persisted dispatch intent, host invocation and host receipt.
 
@@ -28,7 +33,7 @@ class ActionBridge:
     leaves the action in the queue for the external coordinator.
     """
 
-    API_VERSION = 1
+    API_VERSION = 2
 
     def __init__(self, store: Any, host: Any = None, *, adapter: str = "action-bridge", resource_broker: ResourceBroker | None = None) -> None:
         self.store = store
@@ -46,6 +51,21 @@ class ActionBridge:
     @property
     def receipts(self) -> tuple[Any, ...]:
         return tuple(self._receipts.values())
+
+    def refresh_resource_capabilities(self) -> Mapping[str, Any] | None:
+        """Refresh host capability policy through its change-sensitive cache.
+
+        Failure to expose model-route capability data is not a dispatch failure
+        under the default ``observe_if_exposed`` policy, so this remains a
+        best-effort discovery seam rather than an eager conformance gate.
+        """
+
+        if self.host is None:
+            return None
+        try:
+            return self.resource_broker.refresh_host_capabilities(self.host)
+        except (AttributeError, TypeError, ValueError):
+            return None
 
     def _existing_dispatch(self, key: str) -> dict[str, Any] | None:
         return self.store._fetchone("SELECT * FROM host_receipts WHERE dispatch_key = ?", (key,))
@@ -108,6 +128,20 @@ class ActionBridge:
         attempt = self.store._fetchone(
             "SELECT * FROM task_attempts WHERE dispatch_key = ?", (action.idempotency_key,)
         )
+        target_kind = "task"
+        if attempt is None:
+            attempt = self.store._fetchone(
+                "SELECT * FROM work_unit_attempts WHERE dispatch_key = ?", (action.idempotency_key,)
+            )
+            target_kind = "work_unit"
+        violation = self._top_level_protocol_violation(action, receipt)
+        if violation is not None:
+            return {
+                "receipt": receipt.to_dict(),
+                "attempt_id": attempt["id"] if attempt is not None else None,
+                "repaired": False,
+                "protocol_violation": violation,
+            }
         if attempt is None:
             return {"receipt": receipt.to_dict(), "attempt_id": None, "repaired": False}
 
@@ -116,15 +150,20 @@ class ActionBridge:
             return {"receipt": receipt.to_dict(), "attempt_id": attempt["id"], "repaired": False}
         if status in {"failed", "error", "lost"}:
             next_attempt = "lost" if status == "lost" else "failed"
-            next_task = None
+            next_target = "failed" if target_kind == "work_unit" else None
         elif not receipt.thread_id:
             return {"receipt": receipt.to_dict(), "attempt_id": attempt["id"], "repaired": False}
         elif status in {"completed", "succeeded", "success", "closed"}:
-            next_attempt, next_task = "closed", None
+            # A local host lifecycle receipt is not a WorkHandoff.  It closes
+            # the worker attempt but leaves the WorkUnit active for typed
+            # handoff ingestion and independent evidence collection.
+            next_attempt, next_target = "closed", "active" if target_kind == "work_unit" else None
         elif status == "handoff_ready":
-            next_attempt, next_task = "handoff_ready", "verifying"
+            next_attempt, next_target = (
+                ("closed", "active") if target_kind == "work_unit" else ("handoff_ready", "verifying")
+            )
         else:
-            next_attempt, next_task = "active", "active"
+            next_attempt, next_target = "active", "active"
 
         repaired = False
         with self.store.transaction():
@@ -133,35 +172,44 @@ class ActionBridge:
                 or attempt.get("receipt_id") != receipt.receipt_id
                 or (receipt.thread_id and not attempt.get("thread_id"))
             ):
-                self.store._execute(
-                    "UPDATE task_attempts SET state = ?, receipt_id = ?, "
-                    "thread_id = COALESCE(thread_id, ?), host_id = COALESCE(host_id, ?), "
-                    "started_at = COALESCE(started_at, ?), ended_at = CASE WHEN ? IN ('closed','failed','lost') THEN COALESCE(ended_at, ?) ELSE ended_at END "
-                    "WHERE id = ?",
-                    (
-                        next_attempt,
-                        receipt.receipt_id,
-                        receipt.thread_id,
-                        receipt.host_id,
-                        raw.get("received_at"),
-                        next_attempt,
-                        raw.get("received_at"),
-                        attempt["id"],
-                    ),
-                )
+                if target_kind == "task":
+                    self.store._execute(
+                        "UPDATE task_attempts SET state = ?, receipt_id = ?, "
+                        "thread_id = COALESCE(thread_id, ?), host_id = COALESCE(host_id, ?), "
+                        "started_at = COALESCE(started_at, ?), ended_at = CASE WHEN ? IN ('closed','failed','lost') THEN COALESCE(ended_at, ?) ELSE ended_at END "
+                        "WHERE id = ?",
+                        (
+                            next_attempt, receipt.receipt_id, receipt.thread_id, receipt.host_id,
+                            raw.get("received_at"), next_attempt, raw.get("received_at"), attempt["id"],
+                        ),
+                    )
+                else:
+                    self.store._execute(
+                        "UPDATE work_unit_attempts SET state = ?, receipt_id = ?, "
+                        "started_at = COALESCE(started_at, ?), ended_at = CASE WHEN ? IN ('closed','failed') THEN COALESCE(ended_at, ?) ELSE ended_at END WHERE id = ?",
+                        (
+                            next_attempt, receipt.receipt_id, raw.get("received_at"), next_attempt,
+                            raw.get("received_at"), attempt["id"],
+                        ),
+                    )
                 repaired = True
-            task = self.store.get_task(str(attempt["task_id"]))
-            if next_task and task is not None and str(task.get("state")) == "dispatching":
+            task = self.store.get_task(str(attempt["task_id"])) if target_kind == "task" else None
+            if next_target and task is not None and str(task.get("state")) == "dispatching":
                 self.store._execute(
                     "UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND state = 'dispatching'",
-                    (next_task, raw.get("received_at") or row.get("received_at"), attempt["task_id"]),
+                    (next_target, raw.get("received_at") or row.get("received_at"), attempt["task_id"]),
                 )
-                signal = "LANE_ACK" if next_task == "active" else "LANE_HANDOFF"
+                signal = "LANE_ACK" if next_target == "active" else "LANE_HANDOFF"
                 self.store._append_signal_in_transaction(
                     task["run_id"], "task", task["id"], signal,
                     {"receipt_id": receipt.receipt_id, "attempt_id": attempt["id"], "recovered": True},
                 )
                 repaired = True
+            elif next_target and target_kind == "work_unit":
+                self.store._execute(
+                    "UPDATE work_units SET state = ?, updated_at = ? WHERE id = ? AND state IN ('proposed','ready','delegated','active')",
+                    (next_target, raw.get("received_at") or row.get("received_at"), attempt["work_unit_id"]),
+                )
             self.store._execute(
                 "UPDATE dispatch_outbox SET state = 'acknowledged', updated_at = COALESCE(?, updated_at) "
                 "WHERE idempotency_key = ? AND state IN ('pending','emitted')",
@@ -191,6 +239,16 @@ class ActionBridge:
         existing = self._existing_dispatch(value.idempotency_key)
         if existing is not None:
             projection = self._repair_receipt_projection(existing, value)
+            if projection.get("protocol_violation"):
+                receipt = HostReceipt.from_value(
+                    projection["receipt"], action=value, default_source=self.adapter
+                )
+                return self._record_top_level_blocker(
+                    value,
+                    code="HOST_PROTOCOL_VIOLATION",
+                    reason=str(projection["protocol_violation"]),
+                    receipt=receipt,
+                )
             self._receipts[value.idempotency_key] = HostReceipt.from_value(
                 projection["receipt"], action=value, default_source=self.adapter
             )
@@ -243,11 +301,168 @@ class ActionBridge:
             values = values[: max(0, int(limit))]
         return values
 
+    @staticmethod
+    def _is_top_level_action(action: HostAction) -> bool:
+        return action.execution_class == "top_level_task"
+
+    def _exact_top_level_capability(self, action: HostAction) -> tuple[bool, str | None]:
+        """Check only the capability required by the immutable top-level opcode."""
+
+        if self.host is None:
+            return False, "no host adapter is available for the exact top-level tool"
+        required = action.host_capability_required or action.tool
+        if not required:
+            return False, "top-level action declares no required host capability"
+        discover = getattr(self.host, "discover", None)
+        if callable(discover):
+            capabilities = discover()
+            if hasattr(capabilities, "available"):
+                if not bool(capabilities.available):
+                    return False, f"host reports unavailable capability {required}"
+                tools = getattr(capabilities, "tools", ())
+                if tools and required not in tools:
+                    return False, f"host does not declare required capability {required}"
+            elif isinstance(capabilities, Mapping):
+                if capabilities.get("available") is False:
+                    return False, f"host reports unavailable capability {required}"
+                tools = capabilities.get("tools")
+                if isinstance(tools, Mapping) and required not in tools:
+                    return False, f"host does not declare required capability {required}"
+                if isinstance(tools, Sequence) and not isinstance(tools, str) and tools and required not in tools:
+                    return False, f"host does not declare required capability {required}"
+        # A real public host exposes the same argument boundary as
+        # ``codex_app__create_thread``.  Do not require the test/runtime host
+        # to accept the durable action envelope: that envelope belongs to the
+        # Store and the ActionBridge, not to the public tool invocation.
+        if callable(getattr(self.host, "create_thread", None)):
+            return True, None
+        if callable(getattr(self.host, "create_top_level_task", None)):
+            return True, None
+        return False, f"host cannot invoke required capability {required}"
+
+    def _best_effort_cancel(self, receipt: HostReceipt) -> dict[str, Any]:
+        if self.host is None or not receipt.thread_id:
+            return {"attempted": False, "reason": "no erroneous host thread is available to cancel"}
+        method = getattr(self.host, "cancel_task", None)
+        if not callable(method):
+            return {"attempted": False, "reason": "host does not expose cancellation"}
+        target = {"threadId": receipt.thread_id}
+        if receipt.host_id:
+            target["hostId"] = receipt.host_id
+        try:
+            response = method(target)
+        except Exception as exc:
+            return {"attempted": True, "cancelled": False, "error": str(exc)}
+        return {"attempted": True, "cancelled": True, "receipt": _raw(response)}
+
+    def _record_top_level_blocker(
+        self,
+        action: HostAction,
+        *,
+        code: str,
+        reason: str,
+        receipt: HostReceipt | None = None,
+    ) -> dict[str, Any]:
+        """Block an invalid top-level dispatch without losing its durable intent."""
+
+        task = self.store.get_task(action.task_id) if action.task_id else None
+        run_id = str((task or {}).get("run_id") or (action.identity or {}).get("run_id") or "")
+        observed_at = _now()
+        cancellation = self._best_effort_cancel(receipt) if receipt is not None else {
+            "attempted": False,
+            "reason": "exact tool was unavailable before a host task was created",
+        }
+        try:
+            with self.store.transaction():
+                if action.task_id:
+                    self.store._execute(
+                        "UPDATE task_attempts SET state = 'failed', ended_at = COALESCE(ended_at, ?) "
+                        "WHERE dispatch_key = ? AND state IN ('created','dispatched','acknowledged','active','handoff_ready')",
+                        (observed_at, action.idempotency_key),
+                    )
+                    self.store._execute(
+                        "UPDATE tasks SET state = 'blocked', updated_at = ? WHERE id = ? "
+                        "AND state IN ('dispatching','ready','proposed','active','waiting','verifying')",
+                        (observed_at, action.task_id),
+                    )
+                    self.store._execute(
+                        "UPDATE leases SET state = 'released', released_at = ? WHERE scope_type = 'task' "
+                        "AND scope_id = ? AND state = 'active'",
+                        (observed_at, action.task_id),
+                    )
+                    if task is not None and hasattr(self.store, "_release_resource_claims_in_transaction"):
+                        self.store._release_resource_claims_in_transaction(
+                            str(task["run_id"]), action.task_id, scope="top-level", reason=code.lower()
+                        )
+                self.store._execute(
+                    "UPDATE dispatch_outbox SET state = 'failed', updated_at = ? WHERE idempotency_key = ?",
+                    (observed_at, action.idempotency_key),
+                )
+                if run_id:
+                    self.store._append_signal_in_transaction(
+                        run_id,
+                        "task",
+                        str(action.task_id or run_id),
+                        code,
+                        {
+                            "action_id": action.action_id,
+                            "dispatch_id": action.dispatch_id,
+                            "action_contract_hash": action.action_contract_hash,
+                            "required_tool": action.tool,
+                            "required_capability": action.host_capability_required,
+                            "reason": reason,
+                            "receipt": receipt.to_dict() if receipt is not None else None,
+                            "cancellation": cancellation,
+                            "dispatch_intent_preserved": True,
+                        },
+                    )
+        finally:
+            if action.task_id:
+                try:
+                    self.resource_broker.release(action.task_id)
+                except (AttributeError, RuntimeError, ValueError):
+                    pass
+        return {
+            "status": code,
+            "blocker": {
+                "code": code,
+                "message": reason,
+                "owner_scope": "host-action-relay",
+                "recoverable": True,
+            },
+            "action": action.to_dict(),
+            "receipt": receipt.to_dict() if receipt is not None else None,
+            "cancellation": cancellation,
+            "dispatch_intent_preserved": True,
+        }
+
+    def _top_level_protocol_violation(self, action: HostAction, receipt: HostReceipt) -> str | None:
+        if not self._is_top_level_action(action) or not receipt.is_active_identity:
+            return None
+        if receipt.actual_tool != action.tool:
+            return f"receipt actual_tool {receipt.actual_tool!r} does not match exact tool {action.tool!r}"
+        if receipt.actual_capability != action.host_capability_required:
+            return (
+                f"receipt actual_capability {receipt.actual_capability!r} does not match "
+                f"required capability {action.host_capability_required!r}"
+            )
+        if receipt.action_contract_hash != action.action_contract_hash:
+            return "receipt action_contract_hash does not match the persisted action contract"
+        return None
+
     def _invoke(self, action: HostAction) -> Any:
         if self.host is None:
             return None
         kind = action.kind
         if kind == "create-top-level-task":
+            public_method = getattr(self.host, "create_thread", None)
+            if callable(public_method):
+                public = {
+                    key: action.arguments[key]
+                    for key in ("target", "prompt", "model", "thinking", "title")
+                    if key in action.arguments
+                }
+                return public_method(**public)
             method = getattr(self.host, "create_top_level_task", None)
             return method(action) if callable(method) else None
         if kind == "spawn-subagent":
@@ -285,6 +500,13 @@ class ActionBridge:
         else:
             receipt = HostReceipt.from_value(value or {"status": "pending", "fallback": "action-bridge-required"}, action=action, default_source=self.adapter)
         raw = receipt.to_dict()
+        if self._is_top_level_action(action) and receipt.thread_id:
+            if not raw.get("actual_tool"):
+                raw["actual_tool"] = action.tool
+            if not raw.get("actual_capability"):
+                raw["actual_capability"] = action.host_capability_required
+            if not raw.get("action_contract_hash"):
+                raw["action_contract_hash"] = action.action_contract_hash
         # A clientThreadId, an action, or a capability catalog is not a real
         # startup receipt.  Keep the dispatch unresolved until threadId is
         # visible in the host evidence.
@@ -320,6 +542,22 @@ class ActionBridge:
                 dispatch_id=raw.get("dispatch_id"),
             )
         normalized = self._normalize(raw, action)
+        fallback_code = str(normalized.fallback or normalized.payload.get("code") or "")
+        if self._is_top_level_action(action) and fallback_code == "HOST_CAPABILITY_BLOCKED":
+            return self._record_top_level_blocker(
+                action,
+                code="HOST_CAPABILITY_BLOCKED",
+                reason="the host reported that the exact top-level capability is unavailable",
+                receipt=normalized,
+            )
+        violation = self._top_level_protocol_violation(action, normalized)
+        if violation is not None:
+            return self._record_top_level_blocker(
+                action,
+                code="HOST_PROTOCOL_VIOLATION",
+                reason=violation,
+                receipt=normalized,
+            )
         result = self.store.ingest_receipt(
             normalized.to_dict()
             | {
@@ -328,6 +566,18 @@ class ActionBridge:
                 "actual_tool": normalized.actual_tool,
             }
         )
+        assurance = self.resource_broker.assess_route(normalized.resource_receipt)
+        if self._is_top_level_action(action) and assurance.blocking:
+            blocked = self._record_top_level_blocker(
+                action,
+                code="ROUTE_ASSURANCE_BLOCKED",
+                reason=assurance.reason or "route assurance could not be satisfied",
+                receipt=normalized,
+            )
+            blocked["ingestion"] = result
+            blocked["resource_receipt"] = dict(normalized.resource_receipt)
+            blocked["route_assurance"] = assurance.to_dict()
+            return blocked
         # T1 correctly keeps a pending client id from activating a task.  If a
         # later real thread receipt arrives, repair only the attempt identity
         # here so it can replace the pending client evidence.
@@ -346,10 +596,12 @@ class ActionBridge:
             "ingestion": result,
             "receipt": normalized.to_dict(),
             "resource_receipt": dict(normalized.resource_receipt),
+            "route_assurance": assurance.to_dict(),
         }
 
     def dispatch(self, action: Any) -> Any:
         value = action if isinstance(action, HostAction) else HostAction.from_value(action)
+        self.refresh_resource_capabilities()
         if self.resource_broker.is_external_action(value):
             policy = self.resource_broker.external_action_policy
             if policy == "deny":
@@ -370,6 +622,14 @@ class ActionBridge:
         existing = self._existing_dispatch(value.idempotency_key)
         if existing is not None:
             return self.reconcile(value)
+        if self._is_top_level_action(value):
+            available, reason = self._exact_top_level_capability(value)
+            if not available:
+                return self._record_top_level_blocker(
+                    value,
+                    code="HOST_CAPABILITY_BLOCKED",
+                    reason=reason or "the exact top-level host capability is unavailable",
+                )
         outbox = self._outbox(value.idempotency_key)
         # An emitted outbox row may have crossed the host boundary before the
         # process died. Reconcile it first and never call create a second time.
@@ -379,6 +639,12 @@ class ActionBridge:
             self.store.mark_outbox_emitted(value.idempotency_key)
         raw = self._invoke(value)
         if raw is None:
+            if self._is_top_level_action(value):
+                return self._record_top_level_blocker(
+                    value,
+                    code="HOST_CAPABILITY_BLOCKED",
+                    reason="the exact top-level host tool produced no observable receipt",
+                )
             self.enqueue(value)
             return {
                 "status": "pending-host-dispatch",
@@ -393,7 +659,24 @@ class ActionBridge:
                     "observed_at": None,
                 },
             }
-        return self.ingest_receipt(raw, action=value)
+        normalized = self._normalize(raw, value)
+        fallback_code = str(normalized.fallback or normalized.payload.get("code") or "")
+        if self._is_top_level_action(value) and fallback_code == "HOST_CAPABILITY_BLOCKED":
+            return self._record_top_level_blocker(
+                value,
+                code="HOST_CAPABILITY_BLOCKED",
+                reason="the host reported that the exact top-level capability is unavailable",
+                receipt=normalized,
+            )
+        violation = self._top_level_protocol_violation(value, normalized)
+        if violation is not None:
+            return self._record_top_level_blocker(
+                value,
+                code="HOST_PROTOCOL_VIOLATION",
+                reason=violation,
+                receipt=normalized,
+            )
+        return self.ingest_receipt(normalized, action=value)
 
     def create(self, action: Any) -> Any:
         return self.dispatch(action)

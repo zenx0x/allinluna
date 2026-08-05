@@ -23,6 +23,7 @@ from allinluna_runtime.context import ContextKernel
 from allinluna_runtime.artifacts import ArtifactStore
 from allinluna_runtime.evidence import CheckRunner, EvidenceCollector
 from allinluna_runtime.engine.coordinator import CoordinatorEngine
+from allinluna_runtime.engine.coordinator_driver import CoordinatorDriver
 from allinluna_runtime.engine.lane import LaneEngine
 from allinluna_runtime.adapters.workspace.git import GitWorktreeAdapter
 from allinluna_runtime.packs.gsd import GSDPack, PHASES
@@ -32,7 +33,7 @@ from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
 from allinluna_runtime.scheduler.local_scheduler import LocalScheduler
 from allinluna_runtime.store import Store
 
-from .hosts import FakeCodexHost, FakeSubagentHost
+from .hosts import FakeCodexHost, FakeDistributedCodexHost, FakeSubagentHost
 
 
 def _store() -> tuple[tempfile.TemporaryDirectory[str], Store]:
@@ -411,7 +412,7 @@ def _scenario_perf() -> dict[str, Any]:
 
 
 def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
-    """Exercise the real public start -> persisted graph -> completed run path."""
+    """Exercise public start -> create_thread -> child Lane -> parent ingest."""
 
     directory, store = _store()
     try:
@@ -434,6 +435,10 @@ def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
             {
                 "intent_id": "public-runtime-flow",
                 "goal": "complete the persisted public runtime flow",
+                "resource_envelope": {
+                    "model": "gpt-5.6-luna",
+                    "reasoning": "max",
+                },
                 "repository": {
                     "mode": "existing",
                     "roots": [{"path": str(fixture.worktree), "git": True, "dirty_state": "clean", "branch": "lane-fixture", "head": head_commit}],
@@ -467,7 +472,6 @@ def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
             dispatch=False,
         )
         run_id = str(started["run_ref"]).removeprefix("run://")
-        engine = CoordinatorEngine(store, host=fixture.host)
         producer = store.get_task("producer", run_id=run_id)
         consumer = store.get_task("consumer", run_id=run_id)
         if producer is None or consumer is None:
@@ -480,81 +484,64 @@ def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
             task_id: store._fetchall("SELECT id FROM work_units WHERE task_id = ?", (task_id,))
             for task_id in (producer["id"], consumer["id"])
         }
-        top_tick = engine.tick(run_id, dispatch=True)
-        top_level_receipts = [item for item in top_tick.receipts if isinstance(item, dict)]
-        artifact_store = ArtifactStore(store, root=Path(directory.name) / "artifacts")
-        workspace = GitWorktreeAdapter(fixture.worktree, base_commit=base_commit)
-        collector = EvidenceCollector(
-            store,
-            artifact_store=artifact_store,
-            workspace_adapter=workspace,
-            check_runner=CheckRunner(artifact_store),
-            profile="software",
+        host = FakeDistributedCodexHost(
+            workspace_base_commit=base_commit,
+            workspace_path=str(fixture.worktree),
         )
-        verified_handoffs: list[dict[str, Any]] = []
-        lane_ticks = 0
-        work_unit_handoffs = 0
-        export_refs: list[str] = []
-        for task_name, check_name, output in (
-            ("producer", "producer check passes", b"producer-result"),
-            ("consumer", "consumer check passes", b"final-result"),
-        ):
-            task = store.get_task(task_name, run_id=run_id)
-            if task is None:
-                raise AssertionError(f"missing public task {task_name}")
-            lane = LaneEngine(
-                store,
-                task_name,
-                host=FakeSubagentHost(),
-                evidence_collector=collector,
-            )
-            tick = lane.tick(dispatch=True)
-            lane_ticks += 1
-            for action, receipt_result in zip(tick["actions"], tick["receipts"]):
-                receipt = _receipt(receipt_result)
-                envelope = action.get("payload", {}).get("work_unit_envelope", {})
-                work_unit_id = str(action.get("work_unit_id") or envelope.get("work_unit_id"))
-                if work_unit_id == "None":
-                    raise AssertionError(f"lane action has no WorkUnit identity: {action}")
-                lane.ingest_receipt(work_unit_id, receipt)
-                lane.ingest_handoff({"work_unit_id": work_unit_id, "status": "completed", "receipt_id": receipt.get("receipt_id")})
-                work_unit_handoffs += 1
-            neutral = lane.synthesize_handoff()
-            artifact = artifact_store.put(
-                output,
-                kind="summary",
-                produced_by="public-runtime-flow",
-                link=("task", str(task["id"]), "produced"),
-            )
-            export_name = "ProducerArtifact" if task_name == "producer" else "FinalArtifact"
-            collected = lane.collect_handoff_evidence(
-                neutral,
-                checks=[
-                    {
-                        "name": check_name,
-                        "command": [sys.executable, "-c", "print('evidence-check')"],
-                        "satisfies": [check_name],
-                    }
-                ],
-                exports=[{"name": export_name, "artifact_ref": artifact.ref, "version": 1}],
-                workspace_scope={
-                    "worktree": str(fixture.worktree),
-                    "base_commit": base_commit,
-                    "ownership": ["seed.txt"],
-                    "protected_paths": [],
-                },
-                profile="software",
-            )
-            if not collected["evidence"]["verified"]:
-                raise AssertionError(collected["evidence"])
-            completed = engine.ingest_handoff(task_name, collected)
-            verified_handoffs.append({"task_id": task_name, "state": completed["state"], "handoff_status": collected.get("status"), "evidence_verified": collected["evidence"].get("verified"), "handoff_id": collected["handoff_id"], "changed_paths": list(collected["evidence"].get("changed_paths", ())), "protected_unchanged": collected["evidence"].get("workspace_evidence", {}).get("protected_unchanged")})
-            export_refs.append(artifact.ref)
-            if task_name == "producer":
-                follow_up = engine.tick(run_id, dispatch=True)
-                top_level_receipts.extend(item for item in follow_up.receipts if isinstance(item, dict))
 
-        status = engine.status(run_id)
+        # The first process emits the exact public action and then crashes
+        # before monitoring.  A fresh CoordinatorDriver resumes the durable
+        # outbox/checkpoint; it never opens a LaneEngine for either child.
+        first_driver = CoordinatorDriver(store, host=host)
+        first = first_driver.tick(run_id, monitor=False)
+        created_before_restart = len(host.created_task_ids)
+        restarted_driver = CoordinatorDriver(store, host=host)
+        driven = restarted_driver.drive(run_id, max_cycles=8, monitor=True)
+        status = restarted_driver.status(run_id)["status"]
+        handoffs = list(host.child_handoffs)
+        verified_handoffs = [
+            {
+                "task_id": str(item["task_id"]),
+                "state": (store.get_task(str(item["task_id"]), run_id=run_id) or {}).get("state"),
+                "handoff_status": item.get("status"),
+                "evidence_verified": (item.get("evidence") or {}).get("verified"),
+                "evidence_errors": list((item.get("evidence") or {}).get("errors", ())),
+                "workspace_evidence": (item.get("evidence") or {}).get("workspace_evidence"),
+                "handoff_id": item.get("handoff_id"),
+                "changed_paths": list((item.get("evidence") or {}).get("changed_paths", ())),
+                "protected_unchanged": (item.get("evidence") or {})
+                .get("workspace_evidence", {})
+                .get("protected_unchanged"),
+            }
+            for item in handoffs
+            if item.get("status") == "completed"
+        ]
+        export_refs = [
+            str(export["artifact_ref"])
+            for item in handoffs
+            for export in (item.get("evidence") or {}).get("exports", ()) or ()
+            if isinstance(export, dict) and export.get("artifact_ref")
+        ]
+        top_level_attempts = [
+            attempt
+            for task_name in (producer["id"], consumer["id"])
+            for attempt in store.attempts_for_task(task_name)
+        ]
+        telemetry_missing = any(
+            (store.get_host_receipt(str(attempt["receipt_id"])) or {})
+            .get("resource_receipt", {})
+            .get("actual_state")
+            == "unresolved"
+            for attempt in top_level_attempts
+            if attempt.get("receipt_id")
+        )
+        telemetry_states = [
+            (store.get_host_receipt(str(attempt["receipt_id"])) or {})
+            .get("resource_receipt", {})
+            .get("actual_state")
+            for attempt in top_level_attempts
+            if attempt.get("receipt_id")
+        ]
         return {
             "public_api_entry": {
                 "api": SinglePublicSkillAPI.id,
@@ -565,19 +552,43 @@ def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
             "flow": {
                 "task_graph_persisted": len(store._fetchall("SELECT id FROM tasks WHERE run_id = ?", (run_id,))) == 2,
                 "work_graphs_persisted": all(bool(rows) for rows in work_graphs.values()),
-                "top_level_receipts": len(top_level_receipts),
-                "lane_ticks": lane_ticks,
-                "work_unit_handoffs": work_unit_handoffs,
+                "top_level_receipts": len(host.created_task_ids),
+                "lane_ticks": host.child_run_count,
+                "work_unit_handoffs": sum(1 for item in host.call_log if item.get("method") == "read"),
                 "verified_lane_handoffs": len(verified_handoffs),
                 "handoffs": verified_handoffs,
                 "exports": export_refs,
                 "actual_changed_paths": sorted({path for item in verified_handoffs for path in item["changed_paths"]}),
                 "protected_unchanged": all(item["protected_unchanged"] is True for item in verified_handoffs),
-                    "dependency_condition": store._fetchone(
-                        "SELECT condition_json FROM task_dependencies WHERE task_id = ?", (consumer["id"],)
-                    )["condition_json"],
-                    "task_states": {name: (store.get_task(name, run_id=run_id) or {}).get("state") for name in ("producer", "consumer")},
-                    "run_status": (store.get_run(run_id) or {}).get("status"),
+                "dependency_condition": store._fetchone(
+                    "SELECT condition_json FROM task_dependencies WHERE task_id = ?", (consumer["id"],)
+                )["condition_json"],
+                "task_states": {name: (store.get_task(name, run_id=run_id) or {}).get("state") for name in ("producer", "consumer")},
+                "run_status": (store.get_run(run_id) or {}).get("status"),
+                "child_bootstraps_loaded": len(host.child_bootstraps),
+                "public_create_thread_fields": sorted(host.public_calls[0]),
+                "requested_resources": sorted(
+                    {(call["model"], call["thinking"]) for call in host.public_calls}
+                ),
+                "public_create_thread_hidden_payload": any(
+                    key in call for call in host.public_calls for key in ("payload", "task_envelope", "action_contract_hash", "idempotency_key")
+                ),
+                "parent_lane_engine_closure": not hasattr(restarted_driver, "lane"),
+                "parent_wait_read_calls": sum(
+                    1 for item in host.call_log if item.get("method") in {"wait_tasks", "read_task"}
+                ),
+                "dependency_released_next_wave": any(
+                    str(task_id).endswith(":task:consumer") for task_id in host.created_task_ids
+                ) and created_before_restart == 1,
+                "restart_duplicate_dispatches": len(host.public_calls) - len(host.created_task_ids),
+                "telemetry_missing_non_blocking": telemetry_missing and (store.get_run(run_id) or {}).get("status") == "completed",
+                "telemetry_states": telemetry_states,
+                "driver_boundary": driven.get("boundary"),
+                "driver_handoff_results": [
+                    handoff
+                    for cycle in driven.get("cycles", ())
+                    for handoff in cycle.get("handoffs", ())
+                ],
             },
         }
     finally:

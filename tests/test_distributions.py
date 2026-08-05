@@ -74,6 +74,9 @@ class DistributionTests(unittest.TestCase):
                 compat = plugin_root / "runtime/allinluna_runtime/compat/legacy_plan.py"
                 self.assertTrue(runtime.is_file(), runtime)
                 self.assertTrue(compat.is_file(), compat)
+                if distribution == "research-routes":
+                    self.assertTrue((plugin_root / "runtime/research_routes_runtime/__init__.py").is_file())
+                    self.assertTrue((plugin_root / "runtime/research_routes_runtime/schemas/research-pack.schema.json").is_file())
 
     def test_release_artifacts_exclude_python_cache_and_keep_research_readmes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -110,6 +110,11 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     overlay_plugin = root / "plugins" / spec["plugin_name"]
     if (overlay_plugin / "skills").is_dir():
         copy_tree(overlay_plugin / "skills", plugin_root / "skills")
+    # Research Routes owns a Pack-local runtime in addition to its skills.
+    # Keep it beside the canonical host runtime in the standalone artifact;
+    # it is not copied into the All in Luna source distribution.
+    if spec["id"] == "research-routes" and (overlay_plugin / "runtime").is_dir():
+        copy_tree(overlay_plugin / "runtime", plugin_root / "runtime")
     copy_tree(root / "tests", plugin_root / "tests")
     copy_tree(root / "evals", plugin_root / "evals")
     copy_tree(root / "LICENSE", artifact / "LICENSE")

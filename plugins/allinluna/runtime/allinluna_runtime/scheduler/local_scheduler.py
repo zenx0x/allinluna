@@ -212,17 +212,22 @@ class LocalScheduler:
                 "parent_authority": list(parent_policy.get("authority", ())),
                 "parent_ownership": list(parent_policy.get("ownership", ())),
             })
+        arguments = {"envelope": envelope}
+        if allocation.get("model", self.resource_broker.model):
+            arguments["model"] = allocation.get("model", self.resource_broker.model)
+        if allocation.get("reasoning", self.resource_broker.reasoning):
+            arguments["thinking"] = allocation.get("reasoning", self.resource_broker.reasoning)
         return HostAction(
             action_id="action-" + stable_digest({"work_unit": unit_id, "key": key}),
             kind="spawn-subagent",
             tool="native_subagent.spawn",
-            arguments={"envelope": envelope, "model": str(allocation.get("model", self.resource_broker.model)), "thinking": str(allocation.get("reasoning", self.resource_broker.reasoning))},
+            arguments=arguments,
             idempotency_key=key,
             task_id=self.task_id,
             dispatch_id="dispatch-" + stable_digest({"work_unit": unit_id}),
             host_id=self.adapter,
-            model=str(allocation.get("model", self.resource_broker.model)),
-            reasoning=str(allocation.get("reasoning", self.resource_broker.reasoning)),
+            model=allocation.get("model", self.resource_broker.model),
+            reasoning=allocation.get("reasoning", self.resource_broker.reasoning),
             payload={"work_unit_envelope": envelope, "resource_receipt": allocation.get("receipt")},
         )
 
@@ -306,6 +311,14 @@ class LocalScheduler:
             if current["state"] == "ready":
                 self.store.update_work_unit_status(unit_id, "delegated", signal_type="WORK_UNIT_DELEGATED", payload={"attempt_id": attempt["id"]})
             self.store._execute("UPDATE work_unit_attempts SET state = 'delegated' WHERE id = ?", (attempt["id"],))
+            # A Lane may crash after a native spawn reaches the host.  Persist
+            # the exact local action in the shared outbox first so a new
+            # LaneDriver reconciles this same worker instead of spawning it.
+            self.store.persist_work_unit_dispatch_intent(
+                action,
+                attempt_id=str(attempt["id"]),
+                adapter=self.adapter,
+            )
             selected.append(LocalAction(unit_id, action, allocation.to_dict(), str(lease["id"]), str(attempt["id"])))
         return selected
 

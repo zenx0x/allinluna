@@ -7,6 +7,8 @@ class back into a monolith.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 from typing import Any
 
 from .resource_observation import ResourceObservation
@@ -57,6 +59,86 @@ class StoreObservability:
         else:
             row = self._fetchone("SELECT COUNT(*) AS count FROM host_receipts WHERE id = ?", (receipt_id,))
         return int((row or {}).get("count", 0))
+
+    def host_conformance_trace(self, run_id: str) -> dict[str, Any]:
+        """Build a diagnostic trace from durable receipts, never fixture lore.
+
+        Project/worktree fields are included only when the action actually
+        exposed them, allowing projectless and non-Git host operations to be
+        evaluated without inventing repository identity.
+        """
+
+        rows = self._fetchall(
+            """SELECT hr.*, o.action_json, ta.worktree, ta.branch, ta.base_commit
+               FROM host_receipts hr
+               JOIN dispatch_outbox o ON o.idempotency_key = hr.dispatch_key
+               LEFT JOIN task_attempts ta ON ta.dispatch_key = hr.dispatch_key
+               WHERE o.run_id = ?
+               ORDER BY hr.received_at, hr.id""",
+            (run_id,),
+        )
+        operations: list[dict[str, Any]] = []
+        op_names = {
+            "create-top-level-task": "create",
+            "read-task": "read",
+            "wait-for-top-level-tasks": "wait",
+            "cancel-task": "cancel",
+        }
+        for row in rows:
+            try:
+                action = json.loads(str(row.get("action_json") or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                action = {}
+            if not isinstance(action, dict):
+                action = {}
+            kind = str(action.get("kind") or "")
+            operation = op_names.get(kind)
+            if operation is None:
+                for prefix, name in (("read", "read"), ("wait", "wait"), ("cancel", "cancel"), ("create", "create")):
+                    if kind.startswith(prefix):
+                        operation = name
+                        break
+            if operation is None:
+                continue
+            thread_id = row.get("thread_id")
+            host_id = row.get("host_id") or action.get("host_id")
+            identity: dict[str, Any] = {
+                "thread_id": thread_id,
+                "host_id": host_id,
+            }
+            if row.get("worktree"):
+                identity["worktree"] = row["worktree"]
+            if row.get("branch"):
+                identity["branch"] = row["branch"]
+            if row.get("base_commit"):
+                identity["commit"] = row["base_commit"]
+            requested_tool = action.get("tool")
+            requested_capability = action.get("host_capability_required") or requested_tool
+            operations.append(
+                {
+                    "op": operation,
+                    "thread_id": thread_id,
+                    "requested_tool": requested_tool,
+                    "resolved_tool": requested_tool,
+                    "actual_tool": row.get("actual_tool"),
+                    "requested_capability": requested_capability,
+                    "resolved_capability": requested_capability,
+                    "actual_capability": row.get("actual_tool"),
+                    "identity": identity,
+                    "idempotency": "wait" if operation == "wait" else "reuse" if operation == "read" else "no-op",
+                }
+            )
+        identity = dict(operations[0]["identity"]) if operations else {}
+        return {
+            "protocol": "allinluna.host_conformance",
+            "schema_version": "2.0",
+            "verification_mode": "durable-receipts",
+            "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "identity": identity,
+            "operations": operations,
+            "source": "runtime.db",
+            "run_ref": f"run://{run_id}",
+        }
 
     def pending_outbox(self, run_id: str, *, limit: int = 256) -> list[dict[str, Any]]:
         rows = self._fetchall(

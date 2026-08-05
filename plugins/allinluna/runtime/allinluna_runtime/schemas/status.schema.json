@@ -93,6 +93,9 @@
         "requested_reasoning": {"type": ["string", "null"], "minLength": 1},
         "resolved_model": {"type": ["string", "null"], "minLength": 1},
         "resolved_reasoning": {"type": ["string", "null"], "minLength": 1},
+        "capability_class": {"type": ["string", "null"], "enum": ["control.relay", "planning.semantic", "lane.synthesis", "work.mechanical", "work.implementation", "work.deep-debug", "verify.independent", null]},
+        "route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]},
+        "route_assurance_state": {"enum": ["satisfied", "observed", "unresolved", "blocked"]},
         "actual_model": {"type": ["string", "null"], "minLength": 1},
         "actual_reasoning": {"type": ["string", "null"], "minLength": 1},
         "actual_model_state": {"enum": ["resolved", "unresolved"]},
@@ -167,7 +170,20 @@
         "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,256}$"},
         "expected_receipt": {"const": "host-receipt/v1"},
         "tool": {"type": "string", "minLength": 1},
-        "arguments": {"type": "object", "additionalProperties": true}
+        "arguments": {"type": "object", "additionalProperties": true},
+        "execution_class": {"enum": ["top_level_task", "local_subagent", "direct"]},
+        "tool_policy": {
+          "type": "object",
+          "required": ["exact_tool", "substitutions", "on_unavailable"],
+          "properties": {
+            "exact_tool": {"type": "string", "minLength": 1},
+            "substitutions": {"type": "array", "items": {"type": "string"}},
+            "on_unavailable": {"type": "string"}
+          }
+        },
+        "host_capability_required": {"type": "string", "minLength": 1},
+        "task_envelope_ref": {"type": ["string", "null"]},
+        "action_contract_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
       }
     },
     "extensions": {

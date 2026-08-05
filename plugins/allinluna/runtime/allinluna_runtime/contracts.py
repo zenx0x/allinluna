@@ -583,6 +583,7 @@ class ContractRevision:
         "exports",
         "dependencies",
         "done_when",
+        "verification_specs",
         "ownership",
         "permissions",
         "context_policy",
@@ -605,6 +606,7 @@ class ContractRevision:
         permissions: Any = None,
         context_policy: Any = None,
         *,
+        verification_specs: Any = (),
         id: str | None = None,
         contract_version: int | None = None,
         task_id: str | None = None,
@@ -640,6 +642,8 @@ class ContractRevision:
             raise ContractValidationError(
                 ValidationIssue("/done_when", "required_string", "done_when entries must be non-empty strings")
             )
+        from .verification import verification_specs as parse_verification_specs
+        self.verification_specs = parse_verification_specs(verification_specs)
         self.ownership = _json_copy({} if ownership is None else ownership)
         self.permissions = _json_copy({} if permissions is None else permissions)
         self.context_policy = _json_copy({} if context_policy is None else context_policy)
@@ -699,6 +703,7 @@ class ContractRevision:
             "exports": [_json_copy(item) for item in self.exports],
             "dependencies": [_json_copy(item) for item in self.dependencies],
             "done_when": list(self.done_when),
+            "verification_specs": [item.to_dict() for item in self.verification_specs],
             "ownership": _json_copy(self.ownership),
             "permissions": _json_copy(self.permissions),
             "context_policy": _json_copy(self.context_policy),
@@ -730,6 +735,7 @@ class ContractRevision:
             "imports_json": canonical_json(list(self.imports)),
             "exports_json": canonical_json(list(self.exports)),
             "done_when_json": canonical_json(list(self.done_when)),
+            "verification_specs_json": canonical_json([item.to_dict() for item in self.verification_specs]),
             "ownership_json": canonical_json(self.ownership),
             "permissions_json": canonical_json(self.permissions),
             "context_policy_json": canonical_json(self.context_policy),
@@ -764,6 +770,7 @@ class ContractRevision:
             imports=get_json("imports_json" if is_db_row else "imports", ()),
             exports=get_json("exports_json" if is_db_row else "exports", ()),
             done_when=get_json("done_when_json" if is_db_row else "done_when", ()),
+            verification_specs=get_json("verification_specs_json" if is_db_row else "verification_specs", ()),
             ownership=get_json("ownership_json" if is_db_row else "ownership", {}),
             permissions=get_json("permissions_json" if is_db_row else "permissions", {}),
             context_policy=get_json("context_policy_json" if is_db_row else "context_policy", {}),
@@ -792,6 +799,7 @@ class ContractRevision:
                 "imports_json",
                 "exports_json",
                 "done_when_json",
+                "verification_specs_json",
                 "ownership_json",
                 "permissions_json",
                 "context_policy_json",
@@ -1135,6 +1143,7 @@ class ContractRepository:
     imports_json TEXT NOT NULL,
     exports_json TEXT NOT NULL,
     done_when_json TEXT NOT NULL,
+    verification_specs_json TEXT NOT NULL DEFAULT '[]',
     ownership_json TEXT NOT NULL,
     permissions_json TEXT NOT NULL,
     context_policy_json TEXT NOT NULL,
@@ -1247,8 +1256,8 @@ class ContractRepository:
             row = record.to_db_row()
             self.connection.execute(
                 "INSERT INTO contracts (id, version, task_id, outcome, imports_json, exports_json, "
-                "done_when_json, ownership_json, permissions_json, context_policy_json, created_at, supersedes_id) "
-                "VALUES (:id, :version, :task_id, :outcome, :imports_json, :exports_json, :done_when_json, "
+                "done_when_json, verification_specs_json, ownership_json, permissions_json, context_policy_json, created_at, supersedes_id) "
+                "VALUES (:id, :version, :task_id, :outcome, :imports_json, :exports_json, :done_when_json, :verification_specs_json, "
                 ":ownership_json, :permissions_json, :context_policy_json, :created_at, :supersedes_id)",
                 row,
             )
@@ -1307,7 +1316,7 @@ class ContractRepository:
             version = ref_version
         if version is None:
             row = self.connection.execute(
-                "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, "
+                "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, verification_specs_json, "
                 "ownership_json, permissions_json, context_policy_json, created_at, supersedes_id "
                 "FROM contracts WHERE id = ? ORDER BY version DESC LIMIT 1",
                 (identifier,),
@@ -1315,7 +1324,7 @@ class ContractRepository:
         else:
             _positive_int(version, path="/contract_version")
             row = self.connection.execute(
-                "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, "
+                "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, verification_specs_json, "
                 "ownership_json, permissions_json, context_policy_json, created_at, supersedes_id "
                 "FROM contracts WHERE id = ? AND version = ?",
                 (identifier, version),
@@ -1350,7 +1359,7 @@ class ContractRepository:
     def history(self, contract_id: str | ContractRef) -> tuple[ContractRevision, ...]:
         identifier, _ = self._normalise_id(contract_id)
         rows = self.connection.execute(
-            "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, "
+            "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, verification_specs_json, "
             "ownership_json, permissions_json, context_policy_json, created_at, supersedes_id "
             "FROM contracts WHERE id = ? ORDER BY version ASC",
             (identifier,),
@@ -1362,7 +1371,7 @@ class ContractRepository:
     def list(self, contract_id: str | None = None) -> tuple[ContractRevision, ...]:
         if contract_id is None:
             rows = self.connection.execute(
-                "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, "
+                "SELECT id, version, task_id, outcome, imports_json, exports_json, done_when_json, verification_specs_json, "
                 "ownership_json, permissions_json, context_policy_json, created_at, supersedes_id "
                 "FROM contracts ORDER BY id ASC, version ASC"
             ).fetchall()

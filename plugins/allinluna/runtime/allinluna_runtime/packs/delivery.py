@@ -19,6 +19,7 @@ from ..domain import (
     TaskState,
     WorkGraph,
 )
+from ..verification import VerifierSpec
 from .base import CompiledRunGraph, PackManifest, contract_for, dependency, task_for
 from .goal_compiler import Decomposition, OutcomeDomain, TaskDecomposer
 
@@ -86,6 +87,7 @@ class DeliveryPack:
                 contract_id=f"contract-{run_intent.intent_id}-{task_id}",
                 outcome=outcome,
                 done_when=done_when or run_intent.done_when,
+                verification_specs=domain.verification_specs,
                 ownership=domain.ownership,
                 dependencies=dependencies,
                 exports=tuple({"name": str(item), "kind": "artifact", "version": 1, "description": f"Delivery artifact {item}"} for item in domain.exports),
@@ -109,7 +111,7 @@ class DeliveryPack:
                 scope=(f"task://{task_id}",),
                 authority=(AuthorityAction.READ.value, AuthorityAction.WRITE.value, AuthorityAction.EXECUTE_LOCAL.value, AuthorityAction.DELEGATE_RECURSIVE.value, AuthorityAction.REPORT.value),
                 ownership=domain.ownership,
-                checks=domain.checks or done_when or run_intent.done_when,
+                checks=tuple(spec.id for spec in domain.verification_specs),
                 resource_envelope=domain.work_unit_resource_envelope or domain.resource_envelope,
                 state="ready",
             )
@@ -164,10 +166,10 @@ class DeliveryPack:
         result.setdefault("active_work", []).append({"scope": str(scope), "pack": self.id})
         return result
 
-    def verifiers(self, task: Task) -> list[Any]:
+    def verifiers(self, task: Task) -> list[VerifierSpec]:
         return [
-            lambda evidence, expected=str(task.id): bool(evidence) and str(evidence.get("task_id", expected)) == expected,
-            lambda evidence: all(bool(item) for item in evidence.get("done_when", ())) if isinstance(evidence, Mapping) else False,
+            VerifierSpec(id="task-identity", kind="pack", assertion="task_id_matches"),
+            VerifierSpec(id="semantic-conditions", kind="pack", assertion="done_when_satisfied"),
         ]
 
     def compose_result(self, run: Run) -> Mapping[str, Any]:

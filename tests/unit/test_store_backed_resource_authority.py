@@ -30,7 +30,7 @@ def test_v2_database_migrates_in_place_to_resource_and_host_receipt_authority(tm
         assert runner.apply(2) == 2
 
     with Store(database) as store:
-        assert store.schema_version() == SCHEMA_VERSION == 5
+        assert store.schema_version() == SCHEMA_VERSION == 8
         assert validate_schema(store.connection, strict_tables=True) == []
 
 
@@ -41,7 +41,7 @@ def test_v3_database_migrates_host_resource_receipts_without_rebuild(tmp_path: P
         assert runner.apply(2) == 2
         assert runner.apply(3) == 3
     with Store(database) as store:
-        assert store.schema_version() == 5
+        assert store.schema_version() == SCHEMA_VERSION
         columns = {
             row["name"] for row in store._fetchall("PRAGMA table_info(host_receipts)")
         }
@@ -58,7 +58,7 @@ def test_v4_database_migrates_complete_resource_receipt_triple_without_rebuild(t
         for version in range(1, 5):
             assert runner.apply(version) == version
     with Store(database) as store:
-        assert store.schema_version() == 5
+        assert store.schema_version() == SCHEMA_VERSION
         columns = {row["name"] for row in store._fetchall("PRAGMA table_info(host_receipts)")}
         assert {
             "requested_model", "requested_reasoning", "resolved_model", "resolved_reasoning",
@@ -169,7 +169,6 @@ def test_total_subagent_and_per_lane_limits_are_one_transactional_authority(tmp_
             "lane_slots": {"lane-a": 1, "lane-b": 1},
         }
 
-
 def test_recovery_keeps_attempt_backed_claim_and_reconciles_orphan(tmp_path: Path) -> None:
     database = tmp_path / "runtime.db"
     _seed_top_level(database, 2)
@@ -217,7 +216,7 @@ def test_recovery_reconstructs_missing_claim_from_active_attempt(tmp_path: Path)
         claim = restarted.resource_claims("run-resource")[0]
         assert claim["requested"] == {}
         assert claim["resolved"] == {
-            "model": "gpt-5.6-luna",
-            "reasoning": "high",
+            "capability_class": "lane.synthesis",
+            "route_assurance": "observe_if_exposed",
             "external_action_policy": "deny",
         }

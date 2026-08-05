@@ -18,9 +18,10 @@ from dataclasses import dataclass, field, replace
 from itertools import islice
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Protocol
 
 from ..domain import RunIntent
+from ..verification import VerificationSpec, verification_specs
 
 
 _DOMAIN_MARKERS = (
@@ -359,6 +360,7 @@ class OutcomeDomain:
     id: str
     outcome: str
     done_when: tuple[str, ...] = ()
+    verification_specs: tuple[VerificationSpec | Mapping[str, Any], ...] = ()
     dependencies: tuple[str, ...] = ()
     dependency_exports: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     ownership: tuple[str, ...] = ()
@@ -373,6 +375,7 @@ class OutcomeDomain:
         object.__setattr__(self, "id", _text(self.id, "outcome domain id"))
         object.__setattr__(self, "outcome", _text(self.outcome, "outcome domain outcome"))
         object.__setattr__(self, "done_when", _as_tuple(self.done_when))
+        object.__setattr__(self, "verification_specs", verification_specs(self.verification_specs))
         object.__setattr__(self, "dependencies", _as_tuple(self.dependencies))
         object.__setattr__(
             self,
@@ -399,6 +402,7 @@ class OutcomeDomain:
             "id": self.id,
             "outcome": self.outcome,
             "done_when": list(self.done_when),
+            "verification_specs": [item.to_dict() for item in self.verification_specs],
             "dependencies": [
                 {
                     "id": dependency,
@@ -427,13 +431,17 @@ class Decomposition(Sequence[OutcomeDomain]):
     source: str
     explicit: bool = False
     repository_context: Mapping[str, Any] = field(default_factory=dict)
+    ambiguous: bool = False
+    clarification_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.domains:
             raise ValueError("goal decomposition must contain at least one outcome domain")
-        if self.strategy not in {"atomic", "outcome-domain"}:
+        if self.strategy not in {"atomic", "outcome-domain", "semantic"}:
             raise ValueError(f"unknown decomposition strategy: {self.strategy}")
         object.__setattr__(self, "repository_context", dict(self.repository_context))
+        object.__setattr__(self, "ambiguous", bool(self.ambiguous))
+        object.__setattr__(self, "clarification_reasons", _as_tuple(self.clarification_reasons))
 
     def __len__(self) -> int:
         return len(self.domains)
@@ -448,6 +456,10 @@ class Decomposition(Sequence[OutcomeDomain]):
     def parallel_domains(self) -> tuple[OutcomeDomain, ...]:
         return tuple(domain for domain in self.domains if not domain.dependencies)
 
+    @property
+    def clarification_required(self) -> bool:
+        return self.ambiguous
+
     def to_dict(self) -> dict[str, Any]:
         edges = [
             {"from": dependency, "to": domain.id, "exports": list(domain.dependency_exports.get(dependency, ())) }
@@ -459,6 +471,9 @@ class Decomposition(Sequence[OutcomeDomain]):
             "strategy": self.strategy,
             "source": self.source,
             "explicit": self.explicit,
+            "ambiguous": self.ambiguous,
+            "clarification_required": self.ambiguous,
+            "clarification_reasons": list(self.clarification_reasons),
             "domain_count": len(self.domains),
             "domains": [domain.to_dict() for domain in self.domains],
             "parallel_domain_ids": [domain.id for domain in self.parallel_domains],
@@ -489,6 +504,22 @@ class TaskDecomposer:
 
     version = "2.1"
 
+    _AMBIGUITY_PATTERNS = (
+        (r"\bambiguous\b", "goal-explicitly-ambiguous"),
+        (r"\bunclear\b", "goal-explicitly-unclear"),
+        (r"\bnot\s+sure\b", "goal-needs-user-choice"),
+        (r"\bunspecified\b", "goal-has-unspecified-scope"),
+        (r"\bto\s+be\s+decided\b", "goal-needs-decision"),
+        (r"\bwhich\b", "goal-contains-choice"),
+        (r"\bwhat\s+should\b", "goal-contains-choice"),
+        (r"\bchoose\b", "goal-contains-choice"),
+        (r"\bdecide\b", "goal-contains-choice"),
+        (r"\bsomething\b", "goal-has-unspecified-object"),
+        (r"\bsome\s+kind\s+of\b", "goal-has-unspecified-object"),
+        (r"\bthe\s+thing\b", "goal-has-unspecified-object"),
+        (r"\bmake\s+it\s+better\b", "goal-needs-success-criteria"),
+    )
+
     def __init__(self, repository_inspector: RepositoryContextInspector | None = None) -> None:
         self.repository_inspector = repository_inspector or RepositoryContextInspector()
 
@@ -506,6 +537,7 @@ class TaskDecomposer:
         repository_context = self.repository_inspector.inspect(repository)
 
         configured = self._configured_domains(merged_config)
+        ambiguous, clarification_reasons = self._ambiguity(goal, merged_config, configured is not None)
         if configured is not None:
             domains = self._from_configured(configured, goal=goal, default_done=default_done)
             return Decomposition(
@@ -514,6 +546,8 @@ class TaskDecomposer:
                 "configured",
                 True,
                 repository_context,
+                ambiguous,
+                clarification_reasons,
             )
 
         fragments = self._parse_goal(goal)
@@ -525,6 +559,142 @@ class TaskDecomposer:
             "natural-language",
             False,
             repository_context,
+            ambiguous,
+            clarification_reasons,
+        )
+
+    @classmethod
+    def _ambiguity(
+        cls,
+        goal: str,
+        config: Mapping[str, Any],
+        has_explicit_domains: bool,
+    ) -> tuple[bool, tuple[str, ...]]:
+        """Classify only expansion-relevant ambiguity, not ordinary prose.
+
+        This is deliberately conservative.  A compiler can safely keep an
+        ordinary, concrete atomic goal on the historical eager path, while an
+        explicit unknown/choice or a caller-declared clarification requirement
+        must stop before downstream GSD phases are materialized.
+        """
+
+        reasons: list[str] = []
+        for key in ("ambiguous", "goal_ambiguous", "clarification_required", "requires_clarification"):
+            if config.get(key) is True:
+                reasons.append(f"config:{key}")
+        if config.get("clarification_questions"):
+            reasons.append("config:clarification_questions")
+        lowered = goal.lower()
+        for pattern, reason in cls._AMBIGUITY_PATTERNS:
+            if re.search(pattern, lowered, flags=re.I) and reason not in reasons:
+                reasons.append(reason)
+        # A generic object is ambiguous unless the caller supplied explicit
+        # outcome domains.  Keep "complete product" compatible with the
+        # existing atomic GSD recipe while treating "build the product" as a
+        # clarify-first request.
+        if not has_explicit_domains and not re.search(
+            r"\b(?:complete|entire|whole|full)\s+(?:product|platform|system|stack)\b",
+            lowered,
+        ):
+            if re.search(
+                r"\b(?:build|create|make|do|fix|improve)\s+(?:(?:the|a|an)\s+)?"
+                r"(?:(?:[a-z0-9_-]+)\s+){0,2}(?:product|system|platform|thing|solution|app|application|service|tool|software)\b",
+                lowered,
+            ):
+                reasons.append("goal-generic-object")
+        return bool(reasons), tuple(dict.fromkeys(reasons))
+
+    def validate_decomposition(
+        self,
+        value: Any,
+        *,
+        request: RunIntent | Mapping[str, Any] | str | None = None,
+        done_when: Sequence[str] | None = None,
+    ) -> Decomposition:
+        """Re-run custom semantic output through the deterministic validator.
+
+        Semantic decomposers are pure proposal providers.  They may return a
+        ``Decomposition``, an object carrying ``domains``, or a sequence of
+        domain mappings, but they never receive a Store and never own graph
+        validation.  IDs, dependency references, ownership, and cycles are
+        normalized here before a Workflow Pack can consume the result.
+        """
+
+        raw_value = value
+        if isinstance(value, Decomposition):
+            raw_domains: Sequence[Any] = value.domains
+            strategy = value.strategy
+            source = value.source
+            explicit = value.explicit
+            repository_context = value.repository_context
+            ambiguous = value.ambiguous
+            clarification_reasons = value.clarification_reasons
+        elif isinstance(value, Mapping) and "domains" in value:
+            raw_domains = value.get("domains") or ()
+            strategy = str(value.get("strategy") or ("atomic" if len(raw_domains) == 1 else "outcome-domain"))
+            source = str(value.get("source") or "semantic")
+            explicit = bool(value.get("explicit", True))
+            repository_context = value.get("repository_context", {})
+            ambiguous = bool(value.get("ambiguous", value.get("clarification_required", False)))
+            clarification_reasons = _as_tuple(value.get("clarification_reasons", ()))
+        elif hasattr(value, "domains"):
+            raw_domains = getattr(value, "domains") or ()
+            strategy = str(getattr(value, "strategy", "semantic"))
+            source = str(getattr(value, "source", "semantic"))
+            explicit = bool(getattr(value, "explicit", True))
+            repository_context = getattr(value, "repository_context", {})
+            ambiguous = bool(getattr(value, "ambiguous", getattr(value, "clarification_required", False)))
+            clarification_reasons = _as_tuple(getattr(value, "clarification_reasons", ()))
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            raw_domains = value
+            strategy = "atomic" if len(value) == 1 else "semantic"
+            source = "semantic"
+            explicit = True
+            repository_context = {}
+            ambiguous = False
+            clarification_reasons = ()
+        else:
+            raise TypeError("semantic decomposer must return a Decomposition or a sequence of domains")
+
+        default_done = tuple(str(item) for item in (done_when or self._request_parts(request)[1] or ()))
+        if not default_done:
+            goal = self._request_parts(request)[0] if request is not None else "requested outcome"
+            default_done = (f"{goal} is evidenced",)
+        if isinstance(raw_domains, Mapping):
+            raw_domains = self._configured_domains({"domains": raw_domains}) or ()
+        normalized_input: list[Mapping[str, Any]] = []
+        for index, item in enumerate(raw_domains):
+            if isinstance(item, OutcomeDomain):
+                normalized_input.append(item.to_dict())
+            elif isinstance(item, Mapping):
+                normalized_input.append(dict(item))
+            else:
+                raise ValueError(f"semantic domain {index} must be an OutcomeDomain or object")
+        domains = self._materialize_domains(normalized_input, default_done=default_done)
+        if strategy not in {"atomic", "outcome-domain", "semantic"}:
+            strategy = "semantic"
+        if not repository_context:
+            request_repository = self._request_parts(request)[3] if request is not None else None
+            repository_context = self.repository_inspector.inspect(request_repository)
+        if isinstance(raw_value, Mapping):
+            ambiguous = bool(raw_value.get("ambiguous", raw_value.get("clarification_required", ambiguous)))
+        if request is not None:
+            request_goal, _, request_config, _ = self._request_parts(request)
+            inferred_ambiguous, inferred_reasons = self._ambiguity(
+                request_goal,
+                request_config,
+                self._configured_domains(request_config) is not None or bool(raw_domains),
+            )
+            ambiguous = bool(ambiguous or inferred_ambiguous)
+            clarification_reasons = tuple(dict.fromkeys((*clarification_reasons, *inferred_reasons)))
+        return Decomposition(
+            tuple(domains),
+            strategy,
+            source,
+            explicit,
+            repository_context,
+            ambiguous,
+            clarification_reasons,
         )
 
     @staticmethod
@@ -572,7 +742,8 @@ class TaskDecomposer:
             raw_domains.append({
                 "id": str(value.get("id") or value.get("task_id") or f"domain-{_slug(outcome)}"),
                 "outcome": outcome,
-                "done_when": value.get("done_when", value.get("verification", default_done)),
+                "done_when": value.get("done_when", default_done),
+                "verification_specs": value.get("verification_specs", ()),
                 "dependencies": value.get("dependencies", value.get("depends_on", value.get("after", ()))),
                 "ownership": value.get("ownership", ()),
                 "checks": value.get("checks", ()),
@@ -668,6 +839,7 @@ class TaskDecomposer:
                 "id": "deliver" if len(fragments) == 1 else f"domain-{_slug(fragment.text)}",
                 "outcome": fragment.text,
                 "done_when": default_done,
+                "verification_specs": (),
                 "dependencies": fragment.dependency_refs,
                 "ownership": (),
                 "checks": default_done,
@@ -692,6 +864,7 @@ class TaskDecomposer:
                     "id": f"domain-{surface['id']}",
                     "outcome": f"{goal} ({surface['name']})",
                     "done_when": default_done,
+                    "verification_specs": (),
                     "ownership": (str(surface["ownership"]),),
                     "checks": default_done,
                     "metadata": {
@@ -796,6 +969,7 @@ class TaskDecomposer:
                 "id": candidate,
                 "outcome": _text(str(raw.get("outcome") or ""), f"domain {candidate} outcome"),
                 "done_when": done,
+                "verification_specs": verification_specs(raw.get("verification_specs", ())),
                 "dependency_refs": dependency_refs,
                 "dependency_exports": dependency_exports,
                 "ownership": tuple(str(item) for item in ownership or ()),
@@ -830,6 +1004,7 @@ class TaskDecomposer:
                 id=item["id"],
                 outcome=item["outcome"],
                 done_when=item["done_when"],
+                verification_specs=item["verification_specs"],
                 dependencies=tuple(item["dependencies"]),
                 dependency_exports=item["dependency_exports"],
                 ownership=item["ownership"],
@@ -898,18 +1073,82 @@ class TaskDecomposer:
             visit(node)
 
 
+class SemanticDecomposer(Protocol):
+    """Pure semantic proposal boundary used by ``GoalCompiler``.
+
+    Implementations receive the typed ``RunIntent`` only.  They may propose
+    domain records, but they do not receive a Store, scheduler, host, or
+    persistence callback.  The deterministic ``TaskDecomposer`` validator
+    owns the graph invariants after this method returns.
+    """
+
+    def decompose(
+        self,
+        request: RunIntent,
+        *,
+        done_when: Sequence[str] | None = None,
+        config: Mapping[str, Any] | None = None,
+    ) -> Any: ...
+
+
 class GoalCompiler:
-    """Run the shared goal/decomposition pass before invoking a Pack."""
+    """Run deterministic validation around an optional semantic decomposer."""
 
     version = "2.1"
 
-    def __init__(self, decomposer: TaskDecomposer | None = None) -> None:
+    def __init__(
+        self,
+        decomposer: TaskDecomposer | None = None,
+        *,
+        semantic_decomposer: SemanticDecomposer | Any | None = None,
+    ) -> None:
+        # ``decomposer`` remains the compatibility name for the deterministic
+        # validator.  A semantic provider is optional and intentionally
+        # separate so it cannot replace validation or gain Store access.
         self.decomposer = decomposer or TaskDecomposer()
+        self.semantic_decomposer = semantic_decomposer
+
+    @staticmethod
+    def _call_semantic_decomposer(
+        decomposer: Any,
+        run_intent: RunIntent,
+    ) -> Any:
+        method = getattr(decomposer, "decompose", None)
+        if not callable(method):
+            if callable(decomposer):
+                method = decomposer
+            else:
+                raise TypeError("semantic_decomposer must be callable or expose decompose()")
+        # Do not pass a Store-shaped positional/keyword argument.  The only
+        # input crossing this boundary is the immutable RunIntent plus its
+        # pack config and done_when values.
+        try:
+            return method(
+                run_intent,
+                done_when=run_intent.done_when,
+                config=run_intent.pack.config,
+            )
+        except TypeError as exc:
+            # Small third-party providers commonly accept just the typed
+            # request.  Retry only for a signature mismatch; a provider's
+            # internal TypeError must not be silently rewritten.
+            message = str(exc)
+            if not any(token in message for token in ("unexpected keyword", "positional argument", "keyword-only")):
+                raise
+            return method(run_intent)
 
     def compile(self, run_intent: RunIntent, workflow_pack: Any) -> Any:
         compile_domains = getattr(workflow_pack, "compile_domains", None)
         if callable(compile_domains):
-            decomposition = self.decomposer.decompose(run_intent)
+            if self.semantic_decomposer is None:
+                decomposition = self.decomposer.decompose(run_intent)
+            else:
+                proposed = self._call_semantic_decomposer(self.semantic_decomposer, run_intent)
+                decomposition = self.decomposer.validate_decomposition(
+                    proposed,
+                    request=run_intent,
+                    done_when=run_intent.done_when,
+                )
             return compile_domains(run_intent, decomposition.domains, decomposition=decomposition)
         # Research-route and third-party compatibility Packs retain their own
         # input compiler until they opt into outcome-domain compilation.
@@ -918,4 +1157,11 @@ class GoalCompiler:
     compile_goal = compile
 
 
-__all__ = ["Decomposition", "GoalCompiler", "OutcomeDomain", "RepositoryContextInspector", "TaskDecomposer"]
+__all__ = [
+    "Decomposition",
+    "GoalCompiler",
+    "OutcomeDomain",
+    "RepositoryContextInspector",
+    "SemanticDecomposer",
+    "TaskDecomposer",
+]

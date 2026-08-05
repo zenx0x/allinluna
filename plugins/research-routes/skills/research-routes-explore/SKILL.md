@@ -5,7 +5,7 @@ description: Explore open-ended scientific or product questions through multiple
 
 # Research Routes Explore
 
-Explore without collapsing uncertainty.
+Explore without collapsing uncertainty. The Research Pack is append-only and route-neutral.
 
 1. Start from the supplied question, problem, frame, repository, artifact, or arbitrary context; record it as the starting point.
 2. Build a terrain map and shared backbone before selecting a route.
@@ -13,6 +13,8 @@ Explore without collapsing uncertainty.
 4. Design probes and experiments with boundary conditions and failure regimes. Record observations as evidence with polarity and provenance.
 5. Preserve contradictions and unknowns. A null or failure result is still an observation and does not silently invalidate a route.
 6. Keep candidate inference, experiment authorization, HumanDecision, implementation, and canonical promotion as separate transitions.
-7. Compare mature methods and alternative explanations when the question is scientific; do not treat a terrain map as authorization to run an experiment.
+7. Compare mature methods and alternative explanations when the question is scientific; preserve their scope and limitations.
+8. Record failures with polarity and what did not fail, then use rewind, lessons, and reopened problems to recover without rewriting history.
+9. Do not treat a terrain map as a route choice, experiment authorization, implementation, HumanDecision, or canonical-state promotion.
 
 The shared semantic model and schema are authoritative for node, relation, polarity, route, and lifecycle values.

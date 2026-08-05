@@ -27,6 +27,8 @@
       "properties": {
         "model": {"type": ["string", "null"], "minLength": 1},
         "reasoning": {"type": ["string", "null"], "minLength": 1}
+        ,"capability_class": {"type": ["string", "null"], "enum": ["control.relay", "planning.semantic", "lane.synthesis", "work.mechanical", "work.implementation", "work.deep-debug", "verify.independent", null]}
+        ,"route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]}
       },
       "additionalProperties": true
     },

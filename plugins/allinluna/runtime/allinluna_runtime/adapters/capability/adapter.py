@@ -20,8 +20,10 @@ from .models import (
 from .registry import CapabilityRegistry
 
 
-DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_REASONING = "max"
+# A capability adapter receives a resolved route from ResourcePolicyResolver;
+# it must not manufacture a Core-owned model choice on its own.
+DEFAULT_MODEL: str | None = None
+DEFAULT_REASONING: str | None = None
 READ_ONLY_FORBIDDEN_SCOPE = {
     "write",
     "writes",
@@ -109,8 +111,8 @@ class RegistryCapabilityAdapter:
         discovery_provider: Callable[..., Any] | None = None,
         permission_provider: Callable[..., Any] | None = None,
         invoker: Callable[..., Any] | None = None,
-        model: str = DEFAULT_MODEL,
-        reasoning: str = DEFAULT_REASONING,
+        model: str | None = DEFAULT_MODEL,
+        reasoning: str | None = DEFAULT_REASONING,
         allow_fallback: bool = False,
     ) -> None:
         self.registry = (
@@ -120,8 +122,8 @@ class RegistryCapabilityAdapter:
         self.discovery_provider = discovery_provider
         self.permission_provider = permission_provider
         self.invoker = invoker
-        self.model = _resource_text(model, name="model")
-        self.reasoning = _resource_text(reasoning, name="reasoning")
+        self.model = _text(model)
+        self.reasoning = _text(reasoning)
         # Capability fallback is opt-in.  It never rewrites resource choices.
         self.allow_fallback = bool(allow_fallback)
 

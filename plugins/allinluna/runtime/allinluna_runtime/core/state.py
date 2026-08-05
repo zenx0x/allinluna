@@ -14,7 +14,7 @@ RUN_TRANSITIONS: Final = {
 TASK_TRANSITIONS: Final = {
     "proposed": frozenset({"ready", "cancelled"}),
     "ready": frozenset({"dispatching", "cancelled"}),
-    "dispatching": frozenset({"active"}),
+    "dispatching": frozenset({"active", "blocked"}),
     "active": frozenset({"waiting", "verifying", "blocked", "superseded"}),
     "waiting": frozenset({"active", "blocked"}),
     "verifying": frozenset({"completed", "blocked"}),

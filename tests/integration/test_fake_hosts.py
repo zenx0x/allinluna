@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 
 from tests.fixtures.vnext.contracts import Correction, PromotionRequest
-from tests.fixtures.vnext.hosts import FakeCodexHost, FakeSubagentHost, HostLostError
+from tests.fixtures.vnext.hosts import (
+    FakeCodexHost,
+    FakeDistributedCodexHost,
+    FakeSubagentHost,
+    HostLostError,
+)
 
 
 class FakeCodexHostIntegrationTests(unittest.TestCase):
@@ -81,6 +86,34 @@ class FakeCodexHostIntegrationTests(unittest.TestCase):
         self.assertEqual(correction.task_id, "T-context-kernel")
         self.assertEqual(correction.thread_id, original.thread_id)
         self.assertEqual(correction.dispatch_id, original.dispatch_id)
+
+
+class FakeDistributedCodexHostIntegrationTests(unittest.TestCase):
+    def test_public_create_thread_is_the_only_top_level_entry_shape(self) -> None:
+        host = FakeDistributedCodexHost()
+        self.assertFalse(hasattr(host, "create_top_level_task"))
+
+        receipt = host.create_thread(
+            {"type": "project", "task_id": "task-public"},
+            "prompt with a lane-bootstrap/v1 envelope",
+            "gpt-5.6-luna",
+            "max",
+            "All in Luna lane task-public",
+        )
+
+        self.assertEqual(receipt["actual_tool"], "codex_app__create_thread")
+        self.assertEqual(
+            set(host.public_calls[0]), {"target", "prompt", "model", "thinking", "title"}
+        )
+        with self.assertRaises(TypeError):
+            host.create_thread(
+                {"type": "project", "task_id": "task-public"},
+                "prompt",
+                "gpt-5.6-luna",
+                "max",
+                "title",
+                payload={"task_envelope": "hidden"},
+            )
 
 
 class FakeSubagentHostIntegrationTests(unittest.TestCase):

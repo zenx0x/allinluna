@@ -120,7 +120,13 @@ def test_created_thread_is_reconciled_after_receipt_write_crash_without_duplicat
     assert len(store.attempts_for_task("recover-task")) == 1
     assert recovered["resource_receipt"] == {
         "requested": {"model": "gpt-5.6-luna", "reasoning": "xhigh"},
-        "resolved": {"model": "gpt-5.6-luna", "reasoning": "xhigh"},
+            "resolved": {
+                "model": "gpt-5.6-luna",
+                "reasoning": "xhigh",
+                "capability_class": "lane.synthesis",
+                "route_assurance": "observe_if_exposed",
+                "external_action_policy": "deny",
+            },
         "actual": None,
         "actual_state": "unresolved",
         "evidence_source": None,

@@ -1,5 +1,7 @@
 [
   {"id": "route-map", "prompt": "Map the credible routes and evidence without choosing one yet.", "route": "terrain-map"},
-  {"id": "compare-probes", "prompt": "Compare two research routes and propose reversible probes.", "route": "evidence-comparison"},
-  {"id": "failure-regime", "prompt": "Preserve contradictory evidence and identify the failure regime.", "route": "failure-analysis"}
+  {"id": "compare-probes", "prompt": "Compare routes, mature methods, and reversible probes while preserving scope limits.", "route": "evidence-comparison"},
+  {"id": "failure-regime", "prompt": "Record failure polarity, what did not fail, contradictions, and the boundary where a result stops generalizing.", "route": "failure-analysis"},
+  {"id": "recovery", "prompt": "Create a rewind proposal, lesson, reopened problem, or canonical downgrade without deleting history.", "route": "recovery"},
+  {"id": "human-route", "prompt": "Bind a route authorization to an explicit HumanDecision; keep implementation and canonical promotion separate.", "route": "human-authorization"}
 ]

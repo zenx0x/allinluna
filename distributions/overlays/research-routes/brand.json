@@ -1,7 +1,7 @@
 {
   "brand": "Research Routes",
-  "tagline": "Compare evidence-backed routes and explore reversibly.",
-  "purpose": "Multi-route evidence exploration: map claims, compare routes, probe uncertainty, and preserve reversibility before implementation or canonical promotion.",
+  "tagline": "Preserve evidence, failure, and recovery before promotion.",
+  "purpose": "Route-neutral research exploration with typed evidence polarity, contradictions, unknowns, failure recovery, mature comparators, and explicit human-controlled promotion boundaries.",
   "default_skill": "research-routes",
   "plugin_name": "research-routes"
 }

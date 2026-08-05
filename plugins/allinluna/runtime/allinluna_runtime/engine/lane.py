@@ -100,6 +100,15 @@ class LaneEngine:
             for local in actions:
                 result = self.bridge.dispatch(local.action)
                 receipts.append(result)
+                # LocalScheduler's scheduling snapshot predates the host call.
+                # Advance the same WorkUnit attempt immediately from the real
+                # receipt so a WorkHandoff observed in this tick is not
+                # rejected against a stale delegated/ready snapshot.
+                observed = result.get("receipt") if isinstance(result, Mapping) else None
+                if isinstance(observed, Mapping) and str(observed.get("status") or "").lower() not in {
+                    "pending", "queued", "submitted", "accepted_pending", "unresolved"
+                }:
+                    self.scheduler.mark_active(local.work_unit_id, observed)
         handoff = self.synthesize_handoff() if self._all_work_terminal() else None
         return {"task_id": self.task_id, "actions": [item.action.to_dict() for item in actions], "receipts": receipts, "corrections": correction_results, "handoff": handoff}
 

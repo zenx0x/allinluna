@@ -63,7 +63,7 @@ class CoordinatorEngine:
         self.store = store
         self.resource_broker = resource_broker or ResourceBroker()
         self.bridge = bridge or ActionBridge(store, host, adapter=adapter, resource_broker=self.resource_broker)
-        self.scheduler = scheduler or GlobalScheduler(store, resource_broker=self.resource_broker, adapter=adapter)
+        self.scheduler = scheduler or GlobalScheduler(store, host=host, resource_broker=self.resource_broker, adapter=adapter)
         self.lanes: dict[str, Any] = {}
 
     def start(self, intent: Any, task_graph: Any = None, *, run_id: str | None = None) -> dict[str, Any]:
@@ -191,6 +191,7 @@ class CoordinatorEngine:
             self.bridge.resource_broker = self.resource_broker
         else:
             self.resource_broker.bind(self.store, run_id)
+        self.bridge.refresh_resource_capabilities()
         self.resource_broker.recover()
         if run["status"] in {"paused", "cancelled", "aborted", "completed"}:
             return CoordinatorTick(run_id, (), (), self.status(run_id))
@@ -413,10 +414,17 @@ class CoordinatorEngine:
             task = self.store.get_task(task_id) or {}
             task_resource = task.get("resource_envelope")
             task_resource = task_resource if isinstance(task_resource, Mapping) else {}
-            item["requested_model"] = task_resource.get("model") or self.resource_broker.model
-            item["requested_reasoning"] = task_resource.get("reasoning") or self.resource_broker.reasoning
-            item["resolved_model"] = item["requested_model"]
-            item["resolved_reasoning"] = item["requested_reasoning"]
+            resolution = self.resource_broker.resolve_policy(
+                task_resource,
+                operation="create-top-level-task",
+            )
+            item["requested_model"] = resolution.requested.get("model")
+            item["requested_reasoning"] = resolution.requested.get("reasoning")
+            item["resolved_model"] = resolution.resolved.get("model")
+            item["resolved_reasoning"] = resolution.resolved.get("reasoning")
+            item["capability_class"] = resolution.capability_class
+            item["route_assurance"] = resolution.route_assurance
+            item["route_assurance_state"] = "satisfied" if resolution.route_assurance == "request_only" else "unresolved"
             attempt_ref = item.get("lane_attempt_ref")
             if attempt_ref:
                 attempt_id = str(attempt_ref).removeprefix("lane-attempt://")
@@ -431,6 +439,8 @@ class CoordinatorEngine:
                     if isinstance(requested, Mapping):
                         item["requested_model"] = requested.get("model") or item["requested_model"]
                         item["requested_reasoning"] = requested.get("reasoning") or item["requested_reasoning"]
+                        item["capability_class"] = requested.get("capability_class") or item["capability_class"]
+                        item["route_assurance"] = requested.get("route_assurance") or item["route_assurance"]
                     if isinstance(resolved, Mapping):
                         item["resolved_model"] = resolved.get("model") or item["resolved_model"]
                         item["resolved_reasoning"] = resolved.get("reasoning") or item["resolved_reasoning"]
@@ -445,7 +455,15 @@ class CoordinatorEngine:
                         item["actual_model_state"] = "resolved"
                         item["resource_evidence_source"] = resource_receipt.get("evidence_source")
                         item["resource_observed_at"] = resource_receipt.get("observed_at")
-        projection.setdefault("extensions", {})["resource_policy_receipt"] = self.resource_broker.resolve().to_dict()
+                    assurance = self.resource_broker.assess_route(resource_receipt, mode=item["route_assurance"])
+                    item["route_assurance_state"] = assurance.state
+        policy_resolution = self.resource_broker.resolve_policy(operation="create-top-level-task")
+        projection.setdefault("extensions", {})["resource_policy_receipt"] = policy_resolution.to_dict()
+        projection["extensions"]["resource_policy"] = {
+            "capability_class": policy_resolution.capability_class,
+            "route_assurance": policy_resolution.route_assurance,
+            "capability_cache": policy_resolution.capability_cache,
+        }
         metrics = self.store.runtime_metrics(run_id)
         projection["extensions"]["metrics"] = metrics
         projection["extensions"]["progress_pulse"] = {

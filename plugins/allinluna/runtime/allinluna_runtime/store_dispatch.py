@@ -7,6 +7,7 @@ not make scheduling choices or mutate task/work-unit definitions.
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import uuid
 from typing import Any, Mapping
 
@@ -112,6 +113,78 @@ class StoreDispatch:
     create_dispatch_intent = persist_dispatch_intent
     dispatch_intent = persist_dispatch_intent
 
+    def persist_work_unit_dispatch_intent(self, action: Any, **kwargs: Any) -> dict[str, Any]:
+        """Persist a local WorkUnit dispatch before its host spawn boundary.
+
+        LocalScheduler owns the WorkUnit state transition and creates the
+        attempt first.  This method adds the missing durable outbox identity so
+        a restarted Lane reconciles the original spawn instead of dispatching
+        a second worker.
+        """
+
+        value = _as_mapping(action)
+        value.update(kwargs)
+        payload = value.get("payload") if isinstance(value.get("payload"), Mapping) else {}
+        envelope = payload.get("work_unit_envelope") if isinstance(payload.get("work_unit_envelope"), Mapping) else {}
+        work_unit_id = str(
+            value.get("work_unit_id")
+            or payload.get("work_unit_id")
+            or envelope.get("work_unit_id")
+            or ""
+        )
+        dispatch_key = str(value.get("dispatch_key") or value.get("idempotency_key") or value.get("action_id") or "")
+        if not work_unit_id or not dispatch_key:
+            raise ValueError("work-unit dispatch intent requires work_unit_id and dispatch_key/idempotency_key")
+        unit = self.get_work_unit(work_unit_id)
+        if unit is None:
+            raise KeyError(f"work unit {work_unit_id!r} does not exist")
+        task = self.get_task(str(unit["task_id"]))
+        if task is None:
+            raise KeyError(f"task {unit['task_id']!r} does not exist")
+
+        def persist() -> dict[str, Any]:
+            existing = self._fetchone(
+                "SELECT * FROM work_unit_attempts WHERE dispatch_key = ?", (dispatch_key,)
+            )
+            if existing is not None and str(existing.get("work_unit_id")) != str(unit["id"]):
+                raise DuplicateIdentityError(
+                    f"dispatch key {dispatch_key!r} is already owned by work unit {existing.get('work_unit_id')!r}"
+                )
+            attempt_id = str(value.get("attempt_id") or payload.get("attempt_id") or (existing or {}).get("id") or "")
+            if not attempt_id:
+                raise ValueError("work-unit dispatch must create an attempt before outbox persistence")
+            if existing is None:
+                existing = self._fetchone("SELECT * FROM work_unit_attempts WHERE id = ?", (attempt_id,))
+                if existing is None or str(existing.get("work_unit_id")) != str(unit["id"]):
+                    raise ValueError("work-unit attempt does not match dispatch work unit")
+            outbox = self._fetchone("SELECT * FROM dispatch_outbox WHERE idempotency_key = ?", (dispatch_key,))
+            if outbox is None:
+                action_payload = dict(value)
+                action_payload.setdefault("work_unit_id", str(unit["id"]))
+                self._execute(
+                    """INSERT INTO dispatch_outbox
+                       (id, run_id, target_type, target_id, attempt_id, action_json,
+                        idempotency_key, state, emit_count, next_retry_at, created_at, updated_at)
+                       VALUES (?, ?, 'work_unit', ?, ?, ?, ?, 'pending', 0, NULL, ?, ?)""",
+                    (
+                        str(value.get("outbox_id") or f"outbox-{uuid.uuid4().hex}"),
+                        task["run_id"], unit["id"], attempt_id, _json(action_payload),
+                        dispatch_key, _now(), _now(),
+                    ),
+                )
+                self._append_signal_in_transaction(
+                    str(task["run_id"]), "work_unit", str(unit["id"]), "WORK_UNIT_DELEGATED",
+                    {"dispatch_key": dispatch_key, "attempt_id": attempt_id},
+                )
+            result = dict(existing)
+            result["attempt"] = result.get("attempt_no")
+            result["dispatch_ref"] = f"dispatch://{dispatch_key}"
+            return result
+
+        return self._write(persist)
+
+    create_work_unit_dispatch_intent = persist_work_unit_dispatch_intent
+
     def _attempt_result(self, row: Mapping[str, Any]) -> dict[str, Any]:
         result = dict(row)
         result["attempt"] = result.get("attempt_no")
@@ -126,6 +199,12 @@ class StoreDispatch:
     def attempts_for_task(self, task_id: str) -> list[dict[str, Any]]:
         rows = self._fetchall("SELECT * FROM task_attempts WHERE task_id = ? ORDER BY attempt_no", (task_id,))
         return [self._attempt_result(row) for row in rows]
+
+    def attempts_for_work_unit(self, work_unit_id: str) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            "SELECT * FROM work_unit_attempts WHERE work_unit_id = ? ORDER BY attempt_no", (work_unit_id,)
+        )
+        return [dict(row) | {"attempt": row.get("attempt_no")} for row in rows]
 
     def get_host_receipt(self, receipt_id: str) -> dict[str, Any] | None:
         row = self._fetchone("SELECT * FROM host_receipts WHERE id = ?", (receipt_id,))
@@ -240,14 +319,20 @@ class StoreDispatch:
                     effective_id = str(existing.get("id") or receipt_id)
                     effective_key = existing.get("dispatch_key") or dispatch_key
                     attempt = None
+                    work_attempt = None
                     if effective_key:
                         attempt = self._fetchone(
                             "SELECT * FROM task_attempts WHERE dispatch_key = ?", (str(effective_key),)
                         )
+                        if attempt is None:
+                            work_attempt = self._fetchone(
+                                "SELECT * FROM work_unit_attempts WHERE dispatch_key = ?", (str(effective_key),)
+                            )
                     return {
                         "receipt_id": effective_id,
                         "dispatch_key": effective_key,
-                        "attempt_id": attempt["id"] if attempt else None,
+                        "attempt_id": (attempt or work_attempt or {}).get("id"),
+                        "target_type": "task" if attempt else "work_unit" if work_attempt else None,
                         "status": str(existing.get("status") or status),
                         "idempotent": True,
                         "resource_receipt": self._resource_receipt_from_row(existing),
@@ -303,8 +388,13 @@ class StoreDispatch:
             effective_id = str(receipt_row.get("id") or receipt_id)
             effective_key = receipt_row.get("dispatch_key") or dispatch_key
             attempt = None
+            work_attempt = None
             if effective_key:
                 attempt = self._fetchone("SELECT * FROM task_attempts WHERE dispatch_key = ?", (str(effective_key),))
+                if attempt is None:
+                    work_attempt = self._fetchone(
+                        "SELECT * FROM work_unit_attempts WHERE dispatch_key = ?", (str(effective_key),)
+                    )
             if attempt is not None:
                 current_state = str(attempt["state"])
                 attempt_thread_id = incoming_thread_id or receipt_row.get("thread_id")
@@ -351,10 +441,54 @@ class StoreDispatch:
                         "UPDATE dispatch_outbox SET state = 'acknowledged', updated_at = ? WHERE idempotency_key = ? AND state IN ('pending','emitted')",
                         (_now(), str(effective_key)),
                     )
+            elif work_attempt is not None:
+                current_state = str(work_attempt["state"])
+                normalized_status = str(receipt_row.get("status") or status).lower()
+                if normalized_status in {"pending", "queued", "submitted", "accepted_pending", "unresolved"}:
+                    next_state = current_state
+                    next_unit_state = None
+                elif normalized_status in {"failed", "error", "lost"}:
+                    next_state = "failed"
+                    next_unit_state = "failed"
+                elif normalized_status in {"completed", "succeeded", "success", "closed", "handoff_ready"}:
+                    # A host lifecycle completion is not a WorkHandoff.  Keep
+                    # the unit active until the Lane verifies its typed result.
+                    next_state = "closed"
+                    next_unit_state = "active"
+                else:
+                    next_state = "active" if current_state in {"created", "delegated"} else current_state
+                    next_unit_state = "active" if next_state == "active" else None
+                self._execute(
+                    "UPDATE work_unit_attempts SET state = ?, receipt_id = ?, started_at = COALESCE(started_at, ?), ended_at = CASE WHEN ? IN ('closed','failed') THEN COALESCE(ended_at, ?) ELSE ended_at END WHERE id = ?",
+                    (
+                        next_state, effective_id,
+                        received_at if next_state in {"active", "closed"} else None,
+                        next_state, received_at, work_attempt["id"],
+                    ),
+                )
+                if next_unit_state is not None:
+                    self._execute(
+                        "UPDATE work_units SET state = ?, updated_at = ? WHERE id = ? AND state IN ('proposed','ready','delegated','active')",
+                        (next_unit_state, _now(), work_attempt["work_unit_id"]),
+                    )
+                unit = self.get_work_unit(str(work_attempt["work_unit_id"]))
+                if unit is not None and next_state == "active":
+                    task = self.get_task(str(unit["task_id"]))
+                    if task is not None:
+                        self._append_signal_in_transaction(
+                            str(task["run_id"]), "work_unit", str(unit["id"]), "WORK_UNIT_PULSE",
+                            {"receipt_id": effective_id, "attempt_id": work_attempt["id"], "status": status},
+                        )
+                if effective_key:
+                    self._execute(
+                        "UPDATE dispatch_outbox SET state = 'acknowledged', updated_at = ? WHERE idempotency_key = ? AND state IN ('pending','emitted')",
+                        (_now(), str(effective_key)),
+                    )
             result = {
                 "receipt_id": effective_id,
                 "dispatch_key": effective_key,
-                "attempt_id": attempt["id"] if attempt else None,
+                "attempt_id": (attempt or work_attempt or {}).get("id"),
+                "target_type": "task" if attempt else "work_unit" if work_attempt else None,
                 "status": str(receipt_row.get("status") or status),
                 "idempotent": True,
                 "resource_receipt": self._resource_receipt_from_row(receipt_row),

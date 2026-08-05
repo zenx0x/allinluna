@@ -18,6 +18,7 @@ from ..engine.coordinator import CoordinatorEngine
 from ..resource import ResourceBroker
 from ..store import Store
 from .base import CompiledRunGraph
+from .goal_compiler import GoalCompiler, TaskDecomposer
 from .manifest import PackRegistry, builtin_registry
 from .research_routes import ResearchRoutesBridge
 
@@ -74,9 +75,16 @@ class SinglePublicSkillAPI:
     id = "allinluna"
     version = "1.1.1"
 
-    def __init__(self, *, registry: PackRegistry | None = None, permission_router: JITPermissionRouter | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        registry: PackRegistry | None = None,
+        permission_router: JITPermissionRouter | None = None,
+        goal_compiler: GoalCompiler | None = None,
+    ) -> None:
         self.registry = registry or builtin_registry()
         self.permissions = permission_router or JITPermissionRouter()
+        self.goal_compiler = goal_compiler or GoalCompiler()
 
     def compile_run_intent(self, request: str | Mapping[str, Any] | RunIntent, *, repository: Mapping[str, Any] | None = None, pack: str | None = None) -> tuple[RunIntent, str, Mapping[str, Any]]:
         if isinstance(request, RunIntent):
@@ -107,7 +115,7 @@ class SinglePublicSkillAPI:
     def compile(self, request: str | Mapping[str, Any] | RunIntent, *, repository: Mapping[str, Any] | None = None, pack: str | None = None) -> SkillCompilation:
         intent, input_kind, compatibility = self.compile_run_intent(request, repository=repository, pack=pack)
         workflow_pack = self.registry.require(str(intent.pack.id), str(intent.pack.version))
-        graph = workflow_pack.compile_goal(intent)
+        graph = self.goal_compiler.compile(intent, workflow_pack)
         # Permissions are intentionally absent at compile time. The Action
         # Bridge persists a PermissionIntent only when a concrete external
         # action reaches the dispatch boundary.
@@ -155,10 +163,18 @@ class SinglePublicSkillAPI:
         pack_value = pack or raw.get("pack") or "delivery"
         if isinstance(pack_value, Mapping):
             pack_ref = dict(pack_value)
+            pack_config = dict(pack_ref.get("config", {}) or {})
+            pack_config.update(dict(raw.get("pack_config", {}) or {}))
+            pack_ref["config"] = pack_config
         else:
-            pack_ref = {"id": str(pack_value), "version": "1.0.0", "config": raw.get("pack_config", {})}
+            pack_config = dict(raw.get("pack_config", {}) or {})
+            for key in ("domains", "outcome_domains", "tasks"):
+                if key in raw and key not in pack_config:
+                    pack_config[key] = raw[key]
+            pack_ref = {"id": str(pack_value), "version": "1.0.0", "config": pack_config}
+        generated_id = "".join(char.lower() if char.isascii() and char.isalnum() else "-" for char in goal)[:32].strip("-")
         return RunIntent(
-            intent_id=str(raw.get("intent_id") or "intent-" + "".join(char.lower() if char.isalnum() else "-" for char in goal)[:32]).strip("-"),
+            intent_id=str(raw.get("intent_id") or f"intent-{generated_id or 'goal'}").strip("-") or "intent-goal",
             goal=goal,
             done_when=tuple(str(item) for item in raw.get("done_when", ("the requested outcome is evidenced",))),
             repository=repository or {"mode": "projectless", "roots": (), "protected_paths": ()},
@@ -169,4 +185,4 @@ class SinglePublicSkillAPI:
         )
 
 
-__all__ = ["JITPermissionRouter", "PermissionIntent", "SinglePublicSkillAPI", "SkillCompilation"]
+__all__ = ["GoalCompiler", "JITPermissionRouter", "PermissionIntent", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]

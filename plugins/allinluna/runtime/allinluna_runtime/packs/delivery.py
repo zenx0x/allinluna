@@ -20,6 +20,7 @@ from ..domain import (
     WorkGraph,
 )
 from .base import CompiledRunGraph, PackManifest, contract_for, dependency, task_for
+from .goal_compiler import Decomposition, OutcomeDomain, TaskDecomposer
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -49,44 +50,56 @@ class DeliveryPack:
     )
 
     def compile_goal(self, run_intent: RunIntent) -> CompiledRunGraph:
+        decomposition = TaskDecomposer().decompose(run_intent)
+        return self.compile_domains(run_intent, decomposition.domains, decomposition=decomposition)
+
+    def compile_domains(
+        self,
+        run_intent: RunIntent,
+        domains: Sequence[OutcomeDomain],
+        *,
+        decomposition: Decomposition | None = None,
+    ) -> CompiledRunGraph:
+        """Compile one global Task/Lane per outcome domain.
+
+        The method is intentionally separate from ``compile_goal`` so the
+        shared GoalCompiler can perform decomposition once and Packs can only
+        add lane-local semantics after the global domain layer is fixed.
+        """
+
         run_id = f"run-{run_intent.intent_id}"
-        templates = _as_list(run_intent.pack.config.get("tasks"))
-        if not templates:
-            templates = [
-                {
-                    "id": "deliver",
-                    "outcome": run_intent.goal,
-                    "done_when": list(run_intent.done_when),
-                    "ownership": [],
-                    "checks": ["changed paths satisfy ownership", "declared done_when is evidenced"],
-                }
-            ]
+        domain_values = tuple(domains)
+        if not domain_values:
+            raise ValueError("delivery compilation requires at least one outcome domain")
         contracts: list[Contract] = []
         tasks: list[Task] = []
         work_graphs: dict[str, WorkGraph] = {}
-        task_ids: list[str] = []
-        for index, raw in enumerate(templates):
-            if not isinstance(raw, Mapping):
-                raise ValueError(f"delivery task template {index} must be an object")
-            task_id = str(raw.get("id") or f"task-{index + 1}")
-            task_ids.append(task_id)
-            outcome = str(raw.get("outcome") or raw.get("title") or run_intent.goal)
-            raw_ownership = raw.get("ownership", ())
-            if isinstance(raw_ownership, Mapping):
-                raw_ownership = raw_ownership.get("paths", ())
-            ownership = tuple(str(item) for item in raw_ownership)
-            done_when = tuple(str(item) for item in raw.get("done_when", raw.get("verification", run_intent.done_when)))
-            dependencies = tuple(dependency(str(item)) for item in raw.get("dependencies", ()))
+        for domain in domain_values:
+            task_id = str(domain.id)
+            outcome = str(domain.outcome)
+            done_when = tuple(domain.done_when or run_intent.done_when)
+            dependencies = tuple(
+                dependency(str(item), exports=domain.dependency_exports.get(str(item), ()))
+                for item in domain.dependencies
+            )
             contract = contract_for(
                 contract_id=f"contract-{run_intent.intent_id}-{task_id}",
                 outcome=outcome,
                 done_when=done_when or run_intent.done_when,
-                ownership=ownership,
+                ownership=domain.ownership,
                 dependencies=dependencies,
-                exports=tuple({"name": str(item), "kind": "artifact", "version": 1, "description": f"Delivery artifact {item}"} for item in raw.get("exports", ())),
+                exports=tuple({"name": str(item), "kind": "artifact", "version": 1, "description": f"Delivery artifact {item}"} for item in domain.exports),
             )
             contracts.append(contract)
-            task = task_for(run_id=run_id, task_id=task_id, outcome=outcome, contract=contract, dependencies=dependencies, priority=int(raw.get("priority", 0)), resource_envelope=raw.get("resource_envelope"))
+            task = task_for(
+                run_id=run_id,
+                task_id=task_id,
+                outcome=outcome,
+                contract=contract,
+                dependencies=dependencies,
+                priority=domain.priority,
+                resource_envelope=domain.resource_envelope,
+            )
             tasks.append(task)
             graph = WorkGraph(task_id)
             root_id = f"{task_id}-root"
@@ -95,18 +108,47 @@ class DeliveryPack:
                 objective=outcome,
                 scope=(f"task://{task_id}",),
                 authority=(AuthorityAction.READ.value, AuthorityAction.WRITE.value, AuthorityAction.EXECUTE_LOCAL.value, AuthorityAction.DELEGATE_RECURSIVE.value, AuthorityAction.REPORT.value),
-                ownership=ownership,
-                checks=tuple(str(item) for item in raw.get("checks", done_when or run_intent.done_when)),
-                resource_envelope=raw.get("work_unit_resource_envelope", raw.get("resource_envelope", {})),
+                ownership=domain.ownership,
+                checks=domain.checks or done_when or run_intent.done_when,
+                resource_envelope=domain.work_unit_resource_envelope or domain.resource_envelope,
                 state="ready",
             )
             work_graphs[task_id] = graph
+        decomposition = decomposition or Decomposition(
+            domain_values,
+            "atomic" if len(domain_values) == 1 else "outcome-domain",
+            "pack",
+            True,
+        )
+        edges = [
+            {
+                "from": str(dependency.task_ref).removeprefix("task://"),
+                "to": str(task.id),
+                "condition": getattr(dependency.condition, "value", str(dependency.condition)),
+                "exports": list(dependency.exports),
+            }
+            for task in tasks
+            for dependency in task.dependencies
+        ]
         return CompiledRunGraph(
             run_id=run_id,
             tasks=tuple(tasks),
             contracts=tuple(contracts),
             work_graphs=work_graphs,
-            metadata={"pack": self.id, "templates": len(templates), "forbidden_scope": list(run_intent.repository.protected_paths), "resource_defaults": {"subagent_slots_per_lane": "auto", "external_action_policy": run_intent.resource_envelope.external_action_policy}},
+            metadata={
+                "pack": self.id,
+                "compiler": {"name": "GoalCompiler", "version": "2.1"},
+                "decomposer": {"name": "TaskDecomposer", "version": TaskDecomposer.version},
+                "decomposition": decomposition.to_dict(),
+                "outcome_domain_layer": {
+                    "task_ids": [str(task.id) for task in tasks],
+                    "parallel_task_ids": [str(task.id) for task in tasks if not task.dependencies],
+                    "edges": edges,
+                },
+                "templates": len(domain_values),
+                "forbidden_scope": list(run_intent.repository.protected_paths),
+                "resource_defaults": {"subagent_slots_per_lane": "auto", "external_action_policy": run_intent.resource_envelope.external_action_policy},
+            },
         )
 
     def enrich_context(self, scope: Any, bundle: Any) -> Any:

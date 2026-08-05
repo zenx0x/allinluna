@@ -2,11 +2,12 @@
 
 from .base import PackError, PackManifest, TaskGraph, WorkflowPack
 from .delivery import DeliveryPack
-from .gsd import GSDPack, PHASES
+from .goal_compiler import Decomposition, GoalCompiler, OutcomeDomain, TaskDecomposer
+from .gsd import GSDPack, LaneRecipe, PHASES
 from .manifest import ManifestValidationError, PackLoader, PackRegistry, builtin_registry, validate_manifest
 from .research_routes import ResearchRoutesBridge
 from .public_skill import JITPermissionRouter, PermissionIntent, SinglePublicSkillAPI, SkillCompilation
 
 __all__ = [
-    "DeliveryPack", "GSDPack", "JITPermissionRouter", "ManifestValidationError", "PackError", "PackLoader", "PackManifest", "PackRegistry", "PHASES", "PermissionIntent", "ResearchRoutesBridge", "SinglePublicSkillAPI", "SkillCompilation", "TaskGraph", "WorkflowPack", "builtin_registry", "validate_manifest",
+    "Decomposition", "DeliveryPack", "GSDPack", "GoalCompiler", "JITPermissionRouter", "LaneRecipe", "ManifestValidationError", "OutcomeDomain", "PackError", "PackLoader", "PackManifest", "PackRegistry", "PHASES", "PermissionIntent", "ResearchRoutesBridge", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer", "TaskGraph", "WorkflowPack", "builtin_registry", "validate_manifest",
 ]

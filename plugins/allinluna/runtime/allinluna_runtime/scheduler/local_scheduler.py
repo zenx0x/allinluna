@@ -316,6 +316,8 @@ class LocalScheduler:
         latest = self.store._fetchone("SELECT id FROM work_unit_attempts WHERE work_unit_id = ? AND state IN ('created','delegated') ORDER BY attempt_no DESC LIMIT 1", (unit_id,))
         if latest:
             self.store._execute("UPDATE work_unit_attempts SET state = 'active', receipt_id = ?, started_at = COALESCE(started_at, ?) WHERE id = ?", (receipt.get("receipt_id") or receipt.get("id"), _now(), latest["id"]))
+        self._snapshot = None
+        self._snapshot_units = {}
         return self._unit(unit_id)
 
     def complete(self, unit_id: str, handoff: Mapping[str, Any]) -> dict[str, Any]:
@@ -342,6 +344,8 @@ class LocalScheduler:
         attempt = self.store._fetchone("SELECT * FROM work_unit_attempts WHERE work_unit_id = ? ORDER BY attempt_no DESC LIMIT 1", (unit_id,))
         if attempt:
             self.store.release_lease(str(attempt.get("lease_id"))) if attempt.get("lease_id") else None
+        self._snapshot = None
+        self._snapshot_units = {}
         return self._unit(unit_id)
 
     def retry(self, unit_id: str) -> dict[str, Any]:

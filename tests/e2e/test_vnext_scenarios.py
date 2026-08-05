@@ -30,9 +30,17 @@ class ScenarioContract:
     spec_sections: tuple[int, ...]
     test_method: str
     optional: bool = False
+    public_flow: bool = False
 
 
 SCENARIO_CATALOG: tuple[ScenarioContract, ...] = (
+    ScenarioContract(
+        "public_runtime_flow",
+        "public start through persisted TaskGraph, Lane handoffs, exports, and completed Run",
+        (59, 70, 71, 73, 75),
+        "test_public_runtime_flow_completes_from_single_public_api",
+        public_flow=True,
+    ),
     ScenarioContract(
         "three_top_level_tasks_concurrent",
         "three top-level tasks, two subagents each, and nested subagent",
@@ -133,6 +141,24 @@ class FakeCodexHost:
                 {"dispatch_id": dispatch_id, "lane_id": lane_id, "workunit_id": workunit_id}
             )
         return {"dispatch_id": dispatch_id, "status": "intent-recorded"}
+
+    def create_top_level_task(self, action: dict[str, Any]) -> dict[str, str]:
+        """Expose the host adapter shape used by the real Coordinator flow."""
+
+        task_id = str(action.get("task_id") or action.get("arguments", {}).get("target", {}).get("task_id"))
+        dispatch_id = str(action.get("dispatch_id") or action.get("action_id"))
+        if not any(item["dispatch_id"] == dispatch_id for item in self.dispatch_intents):
+            self.dispatch_intents.append({"dispatch_id": dispatch_id, "lane_id": task_id, "workunit_id": task_id})
+        return {
+            "receipt_id": f"receipt-{dispatch_id}",
+            "dispatch_id": dispatch_id,
+            "idempotency_key": str(action.get("idempotency_key")),
+            "task_id": task_id,
+            "status": "active",
+            "source": "test.fake_codex_host",
+            "host_id": "fake-codex-host",
+            "thread_id": f"thread-{dispatch_id}",
+        }
 
     def record_receipt(self, dispatch_id: str, *, status: str = "completed") -> dict[str, str]:
         receipt = {"dispatch_id": dispatch_id, "status": status, "source": "fake-codex-host"}
@@ -297,9 +323,12 @@ class VNextE2ETests(unittest.TestCase):
             result = runtime.run_e2e_scenario(contract.scenario_id, fixture=fixture)
             if not isinstance(result, dict):
                 raise AssertionError("vNext E2E hook must return a mapping")
-            entry = result.get("public_api_entry", {})
-            if entry.get("api") != "allinluna" or not entry.get("run_id"):
-                raise AssertionError("every E2E scenario must enter through SinglePublicSkillAPI")
+            if contract.public_flow:
+                entry = result.get("public_api_entry", {})
+                if entry.get("api") != "allinluna" or not entry.get("run_id") or entry.get("started_via") != "SinglePublicSkillAPI.start":
+                    raise AssertionError("public E2E must enter through SinglePublicSkillAPI.start")
+            elif "component_entry" not in result:
+                raise AssertionError("component scenario must be explicitly classified")
             return result
 
     def test_three_top_level_tasks_are_concurrent_and_recursively_owned(self) -> None:
@@ -316,6 +345,22 @@ class VNextE2ETests(unittest.TestCase):
             self.assertLessEqual(set(item["scope"]), set(item["ancestor_scope"]))
             self.assertLessEqual(set(item["authority"]), set(item["ancestor_authority"]))
             self.assertLessEqual(set(item["ownership"]), set(item["ancestor_ownership"]))
+
+    def test_public_runtime_flow_completes_from_single_public_api(self) -> None:
+        result = self.execute("public_runtime_flow")
+        entry = require(result, "public_api_entry")
+        flow = require(result, "flow")
+        self.assertEqual(entry.get("started_via"), "SinglePublicSkillAPI.start")
+        self.assertTrue(flow.get("task_graph_persisted"))
+        self.assertTrue(flow.get("work_graphs_persisted"))
+        self.assertEqual(flow.get("top_level_receipts"), 2)
+        self.assertEqual(flow.get("verified_lane_handoffs"), 2)
+        self.assertGreaterEqual(flow.get("work_unit_handoffs", 0), 2)
+        self.assertEqual(len(flow.get("exports", [])), 2)
+        self.assertEqual(flow.get("actual_changed_paths"), ["seed.txt"])
+        self.assertTrue(flow.get("protected_unchanged"))
+        self.assertIn("exports_available", flow.get("dependency_condition", ""))
+        self.assertEqual(flow.get("run_status"), "completed", flow)
 
     def test_blocked_lane_does_not_stop_unrelated_lanes(self) -> None:
         result = self.execute("blocked_lane_continuation")

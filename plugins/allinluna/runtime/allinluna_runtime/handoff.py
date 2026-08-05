@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 
 from .artifacts import ArtifactError, ArtifactStore
 from .core.protocol import LANE_HANDOFF_PROTOCOL
+from .evidence import EvidenceCollectionError, EvidenceCollector
 
 
 class HandoffVerificationError(ValueError):
@@ -33,6 +34,7 @@ class HandoffProcessor:
         "kind", "protocol", "handoff_kind", "handoff_id", "run_ref", "status",
         "summary", "artifacts", "checks", "blockers", "promotion_requests",
         "task_id", "contract_revision", "exports", "done_when", "workspace_evidence",
+        "evidence",
     })
 
     def __init__(
@@ -41,6 +43,7 @@ class HandoffProcessor:
         *,
         artifacts: ArtifactStore | None = None,
         workspace_verifier: Callable[[Mapping[str, Any], tuple[str, ...]], Any] | None = None,
+        evidence_collector: EvidenceCollector | None = None,
         packs: Any = None,
     ) -> None:
         self.store = store
@@ -50,6 +53,7 @@ class HandoffProcessor:
             root = path.parent / "artifacts"
         self.artifacts = artifacts or ArtifactStore(store, root=root)
         self.workspace_verifier = workspace_verifier
+        self.evidence_collector = evidence_collector or EvidenceCollector(store, artifact_store=self.artifacts)
         if packs is None:
             from .packs.manifest import builtin_registry
             packs = builtin_registry()
@@ -74,9 +78,26 @@ class HandoffProcessor:
         if value.get("blockers"):
             raise HandoffVerificationError("blockers", "unresolved blockers remain")
 
-        checks = list(value.get("checks") or ())
-        if not checks or any(not isinstance(item, Mapping) or item.get("status") != "pass" for item in checks):
-            raise HandoffVerificationError("checks", "passing check evidence is required")
+        collected = value.get("evidence")
+        if not isinstance(collected, Mapping):
+            raise HandoffVerificationError("evidence", "an EvidenceCollector bundle is required")
+        try:
+            collected = self.evidence_collector.verify(task, collected)
+        except EvidenceCollectionError as exc:
+            raise HandoffVerificationError("evidence", str(exc)) from exc
+
+        # Producers may carry a neutral placeholder for these fields, but they
+        # cannot override a collector result.  Any non-empty conflicting value
+        # is an explicit evidence forgery and fails closed.
+        for field in ("checks", "done_when", "artifacts", "exports", "workspace_evidence", "changed_paths"):
+            producer_value = value.get(field)
+            collected_value = collected.get(field)
+            if producer_value not in (None, (), [], {}) and producer_value != collected_value:
+                raise HandoffVerificationError("evidence", f"producer field {field} conflicts with collected evidence")
+            value[field] = collected_value
+        value["workspace_valid"] = collected.get("workspace_valid") is True
+        if not value["workspace_valid"]:
+            raise HandoffVerificationError("workspace", "collected workspace evidence is not valid")
 
         contract = self.store.get_contract(str(task["contract_id"]), int(task["contract_version"])) or {}
         declared = {str(item.get("name")) for item in contract.get("exports", ()) if isinstance(item, Mapping) and item.get("name")}
@@ -96,6 +117,9 @@ class HandoffProcessor:
 
         refs = {_artifact_ref(item) for item in value.get("artifacts", ())}
         refs.update(_artifact_ref(item) for item in value.get("exports", ()))
+        for check in value.get("checks", ()):
+            if isinstance(check, Mapping):
+                refs.update(str(check[key]) for key in ("stdout_artifact_ref", "stderr_artifact_ref") if check.get(key))
         for ref in sorted(item for item in refs if item):
             try:
                 self.artifacts.verify(ref)
@@ -114,16 +138,16 @@ class HandoffProcessor:
         if evidence.get("ownership_valid", True) is not True or evidence.get("protected_unchanged", True) is not True:
             raise HandoffVerificationError("workspace", "ownership or protected-path verification failed")
         value["workspace_evidence"] = dict(evidence)
-        # Pack verifiers consume the normalized verdict, never an unverified
-        # producer assertion.  Keeping this at the processor boundary makes
-        # GSD integrate checks and every future Pack share one authority.
-        value["workspace_valid"] = True
 
         run = self.store.get_run(str(task["run_id"])) or {}
         policy = run.get("policy") if isinstance(run.get("policy"), Mapping) else {}
         pack_id = str(policy.get("workflow_pack") or "delivery")
         pack = self.packs.require(pack_id)
-        task_view = SimpleNamespace(id=str(task.get("local_id") or task["id"]))
+        # Verifiers receive the persisted identity used by the handoff.  The
+        # processor has already accepted the local-id alias at the identity
+        # boundary; passing a different alias here would reject valid scoped
+        # tasks after persistence prefixes are applied.
+        task_view = SimpleNamespace(id=str(value.get("task_id")))
         if any(not bool(verifier(value)) for verifier in pack.verifiers(task_view)):
             raise HandoffVerificationError("pack", f"{pack_id} verifier rejected the handoff")
         return value

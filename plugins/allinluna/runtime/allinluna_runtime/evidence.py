@@ -1,0 +1,507 @@
+"""Independent evidence collection for completed Lane handoffs.
+
+Lane execution is intentionally unable to assert its own completion.  This
+module is the observation boundary: checks are run by :class:`CheckRunner`,
+payloads are recorded in :class:`~allinluna_runtime.artifacts.ArtifactStore`,
+and workspace facts come from a real ``WorkspaceAdapter``.  The resulting
+bundle is the only evidence shape accepted by ``HandoffProcessor``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import shlex
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Protocol
+
+from .adapters.workspace.base import stable_digest
+from .artifacts import ArtifactError, ArtifactStore
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _raw(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    method = getattr(value, "to_dict", None)
+    if callable(method):
+        result = method()
+        if isinstance(result, Mapping):
+            return dict(result)
+    return dict(vars(value))
+
+
+def _status(value: Any) -> str:
+    text = str(value or "failed").strip().lower()
+    if text in {"passed", "success", "succeeded", "ok", "completed"}:
+        return "pass"
+    if text in {"pass", "failed", "fail", "error", "blocked", "skipped", "unknown"}:
+        return "pass" if text == "pass" else text
+    return "failed"
+
+
+def _artifact_ref(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        raw = value.get("artifact_ref") or value.get("ref") or value.get("uri")
+        return str(raw) if raw else None
+    return None
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+class CheckRunnerProtocol(Protocol):
+    def run(self, check: Any, *, task_id: str | None = None, scope: Mapping[str, Any] | None = None) -> Mapping[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class CheckReceipt:
+    """A receipt produced by an executed check, not by a Lane producer."""
+
+    name: str
+    status: str
+    receipt_id: str
+    command: str | tuple[str, ...]
+    exit_code: int | None
+    source: str
+    observed_at: str
+    stdout_ref: str | None = None
+    stderr_ref: str | None = None
+    satisfies: tuple[str, ...] = ()
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        command: str | list[str] = list(self.command) if isinstance(self.command, tuple) else self.command
+        return {
+            "name": self.name,
+            "status": self.status,
+            "receipt_id": self.receipt_id,
+            "command": command,
+            "exit_code": self.exit_code,
+            "source": self.source,
+            "observed_at": self.observed_at,
+            "stdout_artifact_ref": self.stdout_ref,
+            "stderr_artifact_ref": self.stderr_ref,
+            "satisfies": list(self.satisfies),
+            "details": dict(self.details),
+        }
+
+
+class CheckRunner:
+    """Run a declared check and persist its stdout/stderr as artifacts.
+
+    A mapping containing only ``status=pass`` is deliberately not executable
+    evidence.  Callers must provide a command or a callable runner.  This
+    makes fake hosts useful in tests without allowing a handoff to self-sign.
+    """
+
+    source = "allinluna.check-runner"
+
+    def __init__(self, artifact_store: ArtifactStore | None = None, *, cwd: str | Path | None = None) -> None:
+        self.artifact_store = artifact_store
+        self.cwd = str(cwd) if cwd is not None else None
+
+    def run(
+        self,
+        check: Any,
+        *,
+        task_id: str | None = None,
+        scope: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
+        value = {"name": str(check)} if isinstance(check, str) else _raw(check)
+        name = str(value.get("name") or value.get("id") or value.get("command") or "unnamed-check")
+        command_value = value.get("command")
+        runner = value.get("runner") or value.get("run")
+        started = _now()
+        stdout = ""
+        stderr = ""
+        exit_code: int | None = None
+        details: dict[str, Any] = {"task_id": task_id, "scope": dict(scope or {})}
+        status = "failed"
+        command: str | tuple[str, ...] = ""
+        try:
+            if callable(runner):
+                result = runner()
+                result_value = _raw(result) if result is not None else {}
+                status = _status(result_value.get("status", result_value.get("result")))
+                exit_code = result_value.get("exit_code")
+                stdout = str(result_value.get("stdout") or result_value.get("output") or "")
+                stderr = str(result_value.get("stderr") or "")
+                command = str(result_value.get("command") or value.get("command") or f"callable:{name}")
+                details.update({k: v for k, v in result_value.items() if k not in {"status", "result", "stdout", "stderr", "output", "exit_code", "command"}})
+            elif command_value:
+                if isinstance(command_value, str):
+                    command = tuple(shlex.split(command_value, posix=False))
+                elif isinstance(command_value, Sequence) and not isinstance(command_value, (bytes, bytearray)):
+                    command = tuple(str(item) for item in command_value)
+                else:
+                    raise TypeError("check command must be a string or sequence")
+                if not command:
+                    raise ValueError("check command is empty")
+                completed = subprocess.run(
+                    list(command),
+                    cwd=str(value.get("cwd") or (scope or {}).get("worktree") or self.cwd or "" ) or None,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                exit_code = int(completed.returncode)
+                stdout = completed.stdout
+                stderr = completed.stderr
+                status = "pass" if exit_code == 0 else "fail"
+            else:
+                details["error"] = "check has no executable command or runner"
+                command = f"unexecuted:{name}"
+        except (OSError, TypeError, ValueError) as exc:
+            details["error"] = f"{type(exc).__name__}: {exc}"
+            status = "failed"
+            command = command or f"failed:{name}"
+
+        stdout_ref = self._put_output(stdout, kind="check-log", name=name, task_id=task_id)
+        stderr_ref = self._put_output(stderr, kind="tool-log", name=name, task_id=task_id)
+        observed = _now()
+        receipt_id = "check-receipt-" + stable_digest({
+            "name": name,
+            "command": list(command) if isinstance(command, tuple) else command,
+            "status": status,
+            "exit_code": exit_code,
+            "stdout_ref": stdout_ref,
+            "stderr_ref": stderr_ref,
+            "observed_at": observed,
+        })
+        satisfies = tuple(str(item) for item in value.get("satisfies", value.get("done_when", ())) or ())
+        return CheckReceipt(
+            name=name,
+            status=status,
+            receipt_id=receipt_id,
+            command=command,
+            exit_code=exit_code,
+            source=self.source,
+            observed_at=observed,
+            stdout_ref=stdout_ref,
+            stderr_ref=stderr_ref,
+            satisfies=satisfies,
+            details={**details, "started_at": started},
+        ).to_dict()
+
+    run_check = run
+
+    def _put_output(self, content: str, *, kind: str, name: str, task_id: str | None) -> str | None:
+        if self.artifact_store is None or not content:
+            return None
+        record = self.artifact_store.put(
+            content.encode("utf-8"),
+            kind=kind,
+            produced_by=self.source,
+            # The payload identity is content-addressed.  Do not make
+            # otherwise identical output immutable-conflicting merely because
+            # two Tasks ran the same check text.
+            metadata={"check_output": True},
+        )
+        return record.ref
+
+
+@dataclass(frozen=True)
+class EvidenceProfile:
+    name: str
+    checks_required: bool = True
+    workspace_required: bool = True
+    artifacts_required: bool = False
+    exports_required: bool = False
+    allow_projectless_workspace: bool = False
+
+
+EVIDENCE_PROFILES: dict[str, EvidenceProfile] = {
+    "software": EvidenceProfile("software", workspace_required=True),
+    "projectless-analysis": EvidenceProfile("projectless-analysis", workspace_required=False, allow_projectless_workspace=True),
+    "research": EvidenceProfile("research", workspace_required=False, artifacts_required=True, allow_projectless_workspace=True),
+    "docs": EvidenceProfile("docs", workspace_required=True),
+    "custom": EvidenceProfile("custom", workspace_required=True),
+}
+
+
+class EvidenceCollectionError(ValueError):
+    """A collected evidence bundle is malformed or cannot be verified."""
+
+
+class EvidenceCollector:
+    """Collect and validate external evidence for a Lane handoff."""
+
+    API_VERSION = 1
+    COLLECTOR = "allinluna.evidence-collector/v1"
+
+    def __init__(
+        self,
+        store: Any,
+        *,
+        artifact_store: ArtifactStore | None = None,
+        workspace_adapter: Any = None,
+        workspace: Any = None,
+        check_runner: CheckRunnerProtocol | None = None,
+        profile: str | EvidenceProfile | None = None,
+        verifier_profile: str | EvidenceProfile | None = None,
+        profile_config: Mapping[str, Any] | None = None,
+    ) -> None:
+        self.store = store
+        root = None
+        path = getattr(store, "path", None)
+        if path is not None and str(path) != ":memory:":
+            root = Path(path).parent / "artifacts"
+        self.artifacts = artifact_store or ArtifactStore(store, root=root)
+        self.workspace_adapter = workspace_adapter if workspace_adapter is not None else workspace
+        self.profile = profile if profile is not None else verifier_profile
+        self.profile_config = dict(profile_config or {})
+        self.check_runner = check_runner or CheckRunner(self.artifacts)
+
+    def selected_profile(self, task: Mapping[str, Any], explicit: str | EvidenceProfile | None = None) -> EvidenceProfile:
+        value: Any = explicit or self.profile
+        run = self.store.get_run(str(task.get("run_id"))) or {}
+        policy = run.get("policy") if isinstance(run.get("policy"), Mapping) else {}
+        if value is None:
+            value = task.get("evidence_profile") or policy.get("evidence_profile")
+        if value is None:
+            pack = str(policy.get("workflow_pack") or "delivery")
+            repository_mode = str(policy.get("repository_mode") or "")
+            value = "research" if pack == "research-routes-bridge" else "projectless-analysis" if repository_mode == "projectless" else "software"
+        if isinstance(value, EvidenceProfile):
+            return value
+        name = str(value)
+        if name not in EVIDENCE_PROFILES:
+            raise EvidenceCollectionError(f"unknown evidence profile: {name}")
+        base = EVIDENCE_PROFILES[name]
+        config = self.profile_config
+        return EvidenceProfile(
+            name=base.name,
+            checks_required=bool(config.get("checks_required", base.checks_required)),
+            workspace_required=bool(config.get("workspace_required", base.workspace_required)),
+            artifacts_required=bool(config.get("artifacts_required", base.artifacts_required)),
+            exports_required=bool(config.get("exports_required", base.exports_required)),
+            allow_projectless_workspace=bool(config.get("allow_projectless_workspace", base.allow_projectless_workspace)),
+        )
+
+    def collect(
+        self,
+        task: Mapping[str, Any] | str,
+        handoff: Mapping[str, Any] | None = None,
+        *,
+        checks: Sequence[Any] | None = None,
+        artifacts: Sequence[Any] | None = None,
+        exports: Sequence[Any] | None = None,
+        workspace_scope: Mapping[str, Any] | None = None,
+        profile: str | EvidenceProfile | None = None,
+    ) -> dict[str, Any]:
+        task_value = self.store.get_task(str(task)) if isinstance(task, str) else dict(task)
+        if task_value is None:
+            raise KeyError(task)
+        handoff_value = dict(handoff or {})
+        selected = self.selected_profile(task_value, profile)
+        contract = self.store.get_contract(str(task_value.get("contract_id") or ""), int(task_value.get("contract_version", 1))) or {}
+        done_conditions = tuple(str(item) for item in contract.get("done_when", ()) or ())
+        check_specs = list(checks if checks is not None else handoff_value.get("check_specs") or ())
+        if not check_specs:
+            check_specs = [{"name": condition} for condition in done_conditions]
+        run_check = getattr(self.check_runner, "run", None) or getattr(self.check_runner, "run_check", None)
+        if not callable(run_check):
+            raise TypeError("check_runner must expose run or run_check")
+        check_receipts = [dict(run_check(item, task_id=str(task_value["id"]), scope=workspace_scope)) for item in check_specs]
+        errors: list[str] = []
+        if selected.checks_required and (not check_receipts or any(not self._valid_check(item) for item in check_receipts)):
+            errors.append("checks_not_verified")
+
+        done_evidence = []
+        for condition in done_conditions:
+            matching = [item for item in check_receipts if condition in {str(name) for name in item.get("satisfies", ())} or str(item.get("name")) == condition]
+            satisfied = bool(matching) and all(self._valid_check(item) for item in matching)
+            done_evidence.append({"condition": condition, "satisfied": satisfied, "source_receipts": [item.get("receipt_id") for item in matching]})
+            if not satisfied:
+                errors.append(f"done_when:{condition}")
+
+        workspace = self._collect_workspace(task_value, handoff_value, workspace_scope, selected, errors)
+        artifact_values = list(artifacts if artifacts is not None else handoff_value.get("artifacts") or ())
+        export_values = list(exports if exports is not None else handoff_value.get("exports") or ())
+        artifact_refs = self._verified_artifacts(artifact_values, errors)
+        artifact_refs = sorted(set(artifact_refs) | {
+            str(ref)
+            for item in check_receipts
+            for ref in (item.get("stdout_artifact_ref"), item.get("stderr_artifact_ref"))
+            if ref
+        })
+        collected_exports = self._verified_exports(export_values, contract, errors)
+        if selected.artifacts_required and not artifact_refs:
+            errors.append("artifacts_required")
+        declared = self._declared_exports(contract)
+        if selected.exports_required and declared and not collected_exports:
+            errors.append("exports_required")
+        if declared and not declared.issubset({str(item.get("name")) for item in collected_exports}):
+            errors.append("declared_exports_missing")
+
+        bundle: dict[str, Any] = {
+            "kind": "evidence-bundle",
+            "schema_version": "1.0",
+            "protocol": "evidence-bundle/v1",
+            "collector": self.COLLECTOR,
+            "collection_id": "collection-" + stable_digest({"task": task_value["id"], "checks": check_receipts, "workspace": workspace, "artifacts": artifact_refs, "exports": collected_exports}),
+            "task_id": str(task_value["id"]),
+            "run_ref": f"run://{task_value['run_id']}",
+            "contract_revision": int(task_value.get("contract_version", 1)),
+            "profile": selected.name,
+            "checks": check_receipts,
+            "done_when": done_evidence,
+            "artifacts": artifact_refs,
+            "exports": collected_exports,
+            "workspace_evidence": workspace,
+            "changed_paths": list(workspace.get("changed_paths", ())) if isinstance(workspace, Mapping) else [],
+            "workspace_valid": bool(workspace.get("valid") is True) if isinstance(workspace, Mapping) else False,
+            "errors": sorted(set(errors)),
+            "verified": not errors,
+            "created_at": _now(),
+        }
+        bundle["evidence_digest"] = self._digest(bundle)
+        return bundle
+
+    def verify(self, task: Mapping[str, Any], bundle: Mapping[str, Any]) -> dict[str, Any]:
+        value = dict(bundle)
+        errors: list[str] = []
+        if value.get("kind") != "evidence-bundle" or value.get("protocol") != "evidence-bundle/v1" or value.get("collector") != self.COLLECTOR:
+            errors.append("collector_provenance")
+        if value.get("verified") is not True:
+            errors.append("bundle_not_verified")
+        if str(value.get("task_id")) != str(task.get("id")):
+            errors.append("task_identity")
+        if str(value.get("run_ref")) != f"run://{task.get('run_id')}":
+            errors.append("run_identity")
+        if int(value.get("contract_revision", -1)) != int(task.get("contract_version", 1)):
+            errors.append("contract_revision")
+        if value.get("evidence_digest") != self._digest(value):
+            errors.append("evidence_digest")
+        if value.get("errors"):
+            errors.extend(str(item) for item in value.get("errors", ()))
+        if not value.get("checks") or any(not self._valid_check(item) for item in value.get("checks", ())):
+            errors.append("checks_not_verified")
+        if not all(isinstance(item, Mapping) and item.get("satisfied") is True for item in value.get("done_when", ())):
+            errors.append("done_when_not_verified")
+        workspace = value.get("workspace_evidence")
+        if not isinstance(workspace, Mapping) or workspace.get("valid") is not True or workspace.get("ownership_valid", True) is not True or workspace.get("protected_unchanged", True) is not True or workspace.get("source") != self.COLLECTOR:
+            errors.append("workspace_not_verified")
+        for ref in self._all_refs(value):
+            try:
+                self.artifacts.verify(ref)
+            except ArtifactError:
+                errors.append(f"artifact_unverified:{ref}")
+        if errors:
+            raise EvidenceCollectionError("; ".join(sorted(set(errors))))
+        return value
+
+    def _collect_workspace(
+        self,
+        task: Mapping[str, Any],
+        handoff: Mapping[str, Any],
+        scope: Mapping[str, Any] | None,
+        profile: EvidenceProfile,
+        errors: list[str],
+    ) -> dict[str, Any]:
+        if self.workspace_adapter is None:
+            if profile.allow_projectless_workspace or profile.name == "projectless-analysis":
+                return {"adapter": "projectless", "operation": "not-applicable", "status": "not-applicable", "valid": True, "changed_paths": [], "ownership_valid": True, "protected_unchanged": True, "source": self.COLLECTOR}
+            errors.append("workspace_adapter_missing")
+            return {"adapter": "none", "operation": "unavailable", "status": "rejected", "valid": False, "changed_paths": [], "ownership_valid": False, "protected_unchanged": False, "errors": ["workspace_adapter_missing"]}
+        adapter_scope = dict(scope or {})
+        identity = self.workspace_adapter.identity(adapter_scope)
+        identity_value = identity.to_dict() if hasattr(identity, "to_dict") else dict(identity)
+        actual_paths = tuple(str(item) for item in identity_value.get("changed_paths", ()) or ())
+        evidence = self.workspace_adapter.verify_changed_paths(adapter_scope, actual_paths)
+        value = evidence.to_dict() if hasattr(evidence, "to_dict") else dict(evidence)
+        reported = handoff.get("changed_paths")
+        if reported is None and isinstance(handoff.get("workspace_evidence"), Mapping):
+            reported = handoff["workspace_evidence"].get("changed_paths")
+        if reported not in (None, (), [] ) and tuple(sorted(map(str, reported or ()))) != tuple(sorted(actual_paths)):
+            errors.append("changed_paths_claim_mismatch")
+        if value.get("valid") is not True or value.get("ownership_valid", True) is not True or value.get("protected_unchanged", True) is not True:
+            errors.append("workspace_not_verified")
+        value["identity"] = identity_value
+        value["changed_paths"] = list(actual_paths)
+        value["source"] = self.COLLECTOR
+        return value
+
+    def _verified_artifacts(self, values: Sequence[Any], errors: list[str]) -> list[str]:
+        refs: list[str] = []
+        for item in values:
+            ref = _artifact_ref(item)
+            if not ref:
+                errors.append("artifact_ref_missing")
+                continue
+            try:
+                self.artifacts.verify(ref)
+            except ArtifactError:
+                errors.append(f"artifact_unverified:{ref}")
+                continue
+            refs.append(ref)
+        return sorted(set(refs))
+
+    def _verified_exports(self, values: Sequence[Any], contract: Mapping[str, Any], errors: list[str]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for item in values:
+            value = {"name": str(item)} if isinstance(item, str) else dict(item) if isinstance(item, Mapping) else {}
+            name = str(value.get("name") or value.get("port_name") or "")
+            ref = _artifact_ref(value)
+            if not name or not ref:
+                errors.append("export_ref_missing")
+                continue
+            try:
+                self.artifacts.verify(ref)
+            except ArtifactError:
+                errors.append(f"export_unverified:{name}")
+                continue
+            result.append({"name": name, "artifact_ref": ref, "version": int(value.get("version", 1)), "evidence_source": self.COLLECTOR})
+        return sorted(result, key=lambda item: item["name"])
+
+    @staticmethod
+    def _declared_exports(contract: Mapping[str, Any]) -> set[str]:
+        return {str(item.get("name")) for item in contract.get("exports", ()) if isinstance(item, Mapping) and item.get("name")}
+
+    @staticmethod
+    def _valid_check(value: Any) -> bool:
+        return isinstance(value, Mapping) and value.get("status") == "pass" and bool(value.get("receipt_id")) and str(value.get("source", "")).startswith("allinluna.check-runner")
+
+    @staticmethod
+    def _digest(value: Mapping[str, Any]) -> str:
+        material = {key: item for key, item in value.items() if key != "evidence_digest"}
+        return "sha256:" + hashlib.sha256(_canonical(material).encode("utf-8")).hexdigest()
+
+    def _all_refs(self, value: Mapping[str, Any]) -> tuple[str, ...]:
+        refs = [str(_artifact_ref(item)) for item in value.get("artifacts", ()) if _artifact_ref(item)]
+        for item in value.get("exports", ()):
+            ref = _artifact_ref(item)
+            if ref:
+                refs.append(ref)
+        for item in value.get("checks", ()):
+            if isinstance(item, Mapping):
+                for key in ("stdout_artifact_ref", "stderr_artifact_ref"):
+                    if item.get(key):
+                        refs.append(str(item[key]))
+        return tuple(sorted(set(refs)))
+
+    collect_handoff_evidence = collect
+    collect_for_task = collect
+    verify_bundle = verify
+
+
+__all__ = [
+    "CheckReceipt",
+    "CheckRunner",
+    "CheckRunnerProtocol",
+    "EVIDENCE_PROFILES",
+    "EvidenceCollectionError",
+    "EvidenceCollector",
+    "EvidenceProfile",
+]

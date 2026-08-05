@@ -11,6 +11,7 @@ if str(RUNTIME) not in sys.path:
 from allinluna_runtime.engine.action_bridge import ActionBridge
 from allinluna_runtime.adapters.host.base import HostAction
 from allinluna_runtime.artifacts import ArtifactStore
+from allinluna_runtime.evidence import CheckRunner, EvidenceCollector
 from allinluna_runtime.packs.public_skill import SinglePublicSkillAPI
 from allinluna_runtime.resource import ResourceBroker
 from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
@@ -137,7 +138,19 @@ def test_completed_lane_handoff_is_verified_before_exports_and_completion(tmp_pa
         store.put_contract({"id": "contract-handoff", "version": 1, "outcome": "deliver", "exports": [{"name": "Result", "kind": "artifact", "version": 1}], "done_when": ["check passes"]})
         store.create_task({"id": "deliver", "run_id": "run-handoff", "outcome": "deliver", "contract_id": "contract-handoff", "state": "ready"})
         store._execute("UPDATE tasks SET state = 'active' WHERE id = 'deliver'")
-        artifact = ArtifactStore(store, root=tmp_path / "artifacts").put(b"verified-result")
+        artifact_store = ArtifactStore(store, root=tmp_path / "artifacts")
+        artifact = artifact_store.put(b"verified-result")
+        evidence = EvidenceCollector(
+            store,
+            artifact_store=artifact_store,
+            check_runner=CheckRunner(artifact_store),
+            profile="projectless-analysis",
+        ).collect(
+            store.get_task("deliver") or {},
+            checks=[{"name": "check passes", "command": [sys.executable, "-c", "print('pass')"], "satisfies": ["check passes"]}],
+            exports=[{"name": "Result", "artifact_ref": artifact.ref, "version": 1}],
+        )
+        assert evidence["verified"] is True
         scheduler = GlobalScheduler(store)
         base = {
             "kind": "handoff",
@@ -147,21 +160,22 @@ def test_completed_lane_handoff_is_verified_before_exports_and_completion(tmp_pa
             "run_ref": "run://run-handoff",
             "status": "completed",
             "summary": "verified",
-            "artifacts": [artifact.ref],
-            "checks": [{"name": "tests", "status": "pass"}],
+            "artifacts": [],
+            "checks": [],
             "blockers": [],
             "promotion_requests": [],
             "task_id": "deliver",
             "contract_revision": 1,
-            "exports": [{"name": "Result", "artifact_ref": artifact.ref, "version": 1}],
-            "done_when": [{"condition": "check passes", "satisfied": True}],
-            "workspace_evidence": {"valid": True, "changed_paths": [], "ownership_valid": True, "protected_unchanged": True},
+            "exports": [],
+            "done_when": [],
+            "workspace_evidence": None,
+            "evidence": evidence,
         }
         invalid = dict(base, checks=[{"name": "tests", "status": "fail"}])
         try:
             scheduler.accept_handoff("deliver", invalid)
         except ValueError as exc:
-            assert "passing check" in str(exc)
+            assert "evidence" in str(exc) or "passing check" in str(exc)
         else:  # pragma: no cover
             raise AssertionError("failed evidence must not complete a Task")
         for invalid in (

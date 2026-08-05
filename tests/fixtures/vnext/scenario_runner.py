@@ -8,6 +8,8 @@ fake Codex/Git fixtures for deterministic host evidence.
 from __future__ import annotations
 
 import sys
+import json
+import subprocess
 import tempfile
 from time import perf_counter
 from pathlib import Path
@@ -18,8 +20,11 @@ if str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNTIME_ROOT))
 
 from allinluna_runtime.context import ContextKernel
+from allinluna_runtime.artifacts import ArtifactStore
+from allinluna_runtime.evidence import CheckRunner, EvidenceCollector
 from allinluna_runtime.engine.coordinator import CoordinatorEngine
 from allinluna_runtime.engine.lane import LaneEngine
+from allinluna_runtime.adapters.workspace.git import GitWorktreeAdapter
 from allinluna_runtime.packs.gsd import GSDPack, PHASES
 from allinluna_runtime.packs.public_skill import JITPermissionRouter, SinglePublicSkillAPI
 from allinluna_runtime.compat.legacy_plan import LegacyPlanImportAPI
@@ -405,8 +410,184 @@ def _scenario_perf() -> dict[str, Any]:
         directory.cleanup()
 
 
+def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
+    """Exercise the real public start -> persisted graph -> completed run path."""
+
+    directory, store = _store()
+    try:
+        base_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=fixture.root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        (fixture.worktree / "seed.txt").write_text("public-flow\n", encoding="utf-8")
+        subprocess.run(["git", "add", "seed.txt"], cwd=fixture.worktree, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "public flow evidence"],
+            cwd=fixture.worktree,
+            check=True,
+            capture_output=True,
+        )
+        head_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=fixture.worktree, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        api = SinglePublicSkillAPI()
+        started = api.start(
+            {
+                "intent_id": "public-runtime-flow",
+                "goal": "complete the persisted public runtime flow",
+                "repository": {
+                    "mode": "existing",
+                    "roots": [{"path": str(fixture.worktree), "git": True, "dirty_state": "clean", "branch": "lane-fixture", "head": head_commit}],
+                    "protected_paths": [],
+                },
+                "pack": {
+                    "id": "delivery",
+                    "version": "1.0.0",
+                    "config": {
+                        "tasks": [
+                            {
+                                "id": "producer",
+                                "outcome": "produce the upstream artifact",
+                                "done_when": ["producer check passes"],
+                                "ownership": ["seed.txt"],
+                                "exports": ["ProducerArtifact"],
+                            },
+                            {
+                                "id": "consumer",
+                                "outcome": "consume the upstream artifact",
+                                "done_when": ["consumer check passes"],
+                                "ownership": ["seed.txt"],
+                                "dependencies": ["producer"],
+                                "exports": ["FinalArtifact"],
+                            },
+                        ]
+                    },
+                },
+            },
+            store=store,
+            dispatch=False,
+        )
+        run_id = str(started["run_ref"]).removeprefix("run://")
+        engine = CoordinatorEngine(store, host=fixture.host)
+        producer = store.get_task("producer", run_id=run_id)
+        consumer = store.get_task("consumer", run_id=run_id)
+        if producer is None or consumer is None:
+            raise AssertionError("public start did not persist the delivery TaskGraph")
+        store._execute(
+            "UPDATE task_dependencies SET condition_json = ? WHERE task_id = ? AND depends_on_task_id = ?",
+            (json.dumps({"type": "exports_available", "exports": ["ProducerArtifact"]}), consumer["id"], producer["id"]),
+        )
+        work_graphs = {
+            task_id: store._fetchall("SELECT id FROM work_units WHERE task_id = ?", (task_id,))
+            for task_id in (producer["id"], consumer["id"])
+        }
+        top_tick = engine.tick(run_id, dispatch=True)
+        top_level_receipts = [item for item in top_tick.receipts if isinstance(item, dict)]
+        artifact_store = ArtifactStore(store, root=Path(directory.name) / "artifacts")
+        workspace = GitWorktreeAdapter(fixture.worktree, base_commit=base_commit)
+        collector = EvidenceCollector(
+            store,
+            artifact_store=artifact_store,
+            workspace_adapter=workspace,
+            check_runner=CheckRunner(artifact_store),
+            profile="software",
+        )
+        verified_handoffs: list[dict[str, Any]] = []
+        lane_ticks = 0
+        work_unit_handoffs = 0
+        export_refs: list[str] = []
+        for task_name, check_name, output in (
+            ("producer", "producer check passes", b"producer-result"),
+            ("consumer", "consumer check passes", b"final-result"),
+        ):
+            task = store.get_task(task_name, run_id=run_id)
+            if task is None:
+                raise AssertionError(f"missing public task {task_name}")
+            lane = LaneEngine(
+                store,
+                task_name,
+                host=FakeSubagentHost(),
+                evidence_collector=collector,
+            )
+            tick = lane.tick(dispatch=True)
+            lane_ticks += 1
+            for action, receipt_result in zip(tick["actions"], tick["receipts"]):
+                receipt = _receipt(receipt_result)
+                envelope = action.get("payload", {}).get("work_unit_envelope", {})
+                work_unit_id = str(action.get("work_unit_id") or envelope.get("work_unit_id"))
+                if work_unit_id == "None":
+                    raise AssertionError(f"lane action has no WorkUnit identity: {action}")
+                lane.ingest_receipt(work_unit_id, receipt)
+                lane.ingest_handoff({"work_unit_id": work_unit_id, "status": "completed", "receipt_id": receipt.get("receipt_id")})
+                work_unit_handoffs += 1
+            neutral = lane.synthesize_handoff()
+            artifact = artifact_store.put(
+                output,
+                kind="summary",
+                produced_by="public-runtime-flow",
+                link=("task", str(task["id"]), "produced"),
+            )
+            export_name = "ProducerArtifact" if task_name == "producer" else "FinalArtifact"
+            collected = lane.collect_handoff_evidence(
+                neutral,
+                checks=[
+                    {
+                        "name": check_name,
+                        "command": [sys.executable, "-c", "print('evidence-check')"],
+                        "satisfies": [check_name],
+                    }
+                ],
+                exports=[{"name": export_name, "artifact_ref": artifact.ref, "version": 1}],
+                workspace_scope={
+                    "worktree": str(fixture.worktree),
+                    "base_commit": base_commit,
+                    "ownership": ["seed.txt"],
+                    "protected_paths": [],
+                },
+                profile="software",
+            )
+            if not collected["evidence"]["verified"]:
+                raise AssertionError(collected["evidence"])
+            completed = engine.ingest_handoff(task_name, collected)
+            verified_handoffs.append({"task_id": task_name, "state": completed["state"], "handoff_status": collected.get("status"), "evidence_verified": collected["evidence"].get("verified"), "handoff_id": collected["handoff_id"], "changed_paths": list(collected["evidence"].get("changed_paths", ())), "protected_unchanged": collected["evidence"].get("workspace_evidence", {}).get("protected_unchanged")})
+            export_refs.append(artifact.ref)
+            if task_name == "producer":
+                follow_up = engine.tick(run_id, dispatch=True)
+                top_level_receipts.extend(item for item in follow_up.receipts if isinstance(item, dict))
+
+        status = engine.status(run_id)
+        return {
+            "public_api_entry": {
+                "api": SinglePublicSkillAPI.id,
+                "version": SinglePublicSkillAPI.version,
+                "run_id": run_id,
+                "started_via": "SinglePublicSkillAPI.start",
+            },
+            "flow": {
+                "task_graph_persisted": len(store._fetchall("SELECT id FROM tasks WHERE run_id = ?", (run_id,))) == 2,
+                "work_graphs_persisted": all(bool(rows) for rows in work_graphs.values()),
+                "top_level_receipts": len(top_level_receipts),
+                "lane_ticks": lane_ticks,
+                "work_unit_handoffs": work_unit_handoffs,
+                "verified_lane_handoffs": len(verified_handoffs),
+                "handoffs": verified_handoffs,
+                "exports": export_refs,
+                "actual_changed_paths": sorted({path for item in verified_handoffs for path in item["changed_paths"]}),
+                "protected_unchanged": all(item["protected_unchanged"] is True for item in verified_handoffs),
+                    "dependency_condition": store._fetchone(
+                        "SELECT condition_json FROM task_dependencies WHERE task_id = ?", (consumer["id"],)
+                    )["condition_json"],
+                    "task_states": {name: (store.get_task(name, run_id=run_id) or {}).get("state") for name in ("producer", "consumer")},
+                    "run_status": (store.get_run(run_id) or {}).get("status"),
+            },
+        }
+    finally:
+        store.close()
+        directory.cleanup()
+
+
 def run_e2e_scenario(scenario_id: str, *, fixture: Any) -> dict[str, Any]:
     scenarios = {
+        "public_runtime_flow": lambda: _scenario_public_runtime_flow(fixture),
         "three_top_level_tasks_concurrent": _scenario_three_tasks,
         "blocked_lane_continuation": _scenario_blocked,
         "workunit_promotion": _scenario_promotion,
@@ -422,20 +603,13 @@ def run_e2e_scenario(scenario_id: str, *, fixture: Any) -> dict[str, Any]:
         "scheduler_100_tasks_1000_workunits": _scenario_perf,
     }
     try:
-        # Every end-to-end case enters through the shipped public compiler.
-        # Scenario-specific assertions may inspect lower projections afterwards,
-        # just as a black-box test may inspect its persisted acceptance evidence.
-        pack = "gsd" if "gsd" in scenario_id else "delivery"
-        compilation = SinglePublicSkillAPI().compile(
-            {"intent_id": f"e2e-{scenario_id}"[:120], "goal": f"accept {scenario_id}", "pack": pack}
-        )
         result = scenarios[scenario_id]()
-        result["public_api_entry"] = {
-            "api": SinglePublicSkillAPI.id,
-            "version": SinglePublicSkillAPI.version,
-            "run_id": compilation.task_graph.run_id,
-            "pack": str(compilation.intent.pack.id),
-        }
+        if scenario_id != "public_runtime_flow":
+            result["component_entry"] = {
+                "kind": "component-scenario",
+                "scenario_id": scenario_id,
+                "runtime": "allinluna_runtime",
+            }
         return result
     except KeyError as exc:
         raise ValueError(f"unknown vNext E2E scenario: {scenario_id}") from exc

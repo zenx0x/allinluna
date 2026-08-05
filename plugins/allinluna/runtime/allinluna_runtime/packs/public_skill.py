@@ -113,13 +113,13 @@ class SinglePublicSkillAPI:
         # action reaches the dispatch boundary.
         return SkillCompilation(intent, graph, input_kind, compatibility, ())
 
-    def start(self, request: str | Mapping[str, Any] | RunIntent, *, store: Store | None = None, db_path: str | Path | None = None, repository: Mapping[str, Any] | None = None, pack: str | None = None, dispatch: bool = False) -> Mapping[str, Any]:
+    def start(self, request: str | Mapping[str, Any] | RunIntent, *, store: Store | None = None, db_path: str | Path | None = None, repository: Mapping[str, Any] | None = None, pack: str | None = None, dispatch: bool = False, host: Any = None) -> Mapping[str, Any]:
         compilation = self.compile(request, repository=repository, pack=pack)
         owned_store = store is None
         runtime_store = store or Store(str(db_path or "runtime.db"))
         try:
             run_id = compilation.task_graph.run_id
-            engine = CoordinatorEngine(runtime_store, resource_broker=ResourceBroker(compilation.intent.resource_envelope))
+            engine = CoordinatorEngine(runtime_store, host=host, resource_broker=ResourceBroker(compilation.intent.resource_envelope))
             engine.start(compilation.intent, compilation.task_graph, run_id=run_id)
             result: dict[str, Any] = {"run_ref": f"run://{run_id}", "compilation": compilation.to_dict(), "status": "created", "actions": []}
             if dispatch:

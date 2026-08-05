@@ -158,7 +158,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "status":
             result = engine.status(args.run_id)
         elif args.command == "next-actions":
-            result = engine.tick(args.run_id, dispatch=False).actions
+            # Preview is the scheduler's read-only path.  Calling Coordinator
+            # tick here used to make this observational command look like a
+            # scheduling step and could create leases/attempts on regressions.
+            result = [action.to_dict() for action in engine.scheduler.preview(args.run_id)]
         elif args.command == "dispatch":
             tick = engine.tick(args.run_id, dispatch=True)
             result = {"run_id": args.run_id, "actions": list(tick.actions), "receipts": list(tick.receipts), "status": tick.status}

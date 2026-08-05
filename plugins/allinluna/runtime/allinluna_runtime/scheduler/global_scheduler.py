@@ -679,6 +679,7 @@ class GlobalScheduler:
                 self.store.update_task_status(task_id, "blocked", signal_type="TASK_BLOCKED", payload=dict(handoff))
             elif status == "cancelled" and current["state"] in {"proposed", "ready", "blocked"}:
                 self.store.update_task_status(task_id, "cancelled", payload=dict(handoff))
+        self._invalidate_snapshot()
         self.resource_broker.release(task_id)
         return self._task(task_id)
 

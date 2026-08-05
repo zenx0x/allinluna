@@ -81,6 +81,11 @@ class CoordinatorEngine:
             tasks = [dict(item, id=task_id) if isinstance(item, Mapping) else {"id": task_id, "outcome": str(item)} for task_id, item in tasks.items()]
         with self.store.transaction():
             policy = dict(value.get("resource_envelope", value.get("policy", {})) or {})
+            repository = value.get("repository") if isinstance(value.get("repository"), Mapping) else {}
+            if repository.get("mode"):
+                policy.setdefault("repository_mode", str(repository["mode"]))
+            if value.get("evidence_profile"):
+                policy["evidence_profile"] = str(value["evidence_profile"])
             pack_value = value.get("pack")
             if isinstance(pack_value, Mapping):
                 policy["workflow_pack"] = str(pack_value.get("id") or "delivery")

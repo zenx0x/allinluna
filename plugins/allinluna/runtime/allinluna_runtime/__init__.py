@@ -33,6 +33,15 @@ from .migrations import (
     apply_migrations,
     validate_schema,
 )
+from .evidence import (
+    CheckReceipt,
+    CheckRunner,
+    CheckRunnerProtocol,
+    EVIDENCE_PROFILES,
+    EvidenceCollectionError,
+    EvidenceCollector,
+    EvidenceProfile,
+)
 from .store import (
     LeaseConflictError,
     ReceiptIngestionAPI,
@@ -81,6 +90,13 @@ __all__ = sorted(
                 "StoreTransactionRules",
                 "ContractRepository",
                 "LegacyReadOnlyMigration",
+                "CheckReceipt",
+                "CheckRunner",
+                "CheckRunnerProtocol",
+                "EVIDENCE_PROFILES",
+                "EvidenceCollectionError",
+                "EvidenceCollector",
+                "EvidenceProfile",
             }
         )
         if name in globals()

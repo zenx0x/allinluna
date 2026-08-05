@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 from ..adapters.host.base import HostAction, stable_digest
+from ..evidence import EvidenceCollector
 from ..resource import ResourceBroker
 from ..scheduler.local_scheduler import LocalAction, LocalScheduler
 from ..scheduler.conflicts import path_overlaps
@@ -31,12 +32,13 @@ class LaneEngine:
 
     API_VERSION = 1
 
-    def __init__(self, store: Any, task_id: str, *, context_kernel: Any = None, artifact_store: Any = None, host: Any = None, resource_broker: ResourceBroker | None = None, bridge: ActionBridge | None = None, scheduler: LocalScheduler | None = None, adapter: str = "native-subagent") -> None:
+    def __init__(self, store: Any, task_id: str, *, context_kernel: Any = None, artifact_store: Any = None, host: Any = None, resource_broker: ResourceBroker | None = None, bridge: ActionBridge | None = None, scheduler: LocalScheduler | None = None, adapter: str = "native-subagent", evidence_collector: EvidenceCollector | None = None) -> None:
         self.store = store
         persisted_task = store.get_task(str(task_id))
         self.task_id = str(persisted_task["id"] if persisted_task is not None else task_id)
         self.context_kernel = context_kernel
         self.artifact_store = artifact_store
+        self.evidence_collector = evidence_collector
         if resource_broker is None and persisted_task is not None:
             run = store.get_run(str(persisted_task["run_id"])) or {}
             resource_broker = ResourceBroker(persisted_task.get("resource_envelope") or run.get("policy") or {}, store=store, run_id=str(persisted_task["run_id"]))
@@ -250,11 +252,16 @@ class LaneEngine:
             "contract_revision": int(task.get("contract_version", 1)),
             "status": status,
             "summary": summary or f"lane {self.task_id} synthesized {status} handoff",
+            # Evidence is deliberately absent from Lane synthesis.  A Lane
+            # can report graph state, but it cannot sign checks, done_when,
+            # workspace validity, artifacts, or exports.
             "exports": [],
             "artifacts": [],
-            "checks": [{"name": f"work-unit:{unit.get('local_id') or unit['id']}", "status": "pass" if unit["state"] == "completed" else "fail"} for unit in units],
-            "done_when": [{"condition": str(condition), "satisfied": complete} for condition in contract.get("done_when", ())],
-            "workspace_evidence": {"valid": True, "source": "lane-runtime", "changed_paths": [], "ownership_valid": True, "protected_unchanged": True},
+            "checks": [],
+            "done_when": [],
+            "workspace_evidence": None,
+            "changed_paths": [],
+            "evidence": None,
             "blockers": _boundary_blockers(self.task_id, boundaries) if any(boundaries.values()) else ([] if status == "completed" else [{"code": "lane.incomplete", "message": "work graph has unfinished units", "owner_scope": self.task_id, "recoverable": True}]),
             "discovered_work": [],
             "promotion_requests": self.scheduler.persisted_promotion_requests(),
@@ -263,6 +270,40 @@ class LaneEngine:
         }
         self.last_handoff = handoff
         return handoff
+
+    def collect_handoff_evidence(
+        self,
+        handoff: Mapping[str, Any] | None = None,
+        *,
+        checks: Sequence[Any] | None = None,
+        artifacts: Sequence[Any] | None = None,
+        exports: Sequence[Any] | None = None,
+        workspace_scope: Mapping[str, Any] | None = None,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Collect independent evidence for a neutral lane handoff."""
+
+        if self.evidence_collector is None:
+            raise RuntimeError("LaneEngine requires an EvidenceCollector to collect handoff evidence")
+        candidate = dict(handoff or self.synthesize_handoff())
+        evidence = self.evidence_collector.collect(
+            self.store.get_task(self.task_id) or self.task_id,
+            candidate,
+            checks=checks,
+            artifacts=artifacts,
+            exports=exports,
+            workspace_scope=workspace_scope,
+            profile=profile,
+        )
+        candidate["evidence"] = evidence
+        candidate["checks"] = []
+        candidate["done_when"] = []
+        candidate["workspace_evidence"] = None
+        candidate["artifacts"] = []
+        candidate["exports"] = []
+        candidate["changed_paths"] = []
+        self.last_handoff = candidate
+        return candidate
 
     def graph(self) -> dict[str, Any]:
         return self.scheduler.graph()

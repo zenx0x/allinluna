@@ -94,8 +94,9 @@ def classify() -> dict[str, Any]:
                 "sections": list(contract.spec_sections),
                 "test_method": contract.test_method,
                 "class": "VNextE2ETests",
-                "kind": "performance" if contract.optional else "e2e",
+                "kind": "performance" if contract.optional else "public-e2e" if contract.public_flow else "component",
                 "status": "optional" if contract.optional else "required",
+                "public_flow": bool(contract.public_flow),
             }
         )
     runtime = runtime_status()

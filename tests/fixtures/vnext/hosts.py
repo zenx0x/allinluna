@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -309,11 +310,34 @@ class FakeDistributedCodexHost:
             "available": True,
             "tools": [
                 self.actual_create_tool,
+                "codex_app__list_projects",
                 "codex_app__wait_threads",
                 "codex_app__read_thread",
             ],
             "receipt_provenance": "test-fixture",
             "is_real_codex_app": False,
+        }
+
+    def list_projects(self) -> dict[str, Any]:
+        """Return the explicit project-resolution receipt used by v2 tests."""
+
+        root = str(self.workspace_path or "")
+        project_id = _stable_id("project", root or self.host_id)
+        environment = {
+            "worktree": root,
+            "root": root,
+            "branch": "lane-fixture",
+        }
+        return {
+            "protocol": "host-receipt/v1",
+            "kind": "project-resolution-receipt",
+            "receipt_id": _stable_id("project-receipt", project_id),
+            "status": "completed",
+            "source": self.source,
+            "host_id": self.host_id,
+            "actual_tool": "codex_app__list_projects",
+            "actual_capability": "codex_app__list_projects",
+            "projects": [{"projectId": project_id, "root": root, "environment": environment}],
         }
 
     def create_thread(
@@ -339,8 +363,9 @@ class FakeDistributedCodexHost:
             "title": str(title),
         }
         self.public_calls.append(public)
-        self.call_log.append({"method": "create_thread", "task_id": public["target"].get("task_id")})
-        task_id = str(public["target"].get("task_id") or "")
+        match = re.search(r'"task_id"\s*:\s*"([^"]+)"', public["prompt"])
+        task_id = str(match.group(1) if match else "public-call-" + str(len(self.public_calls)))
+        self.call_log.append({"method": "create_thread", "task_id": task_id})
         if not task_id:
             raise ValueError("public create_thread target requires task_id")
         thread_id = _stable_id("distributed-thread", self.host_id, task_id, prompt)

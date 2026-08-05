@@ -373,8 +373,20 @@ class ResourcePolicyResolver:
             "route_assurance": assurance,
             "external_action_policy": str(self.envelope.get("external_action_policy") or "deny"),
         }
-        model = request_route.get("model") if model_policy == "explicit" or "model" in request_route else configured.get("model") or root_route.get("model")
-        reasoning = request_route.get("reasoning") if reasoning_policy == "explicit" or "reasoning" in request_route else configured.get("reasoning") or root_route.get("reasoning")
+        model = (
+            request_route.get("model") or configured.get("model") or root_route.get("model")
+            if model_policy == "explicit"
+            else request_route.get("model")
+            if "model" in request_route
+            else configured.get("model") or root_route.get("model")
+        )
+        reasoning = (
+            request_route.get("reasoning") or configured.get("reasoning") or root_route.get("reasoning")
+            if reasoning_policy == "explicit"
+            else request_route.get("reasoning")
+            if "reasoning" in request_route
+            else configured.get("reasoning") or root_route.get("reasoning")
+        )
         if model is not None:
             resolved["model"] = model
         if reasoning is not None:

@@ -1,0 +1,28 @@
+{
+  "protocol": "host-receipt/v1",
+  "receipt_id": "<REAL_DESKTOP_RECEIPT_ID>",
+  "dispatch_key": "<ACTION_IDEMPOTENCY_KEY>",
+  "status": "active",
+  "source": "codex_app",
+  "event_origin": "codex_desktop",
+  "host_id": "<REAL_DESKTOP_HOST_ID>",
+  "thread_id": "<REAL_DESKTOP_THREAD_ID>",
+  "actual": true,
+  "actual_tool": "codex_app__create_thread",
+  "actual_capability": "codex_app__create_thread",
+  "action_contract_hash": "<ACTION_CONTRACT_HASH>",
+  "resource_receipt": {
+    "requested": {
+      "model": "gpt-5.3-codex-spark",
+      "reasoning": "high"
+    },
+    "resolved": {
+      "model": "<RESOLVED_MODEL_FROM_HOST_ROUTE>",
+      "reasoning": "<RESOLVED_REASONING_FROM_HOST_ROUTE>"
+    },
+    "actual": null,
+    "actual_state": "unresolved",
+    "evidence_source": null,
+    "observed_at": null
+  }
+}

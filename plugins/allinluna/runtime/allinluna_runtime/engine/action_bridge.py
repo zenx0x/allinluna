@@ -273,7 +273,7 @@ class ActionBridge:
                 "receipt": None,
                 "reason": "emitted intent has no durable receipt; host reconciliation returned no match",
             }
-        observed = self._normalize(raw, value)
+        observed = self._normalize(raw, value, trusted=True)
         if observed.status == "unresolved" and not observed.thread_id and not observed.client_thread_id:
             self.enqueue(value)
             return {
@@ -282,7 +282,11 @@ class ActionBridge:
                 "receipt": None,
                 "reason": "host reconciliation returned no identifiable receipt",
             }
-        result = self.ingest_receipt(raw, action=value)
+        # Reconciliation is a direct call to the trusted HostAdapter.  Pass
+        # the normalized observation onward so the adapter's explicit
+        # actual_tool/capability/hash signature is preserved at the ingest
+        # boundary; an external file/CLI ingest still remains untrusted.
+        result = self.ingest_receipt(observed, action=value)
         return {"status": "host-reconciled", "action": value.to_dict(), **result}
 
     def enqueue(self, action: Any) -> HostAction:
@@ -465,6 +469,16 @@ class ActionBridge:
                 return public_method(**public)
             method = getattr(self.host, "create_top_level_task", None)
             return method(action) if callable(method) else None
+        if kind == "resolve-project":
+            method = getattr(self.host, "list_projects", None)
+            if callable(method):
+                return method()
+            invoke = getattr(self.host, "invoke", None)
+            if callable(invoke):
+                return invoke("codex_app__list_projects", {})
+            return None
+        if kind == "resolve-resource-route":
+            return None
         if kind == "spawn-subagent":
             method = getattr(self.host, "spawn", None)
             if callable(method):
@@ -494,13 +508,13 @@ class ActionBridge:
                 return method(action.arguments.get("target", action.arguments))
         return None
 
-    def _normalize(self, value: Any, action: HostAction) -> HostReceipt:
+    def _normalize(self, value: Any, action: HostAction, *, trusted: bool = False) -> HostReceipt:
         if isinstance(value, HostReceipt):
             receipt = value
         else:
             receipt = HostReceipt.from_value(value or {"status": "pending", "fallback": "action-bridge-required"}, action=action, default_source=self.adapter)
         raw = receipt.to_dict()
-        if self._is_top_level_action(action) and receipt.thread_id:
+        if trusted and self._is_top_level_action(action) and receipt.thread_id:
             if not raw.get("actual_tool"):
                 raw["actual_tool"] = action.tool
             if not raw.get("actual_capability"):
@@ -622,6 +636,26 @@ class ActionBridge:
         existing = self._existing_dispatch(value.idempotency_key)
         if existing is not None:
             return self.reconcile(value)
+        if self.host is None:
+            # No host binding is a relay state, not a capability discovery
+            # result.  Preserve the pending action and let the Desktop
+            # coordinator invoke its exact opcode.
+            self.enqueue(value)
+            return {
+                "status": "ACTION_RELAY_REQUIRED",
+                "action": value.to_dict(),
+                "receipt": None,
+                "relay_required": True,
+                "reason": "no HostAdapter is bound; invoke the exact host action with its exact arguments",
+            }
+        if value.kind == "resolve-resource-route":
+            self.enqueue(value)
+            return {
+                "status": "RESOURCE_ROUTE_REQUIRED",
+                "action": value.to_dict(),
+                "receipt": None,
+                "reason": "host route resolution did not produce a concrete model",
+            }
         if self._is_top_level_action(value):
             available, reason = self._exact_top_level_capability(value)
             if not available:
@@ -659,7 +693,7 @@ class ActionBridge:
                     "observed_at": None,
                 },
             }
-        normalized = self._normalize(raw, value)
+        normalized = self._normalize(raw, value, trusted=True)
         fallback_code = str(normalized.fallback or normalized.payload.get("code") or "")
         if self._is_top_level_action(value) and fallback_code == "HOST_CAPABILITY_BLOCKED":
             return self._record_top_level_blocker(

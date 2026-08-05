@@ -17,9 +17,10 @@ def test_start_persists_atomic_and_parallel_outcome_domain_graphs(tmp_path: Path
     db_path = tmp_path / "runtime.db"
     api = SinglePublicSkillAPI()
 
-    atomic = api.start({"intent_id": "phase21-atomic", "goal": "Build and verify the complete product"}, db_path=db_path)
-    parallel = api.start({"intent_id": "phase21-parallel", "goal": "Build the API and dashboard"}, db_path=db_path)
-    dependent = api.start({"intent_id": "phase21-dependent", "goal": "Build the API, then create the dashboard"}, db_path=db_path)
+    resource_envelope = {"model": "gpt-5.6-luna", "reasoning": "high"}
+    atomic = api.start({"intent_id": "phase21-atomic", "goal": "Build and verify the complete product", "resource_envelope": resource_envelope}, db_path=db_path)
+    parallel = api.start({"intent_id": "phase21-parallel", "goal": "Build the API and dashboard", "resource_envelope": resource_envelope}, db_path=db_path)
+    dependent = api.start({"intent_id": "phase21-dependent", "goal": "Build the API, then create the dashboard", "resource_envelope": resource_envelope}, db_path=db_path)
 
     with Store(db_path) as store:
         atomic_run = atomic["run_ref"].removeprefix("run://")

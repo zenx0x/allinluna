@@ -342,6 +342,10 @@ def test_action_bridge_rehydrates_trusted_resource_baseline_from_outbox(vnext_mo
                 "dispatch_key": action.idempotency_key,
                 "thread_id": "persisted-action-thread",
                 "status": "active",
+                "actual": True,
+                "actual_tool": action.tool,
+                "actual_capability": action.host_capability_required,
+                "action_contract_hash": action.action_contract_hash,
                 "resource_receipt": {
                     "requested": dict(values), "resolved": dict(values), "actual": dict(values),
                     "actual_state": "resolved", "evidence_source": "codex-host-runtime",

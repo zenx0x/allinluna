@@ -15,6 +15,13 @@ from typing import Any, Callable, Mapping, Sequence
 from ..resource import ResourceBroker, SlotAllocation
 from ..store import LeaseConflictError
 from ..adapters.host.base import HostAction, stable_digest
+from ..adapters.host.codex_app import (
+    dispatch_identity,
+    LEGACY_DEFAULT_RESOURCE_POLICY,
+    project_resolution_action,
+    resource_route_resolution_action,
+    target_for_task,
+)
 from ..domain import ExportPort, TaskGraph, TaskState
 from ..handoff import HandoffProcessor, HandoffVerificationError
 from ..protocols.lane_bootstrap import (
@@ -86,6 +93,33 @@ class GlobalScheduler:
     def _invalidate_snapshot(self) -> None:
         self._snapshot = None
         self._snapshot_tasks = {}
+
+    def _load_persisted_resource_policy(self, run_id: str) -> None:
+        """Make direct scheduler use honor the Run's durable route request."""
+
+        if self.resource_broker.requested:
+            return
+        run = self.store.get_run(run_id)
+        policy = (run or {}).get("policy") if isinstance(run, Mapping) else None
+        if isinstance(policy, Mapping) and policy:
+            persisted = dict(policy)
+            # Older low-level scheduler callers created a Run with no resource
+            # envelope at all.  Keep that compatibility surface executable by
+            # applying the existing adapter-owned ``all-luna`` profile.  A
+            # public ``auto`` envelope is deliberately not treated this way:
+            # its unresolved route must emit a non-executable resolution action.
+            resource_keys = {
+                "model", "model_policy", "reasoning", "reasoning_policy",
+                "thinking", "capability_class", "operation", "route",
+                "routes", "capability_routes",
+            }
+            if not resource_keys.intersection(persisted):
+                persisted = {**persisted, **LEGACY_DEFAULT_RESOURCE_POLICY}
+            self.resource_broker = ResourceBroker(persisted, store=self.store, run_id=run_id)
+        elif isinstance(policy, Mapping) and not policy:
+            self.resource_broker = ResourceBroker(
+                dict(LEGACY_DEFAULT_RESOURCE_POLICY), store=self.store, run_id=run_id
+            )
 
     def _tasks(self, run_id: str) -> list[dict[str, Any]]:
         if self._snapshot is None or str(self._snapshot.get("run_id")) != str(run_id):
@@ -466,6 +500,26 @@ class GlobalScheduler:
 
     def _default_action(self, task: Mapping[str, Any], allocation: Mapping[str, Any]) -> HostAction:
         task_id = str(task["id"])
+        run = self.store.get_run(str(task["run_id"])) or {}
+        policy = run.get("policy") or run.get("policy_json") or {}
+        if isinstance(policy, str):
+            try:
+                policy = json.loads(policy)
+            except json.JSONDecodeError:
+                policy = {}
+        repository = task.get("repository") if isinstance(task.get("repository"), Mapping) else policy.get("repository", {})
+        state = {
+            "run_id": str(task["run_id"]),
+            "repository": dict(repository) if isinstance(repository, Mapping) else {},
+            "repository_mode": policy.get("repository_mode"),
+            "project_resolution": policy.get("project_resolution"),
+            "project_resolution_receipt": policy.get("project_resolution_receipt"),
+            "capabilities": policy.get("capabilities", {}),
+            "tasks": {task_id: dict(task)},
+        }
+        target = target_for_task(state, task_id)
+        if target is None:
+            return HostAction.from_value(project_resolution_action(state, task_id))
         latest = task.get("latest_attempt") or self.store._fetchone("SELECT COALESCE(MAX(attempt_no), 0) AS attempt_no FROM task_attempts WHERE task_id = ?", (task_id,))
         attempt_no = int((latest or {}).get("attempt_no", 0)) + 1
         dispatch_id = f"lane-{task_id}-attempt-{attempt_no}"
@@ -483,6 +537,15 @@ class GlobalScheduler:
         resolved_route = resource_receipt.get("resolved") if isinstance(resource_receipt.get("resolved"), Mapping) else {}
         resolved_model = allocation.get("model")
         resolved_reasoning = allocation.get("reasoning")
+        if not isinstance(resolved_model, str) or not resolved_model.strip():
+            return HostAction.from_value(
+                resource_route_resolution_action(
+                    state,
+                    task_id=task_id,
+                    requested=resource_receipt.get("requested", {}) if isinstance(resource_receipt, Mapping) else {},
+                    resolved=resource_receipt.get("resolved", {}) if isinstance(resource_receipt, Mapping) else {},
+                )
+            )
         envelope = {
             "kind": "task-envelope",
             "schema_version": "1.0",
@@ -523,13 +586,13 @@ class GlobalScheduler:
         bootstrap = LaneBootstrapEnvelope.for_task(self.store, task, envelope)
         envelope["extensions"]["lane_bootstrap"] = bootstrap.to_dict()
         envelope["extensions"]["task_envelope_digest"] = bootstrap.task_envelope_digest
+        identity = dispatch_identity(state, task_id=task_id, target=target)
         arguments = {
-            "target": {"type": "project", "task_id": task_id},
+            "target": target,
             "prompt": render_lane_bootstrap_prompt(outcome=str(task["outcome"]), bootstrap=bootstrap),
+            "model": resolved_model,
             "title": f"All in Luna lane {task_id}",
         }
-        if resolved_model:
-            arguments["model"] = resolved_model
         if resolved_reasoning:
             arguments["thinking"] = resolved_reasoning
         return HostAction(
@@ -551,7 +614,7 @@ class GlobalScheduler:
             },
             host_capability_required="codex_app__create_thread",
             task_envelope_ref=task_envelope_ref,
-            identity={"run_id": str(task["run_id"]), "task_id": task_id},
+            identity=identity,
             payload={
                 "task_envelope": envelope,
                 "task_envelope_ref": task_envelope_ref,
@@ -572,6 +635,7 @@ class GlobalScheduler:
         run = self.store.get_run(run_id)
         if run is None:
             raise KeyError(run_id)
+        self._load_persisted_resource_policy(run_id)
         ready = self.ready_tasks(run_id)
         policy = run.get("policy") or run.get("policy_json") or {}
         if isinstance(policy, str):
@@ -589,12 +653,16 @@ class GlobalScheduler:
                 "external_action_policy": receipt.resolved["external_action_policy"],
                 "receipt": receipt.to_dict(),
             }
-            actions.append(self.action_factory(task, allocation))
+            action = self.action_factory(task, allocation)
+            actions.append(action)
+            if action.kind in {"resolve-project", "resolve-resource-route"}:
+                break
         return actions
 
     def step(self, run_id: str | None = None, *, capacity: int | None = None) -> list[Any]:
         compat = run_id is None
         run_id = run_id or self._ensure_compat_run()
+        self._load_persisted_resource_policy(run_id)
         self.resource_broker.bind(self.store, run_id)
         self.resource_broker.recover()
         if capacity is not None:
@@ -652,6 +720,16 @@ class GlobalScheduler:
                 self.resource_broker.release(task_id)
                 continue
             action = self.action_factory(task, allocation.to_dict())
+            if action.kind in {"resolve-project", "resolve-resource-route"}:
+                self.resource_broker.release(task_id)
+                lease = self.store._fetchone(
+                    "SELECT id FROM leases WHERE scope_type = 'task' AND scope_id = ? AND state = 'active' ORDER BY acquired_at DESC LIMIT 1",
+                    (task_id,),
+                )
+                if lease:
+                    self.recovery.release(str(lease["id"]))
+                actions.append(action)
+                break
             self.store.persist_dispatch_intent(action, adapter=self.adapter, host_id=action.host_id)
             selected.append(task_id)
             actions.append(action)

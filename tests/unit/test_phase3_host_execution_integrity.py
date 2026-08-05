@@ -20,7 +20,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _scheduled_action(tmp_path):
     store = Store(tmp_path / "phase3-runtime.db")
-    store.create_run("run-phase3", "host execution integrity", {}, "contract://root@1")
+    store.create_run(
+        "run-phase3",
+        "host execution integrity",
+        {"model": "gpt-5.6-luna", "reasoning": "medium", "repository": {"mode": "projectless"}},
+        "contract://root@1",
+    )
     store.create_task({"id": "task-phase3", "run_id": "run-phase3", "outcome": "start an exact top-level lane", "state": "ready"})
     return store, GlobalScheduler(store).step("run-phase3")[0]
 
@@ -56,6 +61,9 @@ def test_top_level_action_has_exact_immutable_execution_contract(tmp_path):
         assert raw["tool"] == EXACT_TOOL
         assert raw["tool_policy"] == {"exact_tool": EXACT_TOOL, "substitutions": [], "on_unavailable": "block"}
         assert raw["host_capability_required"] == EXACT_TOOL
+        assert raw["arguments"]["target"]["type"] == "projectless"
+        assert "task_id" not in raw["arguments"]["target"]
+        assert set(("target", "prompt", "model", "title")) <= raw["arguments"].keys()
         assert raw["task_envelope_ref"] == raw["payload"]["task_envelope_ref"]
         assert len(raw["action_contract_hash"]) == 64
         assert HostAction.from_value(raw).action_contract_hash == raw["action_contract_hash"]
@@ -118,10 +126,31 @@ def test_reconciliation_rejects_a_durable_wrong_tool_receipt(tmp_path):
     store, action = _scheduled_action(tmp_path)
     try:
         store.mark_outbox_emitted(action.idempotency_key)
-        store.ingest_receipt({"receipt_id": "durable-wrong-tool", "dispatch_key": action.idempotency_key, "thread_id": "wrong-tool-thread", "status": "active", "actual": True, "actual_tool": "collaboration.spawn_agent", "actual_capability": "collaboration.spawn_agent"})
+        store.ingest_receipt({"receipt_id": "durable-wrong-tool", "dispatch_key": action.idempotency_key, "thread_id": "wrong-tool-thread", "status": "active", "actual": True, "actual_tool": "collaboration.spawn_agent", "actual_capability": "collaboration.spawn_agent", "action_contract_hash": action.action_contract_hash})
         assert store.get_task(action.task_id)["state"] == "active"
         result = ActionBridge(store, ExactHost()).dispatch(action)
         assert result["status"] == "HOST_PROTOCOL_VIOLATION"
+        assert store.get_task(action.task_id)["state"] == "blocked"
+    finally:
+        store.close()
+
+
+def test_external_spawn_agent_receipt_without_actual_tool_is_rejected(tmp_path):
+    store, action = _scheduled_action(tmp_path)
+    try:
+        store.mark_outbox_emitted(action.idempotency_key)
+        store.ingest_receipt({
+            "receipt_id": "missing-actual-tool",
+            "dispatch_key": action.idempotency_key,
+            "thread_id": "spawn-agent-thread",
+            "status": "active",
+            "actual": True,
+            "actual_capability": "collaboration.spawn_agent",
+            "action_contract_hash": action.action_contract_hash,
+        })
+        result = ActionBridge(store, ExactHost()).dispatch(action)
+        assert result["status"] == "HOST_PROTOCOL_VIOLATION"
+        assert result["receipt"]["actual_tool"] is None
         assert store.get_task(action.task_id)["state"] == "blocked"
     finally:
         store.close()
@@ -149,6 +178,7 @@ def test_codex_app_adapter_relays_only_public_create_thread_arguments(tmp_path):
         receipt = CodexAppHost(host=host).create_top_level_task(action)
         assert receipt["actual"] is True
         assert set(host.public_calls[0]) == {"target", "prompt", "model", "thinking", "title"}
-        assert host.public_calls[0]["target"]["task_id"] == action.task_id
+        assert host.public_calls[0]["target"]["type"] == "projectless"
+        assert "task_id" not in host.public_calls[0]["target"]
     finally:
         store.close()

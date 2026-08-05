@@ -41,6 +41,9 @@ class CrashAwareHost:
                 "host_id": "fake-crash-host",
                 "status": "active",
                 "actual": True,
+                "actual_tool": "codex_app__create_thread",
+                "actual_capability": "codex_app__create_thread",
+                "action_contract_hash": raw["action_contract_hash"],
                 # Deliberately no model/reasoning: actual resource truth stays
                 # unresolved even though the requested route is Luna xhigh.
             },
@@ -145,9 +148,12 @@ def test_persisted_receipt_repairs_same_attempt_and_task_projection(tmp_path):
         "dispatch_key": action.idempotency_key,
         "thread_id": "thread-already-created",
         "host_id": "fake-crash-host",
-        "status": "active",
-        "actual": True,
-    }
+            "status": "active",
+            "actual": True,
+            "actual_tool": action.tool,
+            "actual_capability": action.host_capability_required,
+            "action_contract_hash": action.action_contract_hash,
+        }
     # This is the exact crash point: host receipt durable, projections stale.
     store._execute(
         "INSERT INTO host_receipts (id, action_id, dispatch_key, host_adapter, host_id, thread_id, status, payload_json, actual_tool, received_at) "
@@ -161,7 +167,7 @@ def test_persisted_receipt_repairs_same_attempt_and_task_projection(tmp_path):
             receipt["thread_id"],
             receipt["status"],
             json.dumps(receipt, sort_keys=True),
-            None,
+            receipt["actual_tool"],
             "2026-08-05T00:00:00.000000Z",
         ),
     )

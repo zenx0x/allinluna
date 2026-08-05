@@ -1,4 +1,4 @@
-# All in Luna
+# All in Luna 2.0.0-rc.1
 
 [English](README.en.md)
 
@@ -35,9 +35,11 @@ Pack 只能经公开 Core API 访问 Store/Context/Artifact/Host；manifest、en
 
 ## 资源与权限
 
-模型与推理等级由 Run 资源配置决定，并可由更窄的 Task/WorkUnit 配置覆盖；不再硬锁 Luna-high。可按宿主能力选择 Luna 的 medium/high/xhigh/max、Codex Spark 或其他模型。requested、resolved、actual 始终分开记录：requested 与 resolved 描述路由；actual 只在宿主明确回传时记录，绝不从路由或任务正文推断。
+模型与推理等级由 Run 资源配置决定，并可由更窄的 Task/WorkUnit 配置覆盖。当前 RC 的允许包络是 Luna 类模型，通常使用 medium/high/xhigh，max 仅用于关键任务；Luna 之外额外允许 `gpt-5.3-codex-spark`。Core 不写死具体模型路由。requested、resolved、actual 始终分开记录：requested 与 resolved 描述路由；actual 只在宿主明确回传时记录，绝不从路由或任务正文推断。
 
-宿主资源路由遥测是可选的 adapter diagnostics。只有明确的 `actual host receipt` 能填充 actual；缺少模型、推理或 reroute 遥测时，`actual` 保持 `null`、`actual_state` 保持 `unresolved`；普通执行、handoff 和结果完成仍可继续。宿主提供 actual 证据时，adapter 会将 requested 与持久化的 dispatch action 比对，并要求 actual 与报告的 resolved 路由一致。`runtime.db` schema v5 分别持久化三组资源值（包含 unresolved actual state），支持 crash recovery、replay 与 status 查询。
+宿主资源路由遥测是可选的 adapter diagnostics。只有明确的 `actual host receipt` 能填充 actual；缺少模型、推理或 reroute 遥测时，`actual` 保持 `null`、`actual_state` 保持 `unresolved`；普通执行、handoff 和结果完成仍可继续。`codex_app__create_thread` 的 exact action 只有在 host route resolution 得到非空 model 后才冻结 `action_contract_hash`；route 未解析时只输出不可执行的 route-resolution action。`runtime.db` schema v8 持久化 requested/resolved/actual 三组资源值、outbox、receipt 和 recovery 状态。
+
+顶层 create target 只接受 project resolution receipt 产生的 `projectId + environment`；projectless Task 使用显式 `{"type":"projectless"}` target。没有 project identity 时先输出 `codex_app__list_projects` resolve-project action，绝不把 Task ID 当作 project identity。外部 top-level receipt 必须显式提供 `actual_tool`、`actual_capability` 和 `action_contract_hash`；只有运行时直接调用的可信 HostAdapter 可以签署这些观察字段。
 
 权限在动作边界 JIT 请求：credentials、push、deploy、publish、destructive work、live external mutation 默认不发生，只有到达动作并获得明确授权后才可继续。
 
@@ -45,6 +47,7 @@ Pack 只能经公开 Core API 访问 Store/Context/Artifact/Host；manifest、en
 
 ```text
 allinluna start --goal "..."
+allinluna drive RUN_ID
 allinluna status RUN_ID
 allinluna next-actions RUN_ID
 allinluna ingest-receipt RUN_ID RECEIPT.json
@@ -54,9 +57,15 @@ allinluna retry RUN_ID --task TASK_ID
 allinluna cancel RUN_ID --task TASK_ID
 allinluna reconcile RUN_ID
 allinluna set-policy RUN_ID POLICY.json
+allinluna lane start RUN_ID TASK_ID
+allinluna lane status RUN_ID TASK_ID
+allinluna lane tick RUN_ID TASK_ID
+allinluna lane drive RUN_ID TASK_ID
+allinluna lane ingest-receipt RUN_ID TASK_ID RECEIPT.json
+allinluna lane handoff RUN_ID TASK_ID
 ```
 
-runtime CLI 还提供 `set-policy`。legacy plan/run import 通过下方 read-only API 完成；恢复依据 SQLite state/journal、真实 host receipt、lease、Git/workspace identity 和 snapshot validity 重算 ready actions；不可恢复的问题返回 blocker，并保留 immutable artifacts。
+`start` 默认持久化 ready Task、发出或 preview actions；没有绑定 HostAdapter 时返回 `ACTION_RELAY_REQUIRED`，保留 exact relay，不误报 `HOST_CAPABILITY_BLOCKED`。只有 capability discovery 确认 exact tool 不存在时才 block。`drive` 继续 Coordinator loop，`lane` 命令驱动独立 Task Lane。legacy plan/run import 通过下方 read-only API 完成；恢复依据 SQLite state/journal、真实 host receipt、lease、Git/workspace identity 和 snapshot validity 重算 ready actions；不可恢复的问题返回 blocker，并保留 immutable artifacts。Route assurance 通过 `observe_if_exposed`、`request_only` 或更严格策略表达，不能用缺失 actual 伪造成功。
 Host-side conformance 会同时校验 `requested`、`resolved`、`actual` 与 host `identity`，并检查 `create`、`read`、`wait`、`cancel`、`idempotency` 的完整性；缺失迹象会返回 `BLOCKED`。
 
 Evidence checks 使用受超时约束的受控命令执行并将 stdout、stderr、超时和执行错误作为证据保存；任意 Python callable 不能被安全强制终止，因此不会作为 check runner 执行。

@@ -213,7 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "reconcile":
             result = engine.reconcile(args.run_id)
         elif args.command == "ingest-receipt":
-            result = engine.ingest_receipt(_load_json(args.receipt))
+            result = engine.ingest_receipt(_load_json(args.receipt), run_id=args.run_id)
         elif args.command == "lane":
             bootstrap = _load_json(args.bootstrap) if getattr(args, "bootstrap", None) else None
             lane_driver = LaneDriver(

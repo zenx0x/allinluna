@@ -94,7 +94,7 @@ class FakeDistributedCodexHostIntegrationTests(unittest.TestCase):
         self.assertFalse(hasattr(host, "create_top_level_task"))
 
         receipt = host.create_thread(
-            {"type": "project", "task_id": "task-public"},
+            {"type": "project", "projectId": "project-public", "environment": {"type": "worktree"}},
             "prompt with a lane-bootstrap/v1 envelope",
             "gpt-5.6-luna",
             "max",
@@ -107,7 +107,7 @@ class FakeDistributedCodexHostIntegrationTests(unittest.TestCase):
         )
         with self.assertRaises(TypeError):
             host.create_thread(
-                {"type": "project", "task_id": "task-public"},
+                {"type": "project", "projectId": "project-public", "environment": {"type": "worktree"}},
                 "prompt",
                 "gpt-5.6-luna",
                 "max",

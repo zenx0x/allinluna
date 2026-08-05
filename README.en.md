@@ -1,4 +1,4 @@
-# All in Luna
+# All in Luna 2.0.0-rc.1
 
 [简体中文](README.md)
 
@@ -33,9 +33,11 @@ Packs use Store, Context, Artifact, Host, and Capability only through public Cor
 
 ## Resources and permissions
 
-Model and reasoning choices come from the Run resource policy and may be overridden by a narrower Task or WorkUnit policy; Luna-high is no longer hard locked. Callers may select Luna medium/high/xhigh/max, Codex Spark, or another host-supported model. Keep requested, resolved, and actual evidence separate. Requested and resolved describe routing; actual is recorded only from explicit host evidence and is never inferred from either route or task prose.
+Model and reasoning choices come from the Run resource policy and may be overridden by a narrower Task or WorkUnit policy. This RC allows Luna-class models, normally at medium/high/xhigh reasoning with max reserved for critical work, plus `gpt-5.3-codex-spark` outside Luna. Core does not hardcode a concrete model route. Keep requested, resolved, and actual evidence separate. Requested and resolved describe routing; actual is recorded only from explicit host evidence and is never inferred from either route or task prose.
 
-Host resource-route telemetry is optional adapter diagnostics. If model, reasoning, or reroute telemetry is unavailable, `actual` remains `null` and `actual_state` remains `unresolved`; ordinary execution, handoff, and result completion continue normally. When a host supplies actual evidence, the adapter compares requested values with the persisted dispatch action and requires actual to match the reported resolved route. `runtime.db` schema v5 persists all three resource values, including unresolved actual state, for crash recovery, replay, and status queries.
+Host resource-route telemetry is optional adapter diagnostics. If model, reasoning, or reroute telemetry is unavailable, `actual` remains `null` and `actual_state` remains `unresolved`; ordinary execution, handoff, and result completion continue normally. An exact `codex_app__create_thread` action is frozen only after host route resolution supplies a non-empty model; an unresolved route emits a non-executable resolution action. `runtime.db` schema v8 persists requested/resolved/actual resource values, outbox, receipts, and recovery state.
+
+Top-level create targets accept `projectId + environment` only from a project-resolution receipt; a projectless Task uses an explicit `{"type":"projectless"}` target. When project identity is absent, the runtime emits a `codex_app__list_projects` resolve-project action first and never substitutes the Task ID for project identity. External top-level receipts must explicitly provide `actual_tool`, `actual_capability`, and `action_contract_hash`; only a trusted HostAdapter called directly by the runtime may sign those observed fields.
 
 Permissions are requested JIT at the action boundary. Credentials, push, deploy, publish, destructive work, and live external mutation do not happen by default; they proceed only after explicit authorization at the reached action.
 
@@ -43,6 +45,7 @@ Permissions are requested JIT at the action boundary. Credentials, push, deploy,
 
 ```text
 allinluna start --goal "..."
+allinluna drive RUN_ID
 allinluna status RUN_ID
 allinluna next-actions RUN_ID
 allinluna ingest-receipt RUN_ID RECEIPT.json
@@ -52,9 +55,15 @@ allinluna retry RUN_ID --task TASK_ID
 allinluna cancel RUN_ID --task TASK_ID
 allinluna reconcile RUN_ID
 allinluna set-policy RUN_ID POLICY.json
+allinluna lane start RUN_ID TASK_ID
+allinluna lane status RUN_ID TASK_ID
+allinluna lane tick RUN_ID TASK_ID
+allinluna lane drive RUN_ID TASK_ID
+allinluna lane ingest-receipt RUN_ID TASK_ID RECEIPT.json
+allinluna lane handoff RUN_ID TASK_ID
 ```
 
-The runtime CLI also provides `set-policy`. Legacy plan/run import is exposed through the read-only API below. Recovery uses SQLite state/journal, real host receipts, leases, Git/workspace identity, and snapshot validity to recompute ready actions; unrecoverable conditions return a blocker while immutable artifacts are retained.
+`start` defaults to persisting ready Tasks and emitting or previewing actions. With no HostAdapter bound it returns `ACTION_RELAY_REQUIRED`, preserves the exact relay, and does not mislabel the state as `HOST_CAPABILITY_BLOCKED`. Blocking is allowed only after capability discovery confirms the exact tool is absent. `drive` continues the Coordinator loop and `lane` commands drive an independent Task Lane. Legacy plan/run import is exposed through the read-only API below. Recovery uses SQLite state/journal, real host receipts, leases, Git/workspace identity, and snapshot validity to recompute ready actions; route assurance is expressed through `observe_if_exposed`, `request_only`, or stricter policy rather than fabricated actual evidence. Unrecoverable conditions return a blocker while immutable artifacts are retained.
 Host-conformance diagnostics verify `requested`, `resolved`, and `actual` resource layers alongside host `identity`.
 Neutral action checks require coherent `create`, `read`, `wait`, `cancel`, and `idempotency` traces for tool and policy changes; missing traces return `BLOCKED`.
 

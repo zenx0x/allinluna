@@ -69,9 +69,9 @@ def test_next_actions_is_read_only_and_dispatch_uses_durable_outbox(tmp_path):
         action = scheduler.step(run_id)[0]
         assert len(store.pending_outbox(run_id)) == 1
         result = ActionBridge(store).dispatch(action)
-        assert result["status"] == "HOST_CAPABILITY_BLOCKED"
-        assert result["dispatch_intent_preserved"] is True
-        assert store.get_task(action.task_id)["state"] == "blocked"
+        assert result["status"] == "ACTION_RELAY_REQUIRED"
+        assert result["relay_required"] is True
+        assert store.get_task(action.task_id)["state"] == "dispatching"
         assert store.count_receipts() == 0
 
 
@@ -111,7 +111,7 @@ def test_external_permission_is_created_at_action_boundary_and_resumable(tmp_pat
         permission_id = first["permission_intent"]["id"]
         store.decide_permission(permission_id, allowed=True, rationale="authorized test boundary")
         resumed = bridge.dispatch(action)
-        assert resumed["status"] == "pending-host-dispatch"
+        assert resumed["status"] == "ACTION_RELAY_REQUIRED"
         assert store.count_receipts() == 0
 
 

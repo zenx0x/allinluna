@@ -1,0 +1,17 @@
+{
+  "goal": "Run the phase 3 Desktop canary",
+  "repository": {
+    "mode": "projectless",
+    "roots": [],
+    "protected_paths": []
+  },
+  "resource_envelope": {
+    "model_policy": "explicit",
+    "model": "gpt-5.3-codex-spark",
+    "reasoning_policy": "explicit",
+    "reasoning": "high",
+    "route_assurance": "observe_if_exposed",
+    "external_action_policy": "deny"
+  },
+  "pack": "delivery"
+}

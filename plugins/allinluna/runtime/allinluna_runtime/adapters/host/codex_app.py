@@ -41,6 +41,15 @@ CANCEL_THREAD_TOOL = "codex_app__cancel_thread"
 WAIT_THREADS_TOOL = "codex_app__wait_threads"
 CODEX_APP_SOURCE = "codex_app"
 FORBIDDEN_ACTION_FIELDS = {"environment", "reasoning", "brief_path"}
+# Deployment-owned compatibility only: a bare legacy low-level scheduler Run
+# has no resource envelope.  Public ``auto`` requests never use this default;
+# they must resolve a host route before an executable action is frozen.
+LEGACY_DEFAULT_RESOURCE_POLICY = {
+    "model_policy": "explicit",
+    "model": "gpt-5.6-luna",
+    "reasoning_policy": "explicit",
+    "reasoning": "high",
+}
 
 
 TOOL_CATALOG: dict[str, dict[str, Any]] = {
@@ -162,18 +171,128 @@ def project_root(state: Mapping[str, Any]) -> str | None:
     return _string(first, "path")
 
 
-def project_id(state: Mapping[str, Any]) -> str | None:
-    raw = mapping_from(state)
-    repo = raw.get("repository", {})
-    roots = repo.get("roots", []) if isinstance(repo, Mapping) else []
-    first = roots[0] if roots and isinstance(roots[0], Mapping) else {}
-    caps = raw.get("capabilities", {})
-    caps = caps if isinstance(caps, Mapping) else {}
-    for candidate in (caps.get("project_id"), caps.get("projectId"), repo.get("project_id") if isinstance(repo, Mapping) else None, first.get("project_id"), first.get("projectId")):
-        value = _text(candidate)
-        if value:
-            return value
+def _project_resolution_layers(value: Any) -> list[Mapping[str, Any]]:
+    """Return receipt layers without treating requested identity as observed."""
+
+    raw = mapping_from(value)
+    layers: list[Mapping[str, Any]] = []
+    pending: list[Mapping[str, Any]] = [raw]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        layers.append(current)
+        for key in ("receipt", "payload", "result", "project_resolution", "projectResolution"):
+            nested = current.get(key)
+            if isinstance(nested, Mapping):
+                pending.append(nested)
+    return layers
+
+
+def _project_candidate_matches_root(candidate: Mapping[str, Any], root: str | None) -> bool:
+    if not root:
+        return False
+    environment = _first(candidate, "environment", "worktree_environment", "worktreeEnvironment")
+    values = [
+        _first(candidate, "root", "path", "directory", "directoryName"),
+        _first(environment, "root", "path", "directory", "directoryName") if isinstance(environment, Mapping) else None,
+    ]
+    return any(isinstance(item, str) and item == root for item in values)
+
+
+def project_resolution_from_receipt(
+    receipt: Any, *, project_root: str | None = None
+) -> dict[str, Any] | None:
+    """Extract project identity only from an explicit host resolution receipt."""
+
+    layers = _project_resolution_layers(receipt)
+    for layer in layers:
+        explicit_id = _string(layer, "project_id", "projectId")
+        candidates: list[Mapping[str, Any]] = []
+        for key in ("project", "selected_project", "selectedProject", "resolved_project", "resolvedProject"):
+            nested = layer.get(key)
+            if isinstance(nested, Mapping):
+                candidates.append(nested)
+        projects = layer.get("projects")
+        if isinstance(projects, Sequence) and not isinstance(projects, (str, bytes)):
+            candidates.extend(item for item in projects if isinstance(item, Mapping))
+        if explicit_id:
+            candidates.insert(0, layer)
+        selected: Mapping[str, Any] | None = None
+        for candidate in candidates:
+            candidate_id = _string(candidate, "project_id", "projectId", "id")
+            if explicit_id and candidate_id == explicit_id:
+                selected = candidate
+                break
+            if project_root and _project_candidate_matches_root(candidate, project_root):
+                selected = candidate
+                break
+        if selected is None and candidates:
+            if len(candidates) == 1:
+                selected = candidates[0]
+            elif explicit_id:
+                selected = layer
+        project_id_value = explicit_id or (_string(selected or {}, "project_id", "projectId", "id"))
+        if not project_id_value:
+            continue
+        source_environment = _first(
+            selected or layer,
+            "environment",
+            "worktree_environment",
+            "worktreeEnvironment",
+        )
+        environment = dict(source_environment) if isinstance(source_environment, Mapping) else {}
+        if not environment:
+            for key in ("path", "directory", "directoryName", "branch", "base_commit", "baseCommit"):
+                value = _first(selected or layer, key)
+                if value is not None:
+                    environment[key] = value
+        environment.setdefault("type", "worktree")
+        return {
+            "projectId": project_id_value,
+            "project_id": project_id_value,
+            "environment": environment,
+            "receipt_id": _string(layer, "receipt_id", "receiptId"),
+            "source": "project-resolution-receipt",
+        }
     return None
+
+
+def _project_resolution(state: Mapping[str, Any]) -> dict[str, Any] | None:
+    raw = mapping_from(state)
+    root = project_root(raw)
+    repository = raw.get("repository") if isinstance(raw.get("repository"), Mapping) else {}
+    capabilities = raw.get("capabilities") if isinstance(raw.get("capabilities"), Mapping) else {}
+    sources = (
+        raw.get("project_resolution"),
+        raw.get("projectResolution"),
+        raw.get("project_resolution_receipt"),
+        raw.get("projectResolutionReceipt"),
+        repository.get("project_resolution"),
+        repository.get("project_resolution_receipt"),
+        capabilities.get("project_resolution"),
+        capabilities.get("project_resolution_receipt"),
+    )
+    for source in sources:
+        if isinstance(source, Mapping):
+            resolved = project_resolution_from_receipt(source, project_root=root)
+            if resolved:
+                return resolved
+    return None
+
+
+def project_id(state: Mapping[str, Any]) -> str | None:
+    resolved = _project_resolution(state)
+    return _string(resolved or {}, "project_id", "projectId")
+
+
+def project_environment(state: Mapping[str, Any]) -> dict[str, Any] | None:
+    resolved = _project_resolution(state)
+    environment = resolved.get("environment") if isinstance(resolved, Mapping) else None
+    return dict(environment) if isinstance(environment, Mapping) else None
 
 
 def default_repository_identity(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -181,7 +300,13 @@ def default_repository_identity(state: Mapping[str, Any]) -> dict[str, Any]:
     repository = raw.get("repository", {})
     roots = repository.get("roots", []) if isinstance(repository, Mapping) else []
     root = roots[0] if roots and isinstance(roots[0], Mapping) else {}
-    return {"root": root.get("path"), "branch": root.get("branch"), "head": root.get("head")}
+    return {
+        "root": root.get("path"),
+        "branch": root.get("branch"),
+        "head": root.get("head"),
+        "projectId": project_id(raw),
+        "environment": project_environment(raw),
+    }
 
 
 def default_worktree_identity(
@@ -224,19 +349,103 @@ def control_target(state: Mapping[str, Any], role: str) -> dict[str, Any]:
     return {"type": "projectless", "directoryName": _safe_name(f"allinluna-{role}-{raw.get('run_id', 'run')}")}
 
 
+def projectless_target(state: Mapping[str, Any], task_id: str | None = None) -> dict[str, Any]:
+    raw = mapping_from(state)
+    suffix = task_id or raw.get("run_id", "run")
+    return {"type": "projectless", "directoryName": _safe_name(f"allinluna-task-{suffix}")}
+
+
+def target_for_task(state: Mapping[str, Any], task_id: str | None = None) -> dict[str, Any] | None:
+    raw = mapping_from(state)
+    repository = raw.get("repository") if isinstance(raw.get("repository"), Mapping) else {}
+    task = {}
+    tasks = raw.get("tasks")
+    if task_id and isinstance(tasks, Mapping) and isinstance(tasks.get(task_id), Mapping):
+        task = dict(tasks[task_id])
+    mode = str(
+        task.get("repository_mode")
+        or task.get("project_mode")
+        or repository.get("mode")
+        or raw.get("repository_mode")
+        or ("projectless" if not repository else "")
+    ).strip().lower()
+    if task.get("projectless") is True or mode == "projectless":
+        return projectless_target(raw, task_id)
+    resolved = _project_resolution(raw)
+    if not resolved:
+        return None
+    environment = dict(resolved.get("environment") or {"type": "worktree"})
+    environment.setdefault("type", "worktree")
+    return {"type": "project", "projectId": resolved["projectId"], "environment": environment}
+
+
 def owner_target(state: Mapping[str, Any]) -> dict[str, Any] | None:
-    resolved = project_id(state)
-    return {"type": "project", "projectId": resolved, "environment": {"type": "worktree"}} if resolved else None
+    return target_for_task(state)
 
 
-def project_resolution_action(state: Mapping[str, Any]) -> dict[str, Any]:
+def project_resolution_action(state: Mapping[str, Any], task_id: str | None = None) -> dict[str, Any]:
+    raw = mapping_from(state)
+    run_id = str(raw.get("run_id") or "run")
+    dispatch = "resolve-project-" + stable_digest({"run_id": run_id, "task_id": task_id, "root": project_root(raw)})
+    action_id = "action-" + stable_digest({"kind": "resolve-project", "dispatch": dispatch})
     return {
         "kind": "resolve-project",
         "tool": LIST_PROJECTS_TOOL,
+        "arguments": {},
+        "action_id": action_id,
+        "idempotency_key": "intent:" + dispatch,
+        "dispatch_id": dispatch,
+        "execution_class": "direct",
+        "identity": {"run_id": run_id, "task_id": task_id},
+        "payload": {
+            "resolution": "project",
+            "task_id": task_id,
+            "project_root": project_root(raw),
+            "executable": True,
+        },
         "project_root": project_root(state),
         "receipt_required": True,
         "expected_receipt": HOST_RECEIPT_PROTOCOL,
         "runtime_evidence": tool_capability_evidence(state, LIST_PROJECTS_TOOL),
+    }
+
+
+def resource_route_resolution_action(
+    state: Mapping[str, Any], *, task_id: str, requested: Mapping[str, Any], resolved: Mapping[str, Any],
+) -> dict[str, Any]:
+    raw = mapping_from(state)
+    run_id = str(raw.get("run_id") or "run")
+    dispatch = "resolve-resource-route-" + stable_digest({
+        "run_id": run_id, "task_id": task_id, "requested": requested, "resolved": resolved,
+    })
+    return {
+        "kind": "resolve-resource-route",
+        "tool": None,
+        "arguments": {
+            "operation": "create-top-level-task",
+            "task_id": task_id,
+            "requested": deepcopy(dict(requested)),
+            "resolved": deepcopy(dict(resolved)),
+        },
+        "action_id": "action-" + stable_digest({"kind": "resolve-resource-route", "dispatch": dispatch}),
+        "idempotency_key": "intent:" + dispatch,
+        "dispatch_id": dispatch,
+        "execution_class": "direct",
+        "identity": {"run_id": run_id, "task_id": task_id},
+        "payload": {
+            "task_id": task_id,
+            "resolution": "resource-route",
+            "executable": False,
+            "reason": "model-unresolved",
+            "resource_receipt": {"requested": deepcopy(dict(requested)), "resolved": deepcopy(dict(resolved))},
+        },
+        "expected_receipt": HOST_RECEIPT_PROTOCOL,
+        "runtime_evidence": {
+            "requested": {"operation": "create-top-level-task", "task_id": task_id},
+            "resolved": None,
+            "actual": None,
+            "fallback": "model-unresolved-after-host-route-resolution",
+        },
     }
 
 
@@ -378,7 +587,14 @@ def normalize_thread_receipt(payload: Mapping[str, Any], *, capability_receipt: 
     source = _string(raw, "source") or CODEX_APP_SOURCE
     if source != CODEX_APP_SOURCE and raw.get("is_real_codex_app") is not False:
         raise ValueError(f"create_thread receipt source must be {CODEX_APP_SOURCE!r}: {source!r}")
-    actual_tool = _string(raw, "actual_tool", "actualTool") or CREATE_THREAD_TOOL
+    actual_tool = _string(raw, "actual_tool", "actualTool")
+    actual_capability = _string(raw, "actual_capability", "actualCapability")
+    action_contract_hash = _string(raw, "action_contract_hash", "actionContractHash")
+    if not actual_tool or not actual_capability or not action_contract_hash:
+        raise ValueError(
+            "external create_thread receipts must explicitly provide "
+            "actual_tool, actual_capability, and action_contract_hash"
+        )
     if actual_tool != CREATE_THREAD_TOOL:
         raise ValueError(f"create_thread receipt actual_tool must be {CREATE_THREAD_TOOL!r}")
     host_id = _string(raw, "host_id", "hostId")
@@ -402,7 +618,7 @@ def normalize_thread_receipt(payload: Mapping[str, Any], *, capability_receipt: 
         "fallback": fallback,
     }
     result = dict(raw)
-    result.update({"source": source, "actual_tool": actual_tool, "output_dir": output_dir, "actual": actual, "capability": deepcopy(dict(capability)), "capability_evidence": deepcopy(dict(capability)), "runtime_evidence": {"source": source, "actual_tool": actual_tool, "requested": capability.get("requested"), "resolved": capability.get("resolved"), "actual": actual, "fallback": capability.get("fallback"), "capability": deepcopy(dict(capability))}})
+    result.update({"source": source, "actual_tool": actual_tool, "actual_capability": actual_capability, "action_contract_hash": action_contract_hash, "output_dir": output_dir, "actual": actual, "capability": deepcopy(dict(capability)), "capability_evidence": deepcopy(dict(capability)), "runtime_evidence": {"source": source, "actual_tool": actual_tool, "actual_capability": actual_capability, "action_contract_hash": action_contract_hash, "requested": capability.get("requested"), "resolved": capability.get("resolved"), "actual": actual, "fallback": capability.get("fallback"), "capability": deepcopy(dict(capability))}})
     result.update({"kind": "thread-receipt" if thread else "dispatch-receipt", "status": "ready" if thread else "pending"})
     if thread:
         result.update({"thread_id": thread, "host_id": host_id, "dispatch_id": _string(raw, "dispatch_id", "dispatchId")})
@@ -689,5 +905,5 @@ CodexAppHostAdapter = CodexAppHost
 
 __all__ = [
     "CANCEL_THREAD_TOOL", "CODEX_APP_SOURCE", "CREATE_THREAD_TOOL", "LIST_PROJECTS_TOOL", "LIST_THREADS_TOOL", "READ_THREAD_TOOL", "SEND_MESSAGE_TOOL", "WAIT_THREADS_TOOL", "TOOL_CATALOG",
-    "CodexAppHost", "CodexAppHostAdapter", "HostAdapterAPI", "await_dispatch_receipt", "control_target", "create_thread_action", "declared_tools", "default_repository_identity", "default_worktree_identity", "dispatch_id", "dispatch_identity", "dispatch_intent", "monitoring_action", "normalize_thread_receipt", "owner_target", "project_id", "project_resolution_action", "project_root", "send_message_action", "stable_dispatch_key", "tool_capability_evidence",
+    "CodexAppHost", "CodexAppHostAdapter", "HostAdapterAPI", "LEGACY_DEFAULT_RESOURCE_POLICY", "await_dispatch_receipt", "control_target", "create_thread_action", "declared_tools", "default_repository_identity", "default_worktree_identity", "dispatch_id", "dispatch_identity", "dispatch_intent", "monitoring_action", "normalize_thread_receipt", "owner_target", "project_environment", "project_id", "project_resolution_action", "project_resolution_from_receipt", "project_root", "projectless_target", "resource_route_resolution_action", "send_message_action", "stable_dispatch_key", "target_for_task", "tool_capability_evidence",
 ]

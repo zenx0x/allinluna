@@ -31,7 +31,9 @@ EXACT_ACTION_RELAY_CONTRACT: Mapping[str, Any] = {
         "Never translate, approximate, or substitute a host tool.",
         "A top_level_task never falls back to a subagent, current thread, or direct execution.",
         "Ingest the raw receipt immediately, then tick again.",
-        "If the exact capability is unavailable, return HOST_CAPABILITY_BLOCKED.",
+        "If no HostAdapter is bound, return ACTION_RELAY_REQUIRED and preserve the exact action for Desktop relay.",
+        "Only capability discovery that confirms the exact tool is absent may return HOST_CAPABILITY_BLOCKED.",
+        "A top-level receipt must explicitly provide actual_tool, actual_capability, and action_contract_hash; never infer them from the requested action.",
     ),
 }
 
@@ -88,7 +90,7 @@ class SinglePublicSkillAPI:
     """Public API for one Skill and all supported input forms."""
 
     id = "allinluna"
-    version = "1.1.1"
+    version = "2.0.0-rc.1"
 
     def __init__(
         self,

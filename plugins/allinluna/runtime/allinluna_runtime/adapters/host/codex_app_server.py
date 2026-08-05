@@ -205,6 +205,12 @@ def assemble_app_server_receipt(
         raise AppServerProtocolError(
             "thread/start export must be emitted by the Codex Desktop create_thread host"
         )
+    actual_capability = _text(export, "actual_capability", "actualCapability")
+    action_contract_hash = _text(export, "action_contract_hash", "actionContractHash")
+    if not actual_capability or not action_contract_hash:
+        raise AppServerProtocolError(
+            "Desktop receipt must explicitly provide actual_capability and action_contract_hash"
+        )
     start = _unwrap(export)
     if isinstance(start.get("error"), Mapping) or "error" in start:
         raise AppServerProtocolError(f"thread/start failed: {start.get('error')}")
@@ -280,6 +286,8 @@ def assemble_app_server_receipt(
         "host_id": host_id,
         "source": DESKTOP_SOURCE,
         "actual_tool": DESKTOP_TOOL,
+        "actual_capability": actual_capability,
+        "action_contract_hash": action_contract_hash,
         "status": "completed" if actual_resolved else "active",
         "actual": {**resolved, "tool": THREAD_START_METHOD} if actual_resolved else False,
         "resource_receipt": resource_receipt,

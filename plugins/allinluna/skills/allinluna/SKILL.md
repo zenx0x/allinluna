@@ -4,35 +4,34 @@ description: Compile and execute a goal, existing plan, active run, or Research 
 ---
 
 # All in Luna
-
 All in Luna is one public entry point. Accept one of these inputs:
 
 - an idea or one-sentence goal;
 - an existing plan;
 - an active run or legacy run snapshot;
 - a Research Routes packet.
-
 Compile the input to a typed `RunIntent`, select a registered Workflow Pack,
 and compile its `TaskGraph` containing contracts, dependencies, ownership,
 done-when conditions, WorkGraph templates, and resource defaults. Then call the
 vNext runtime/CLI to persist the graph, release ready Lanes, ingest real host
 receipts, and continue until the root result is complete or a concrete blocker
 is returned.
-
 ## Highest-priority exact Action Relay
-
 When the runtime emits a `HostAction`, `HostAction.tool` is an opcode:
 
 1. Invoke that exact tool with `HostAction.arguments`.
 2. Never translate, approximate, or substitute another capability.
 3. A `top_level_task` may never fall back to a subagent, the current thread, or direct execution.
 4. Ingest the raw receipt immediately, then tick again.
-5. If the exact tool/capability is unavailable, return `HOST_CAPABILITY_BLOCKED`.
+5. If no `HostAdapter` is bound, return `ACTION_RELAY_REQUIRED` and preserve
+   the exact action for the Desktop relay.
+6. Return `HOST_CAPABILITY_BLOCKED` only after capability discovery confirms
+   that the exact tool is absent.
 
-The receipt must preserve the action's `action_contract_hash`, `actual_tool`,
-and `actual_capability`. A wrong actual tool is `HOST_PROTOCOL_VIOLATION`, not
+The receipt must explicitly provide the action's `action_contract_hash`,
+`actual_tool`, and `actual_capability`; never infer observed fields from the
+requested action. A wrong actual tool is `HOST_PROTOCOL_VIOLATION`, not
 evidence that a Task started.
-
 ## Lane bootstrap and persistent drivers
 
 Every public `codex_app__create_thread` dispatch embeds a complete
@@ -42,14 +41,12 @@ runtime SQLite path, Contract/Context/WorkGraph references, workspace,
 allowed local capabilities, forbidden global capabilities, and the required
 `lane-handoff/v1` response. A child Lane must reopen that same Store and load
 these objects itself; its prompt is never only a natural-language outcome.
-
 `CoordinatorDriver` is the durable outer loop: schedule exact actions, ingest
 receipts, wait/read top-level threads, ingest typed Lane handoffs, reconcile,
 and immediately release newly-ready Tasks. `LaneDriver` performs the matching
 local WorkGraph loop, including snapshots, dynamic local expansion, worker
 handoffs, same-worker corrections, and lane handoff synthesis. A wave is only
 a UI grouping: dependency-ready work is released immediately.
-
 ## Runtime shape
 
 ```text
@@ -59,12 +56,10 @@ Conversation
             -> bounded recursive WorkUnits
                  -> tools / skills / plugins / MCP
 ```
-
 Keep raw tool output in the Artifact Store. Pass typed contracts, artifact
 references, context slices, receipts, and handoffs upward. A child WorkUnit
 must narrow its parent scope, authority, ownership, and resource envelope; a
 cross-Lane request becomes a promotion request.
-
 ## Input and Pack routing
 
 Use `SinglePublicSkillAPI.compile()` or `allinluna start`:
@@ -84,21 +79,26 @@ failure recovery. Do not add GSD phases to Core.
 ## Resources and permissions
 
 Model and reasoning choices come from the Run resource envelope and may be
-overridden by a narrower Task or WorkUnit resource envelope. They are not hard
-locked: callers may select Luna at medium/high/xhigh/max, Codex Spark, or another
-host-supported model. Preserve requested, resolved, and actual values
+overridden by a narrower Task or WorkUnit resource envelope. The allowed
+deployment envelope is Luna-class models, normally at medium/high/xhigh
+reasoning, with max reserved for critical work, plus
+`gpt-5.3-codex-spark` outside Luna. Core does not hardcode a concrete model
+route. Preserve requested, resolved, and actual values
 separately. If the host cannot provide an actual model receipt, record
 `actual: null` and `actual_state: unresolved`; never claim a fallback or
 fabricate a receipt. A narrower scope may change compute resources but may not
 expand permissions or ownership.
 Host resource-route telemetry is optional adapter diagnostics, not an execution
-or result-completion requirement. Without explicit model and reasoning
-telemetry, record `actual: null` and `actual_state: unresolved` while retaining
+or result-completion requirement. A host route must resolve the required
+`model` before an executable `codex_app__create_thread` action is frozen; an
+unresolved route emits a non-executable resolution action. Without explicit
+model and reasoning telemetry, record `actual: null` and `actual_state: unresolved` while retaining
 the independent requested and resolved values. The persisted receipt exposes
 `resource_receipt.requested`, `resolved`, `actual`, and `actual_state`. When
 actual evidence is available, the adapter compares requested values with the
 persisted dispatch action and requires actual to match the reported resolved
-route; a receipt must never establish its own verification baseline.
+route; a receipt must never establish its own verification baseline. A route is
+not hard-locked unless policy says so; a locked route must match its receipt.
 
 Request permissions just in time at the action boundary. Read-only compilation
 does not request credentials, publication, deployment, push, destructive work,

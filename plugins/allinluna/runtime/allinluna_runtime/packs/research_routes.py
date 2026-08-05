@@ -12,7 +12,7 @@ from .base import CompiledRunGraph, PackManifest, contract_for, task_for
 
 class ResearchRoutesBridge:
     id = "research-routes-bridge"
-    version = "1.0.0"
+    version = "0.3.0-rc.1"
     manifest = PackManifest(
         pack_id=id,
         version=version,

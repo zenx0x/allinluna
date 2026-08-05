@@ -28,6 +28,8 @@ def desktop_start(result: dict) -> dict:
     return {
         "source": "codex_app",
         "actual_tool": "codex_app__create_thread",
+        "actual_capability": "codex_app__create_thread",
+        "action_contract_hash": "external-desktop-contract",
         "event_origin": "codex_desktop",
         "result": result,
     }

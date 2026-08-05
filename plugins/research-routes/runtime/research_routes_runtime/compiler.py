@@ -139,7 +139,7 @@ class ResearchPackCompiler:
     """Compile a route packet into isolated, validated Research Pack state."""
 
     id = PACK_ID
-    version = "1.0.0"
+    version = "0.3.0-rc.1"
     schema_version = SCHEMA_VERSION
 
     def compile_goal(self, packet: Mapping[str, Any] | str | Path) -> ResearchPack:

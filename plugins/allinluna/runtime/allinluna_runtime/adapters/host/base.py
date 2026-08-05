@@ -338,6 +338,18 @@ class HostAction(_MappingRecord):
             if required != tool:
                 raise ValueError("top_level_task required capability must equal its exact tool")
             object.__setattr__(self, "host_capability_required", required)
+            arguments = self.arguments if isinstance(self.arguments, Mapping) else {}
+            missing = [
+                name for name in ("target", "prompt", "model", "title")
+                if name not in arguments
+            ]
+            if missing:
+                raise ValueError(
+                    "top_level_task actions require host arguments: "
+                    + ", ".join(missing)
+                )
+            if not isinstance(arguments.get("model"), str) or not arguments["model"].strip():
+                raise ValueError("top_level_task model must be a non-empty host model identifier")
         object.__setattr__(self, "tool_policy", normalized_policy)
 
         task_envelope_ref = _text(self.task_envelope_ref)
@@ -463,11 +475,12 @@ class HostReceipt(_MappingRecord):
     base_commit: str | None = None
 
     def __post_init__(self) -> None:
-        action = HostAction.from_value(self.action) if isinstance(self.action, Mapping) else None
-        if _text(self.action_contract_hash) is None and action is not None:
-            object.__setattr__(self, "action_contract_hash", action.action_contract_hash)
-        if _text(self.actual_capability) is None and _text(self.actual_tool) is not None:
-            object.__setattr__(self, "actual_capability", self.actual_tool)
+        # Requested action data and observed host identity are different trust
+        # domains.  In particular, do not derive actual_tool,
+        # actual_capability, or action_contract_hash from ``self.action`` here.
+        # A directly-called trusted HostAdapter may sign those fields before
+        # constructing this record; external ingest must provide them.
+        return None
 
     @property
     def is_active_identity(self) -> bool:
@@ -602,17 +615,18 @@ class HostReceipt(_MappingRecord):
         )
         reported_actual_tool = (
             first_text(raw, "actual_tool", "actualTool")
-            or first_text(actual_payload, "actual_tool", "actualTool", "tool")
-            or first_text(runtime, "actual_tool", "actualTool", "tool")
+            or first_text(actual_payload, "actual_tool", "actualTool")
+            or first_text(runtime, "actual_tool", "actualTool")
         )
         reported_actual_capability = (
             first_text(raw, "actual_capability", "actualCapability")
-            or first_text(actual_payload, "actual_capability", "actualCapability", "capability")
-            or reported_actual_tool
+            or first_text(actual_payload, "actual_capability", "actualCapability")
+            or first_text(runtime, "actual_capability", "actualCapability")
         )
         reported_action_contract_hash = (
             first_text(raw, "action_contract_hash", "actionContractHash")
-            or (action_obj.action_contract_hash if action_obj is not None else None)
+            or first_text(actual_payload, "action_contract_hash", "actionContractHash")
+            or first_text(runtime, "action_contract_hash", "actionContractHash")
         )
         effective_resolved = reported_resolved or baseline_resolved
         verified_model_receipt = bool(

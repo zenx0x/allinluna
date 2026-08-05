@@ -199,6 +199,11 @@ def test_adapter_receipt_is_real_and_wait_fallback_is_evidenced(vnext_module, fa
         "action_id": "action-1",
         "idempotency_key": "dispatch-1",
         "task_id": "T1",
+        "dispatch_id": "dispatch-1",
+        "target": {"type": "projectless", "directoryName": "adapter-test"},
+        "prompt": "adapter test",
+        "model": "gpt-5.6-luna",
+        "title": "adapter test",
     }
     receipt = invoke(adapter, "create_top_level_task", action)
     assert receipt["actual"] is True

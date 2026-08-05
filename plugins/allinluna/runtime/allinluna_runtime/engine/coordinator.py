@@ -6,10 +6,12 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
 from ..resource import ResourceBroker
 from ..scheduler.global_scheduler import GlobalScheduler
+from ..adapters.host.codex_app import project_resolution_from_receipt, project_root
 from .action_bridge import ActionBridge
 
 
@@ -82,6 +84,12 @@ class CoordinatorEngine:
         with self.store.transaction():
             policy = dict(value.get("resource_envelope", value.get("policy", {})) or {})
             repository = value.get("repository") if isinstance(value.get("repository"), Mapping) else {}
+            if repository:
+                # Project identity is a repository/run input, not a Task or
+                # host action identity.  Persist the declared repository so a
+                # later host resolution receipt can be applied to the same
+                # run after a restart.
+                policy["repository"] = deepcopy(dict(repository))
             if repository.get("mode"):
                 policy.setdefault("repository_mode", str(repository["mode"]))
             if value.get("evidence_profile"):
@@ -180,6 +188,41 @@ class CoordinatorEngine:
         self.resource_broker.recover()
         return self.status(run_id)
 
+    def _apply_project_resolution(self, run_id: str, value: Any) -> dict[str, Any] | None:
+        """Persist an explicit host project-resolution receipt for a Run."""
+
+        run = self.store.get_run(run_id)
+        if run is None:
+            return None
+        policy = dict(run.get("policy") or {})
+        repository = policy.get("repository") if isinstance(policy.get("repository"), Mapping) else {}
+        root = project_root({"repository": repository})
+        candidates: list[Any] = [value]
+        if isinstance(value, Mapping):
+            candidates.extend(value.get(key) for key in ("receipt", "ingestion", "payload", "host_receipt"))
+        resolution = None
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            resolution = project_resolution_from_receipt(candidate, project_root=root)
+            if resolution:
+                break
+        if resolution is None:
+            return None
+        policy["project_resolution"] = resolution
+        policy["project_resolution_receipt"] = {
+            "receipt_id": resolution.get("receipt_id"),
+            "projectId": resolution.get("projectId"),
+            "environment": deepcopy(resolution.get("environment") or {}),
+            "source": resolution.get("source"),
+        }
+        with self.store.transaction():
+            self.store._execute(
+                "UPDATE runs SET policy_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+                (json.dumps(policy, sort_keys=True), _now(), run_id),
+            )
+        return resolution
+
     def tick(self, run_id: str, *, dispatch: bool = True) -> CoordinatorTick:
         run = self.store.get_run(run_id)
         if run is None:
@@ -206,11 +249,20 @@ class CoordinatorEngine:
                     # evidence together; callers must not mistake the action
                     # envelope for host evidence.
                     receipts.append(dict(result))
+                    if action.kind == "resolve-project":
+                        self._apply_project_resolution(run_id, result)
         self._complete_run_if_ready(run_id)
         return CoordinatorTick(run_id, tuple(action.to_dict() for action in actions), tuple(receipts), self.status(run_id))
 
-    def ingest_receipt(self, receipt: Any) -> dict[str, Any]:
+    def ingest_receipt(self, receipt: Any, *, run_id: str | None = None) -> dict[str, Any]:
         result = self.bridge.ingest_receipt(receipt)
+        raw = _raw(receipt)
+        resolved_run_id = run_id or str(raw.get("run_id") or "")
+        if not resolved_run_id and isinstance(raw.get("identity"), Mapping):
+            resolved_run_id = str(raw["identity"].get("run_id") or "")
+        action_kind = str(raw.get("action_kind") or raw.get("kind") or "")
+        if action_kind == "resolve-project" and resolved_run_id:
+            self._apply_project_resolution(resolved_run_id, result or raw)
         return result
 
     def ingest_handoff(self, task_id: str, handoff: Mapping[str, Any]) -> dict[str, Any]:

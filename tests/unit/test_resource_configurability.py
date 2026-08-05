@@ -19,8 +19,22 @@ def test_resource_broker_accepts_configured_models_and_reasoning(vnext_module, r
     assert receipt.requested == {"model": "custom-model", "reasoning": reasoning}
     assert receipt.resolved["model"] == "custom-model"
     assert receipt.resolved["reasoning"] == reasoning
-    assert receipt.actual == {"model": "custom-model", "reasoning": reasoning}
-    assert receipt.actual_state == "resolved"
+    # A policy resolver has no host authority.  Supplying route-shaped data
+    # without a source/timestamp must not turn it into an observed actual.
+    assert receipt.actual is None
+    assert receipt.actual_state == "unresolved"
+    observed = broker.observe_receipt(
+        {
+            "requested": {"model": "custom-model", "reasoning": reasoning},
+            "resolved": {"model": "custom-model", "reasoning": reasoning},
+            "actual": {"model": "custom-model", "reasoning": reasoning},
+            "actual_state": "resolved",
+            "evidence_source": "host-runtime",
+            "observed_at": "2026-08-05T12:00:00Z",
+        }
+    )
+    assert observed.actual == {"model": "custom-model", "reasoning": reasoning}
+    assert observed.actual_state == "resolved"
 
 
 def test_resource_broker_rejects_only_empty_resource_identifiers(vnext_module):

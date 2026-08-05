@@ -176,10 +176,10 @@ class GlobalScheduler:
         graph = self._compat_graph
         if graph is None or str(graph.run_id) != str(self._compat_run_id):
             return
-        task = graph.tasks.get(str(task_id))
+        task = graph.task_nodes.get(str(task_id))
         if task is None:
             return
-        contract = graph.contracts.get(str(task.contract_ref))
+        contract = graph.contract_nodes.get(str(task.contract_ref))
         if contract is None:
             return
         known = {str(item.name) for item in contract.exports}
@@ -195,7 +195,7 @@ class GlobalScheduler:
         graph = self._compat_graph
         if graph is None or str(graph.run_id) != str(self._compat_run_id):
             return
-        task = graph.tasks.get(str(task_id))
+        task = graph.task_nodes.get(str(task_id))
         stored = self.store.get_task(str(task_id))
         if task is not None and stored is not None:
             task.state = TaskState(str(stored["state"]))
@@ -213,8 +213,8 @@ class GlobalScheduler:
         graph.validate()
         canonical = graph.to_dict()
         run_id = str(canonical["run_id"])
-        tasks = graph.tasks
-        contracts = graph.contracts
+        tasks = graph.task_nodes
+        contracts = graph.contract_nodes
         ownership = graph.ownership
 
         if self.store.get_run(run_id) is None:

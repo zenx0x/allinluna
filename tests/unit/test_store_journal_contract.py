@@ -44,8 +44,8 @@ def test_schema_migration_and_status_projection(vnext_module, tmp_path):
     assert invoke(store, "schema_version") >= 1
     invoke(store, "create_run", "run-status", "projection")
     status = invoke(store, "export_status", "run-status")
-    assert status["run"]["id"] == "run-status"
-    assert status["source"] == "runtime.db"
+    assert status["run_ref"] == "run://run-status"
+    assert status["projection_source"] == "runtime.db"
 
 
 def test_migrations_are_versioned_and_forward_only(vnext_module, tmp_path):

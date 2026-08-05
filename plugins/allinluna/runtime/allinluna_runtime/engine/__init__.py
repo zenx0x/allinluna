@@ -3,7 +3,6 @@
 from .action_bridge import ActionBridge, ActionBridgeAPI
 from .coordinator import CoordinatorEngine, CoordinatorEngineAPI, CoordinatorTick
 from .lane import LaneEngine, LaneEngineAPI
-from .evidence import EvidenceCollector, EvidenceProfile
 
 __all__ = [
     "ActionBridge",
@@ -13,6 +12,4 @@ __all__ = [
     "CoordinatorTick",
     "LaneEngine",
     "LaneEngineAPI",
-    "EvidenceCollector",
-    "EvidenceProfile",
 ]

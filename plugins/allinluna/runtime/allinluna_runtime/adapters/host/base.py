@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, HOST_RECEIPT_PROTOCOL
+from ...resource_observation import ResourceObservation
 
 
 DEFAULT_MODEL = "gpt-5.6-luna"
@@ -471,19 +472,15 @@ class HostReceipt(_MappingRecord):
             model_receipt = "unresolved"
         else:
             model_receipt = reported_model_receipt
-        canonical_resource_receipt = {
-            "requested": _copy(baseline_requested or {"model": None, "reasoning": None}),
-            "resolved": _copy(effective_resolved or {"model": None, "reasoning": None}),
-            "actual": (
-                {"model": actual_model, "reasoning": actual_reasoning}
-                if verified_model_receipt else None
-            ),
-            "actual_state": "resolved" if verified_model_receipt else "unresolved",
-            "evidence_source": evidence_source if verified_model_receipt else None,
-            "observed_at": observed_at if verified_model_receipt else None,
-        }
-        if isinstance(diagnostics, Mapping):
-            canonical_resource_receipt["diagnostics"] = _copy(diagnostics)
+        canonical_resource_receipt = ResourceObservation(
+            requested=baseline_requested or {"model": None, "reasoning": None},
+            resolved=effective_resolved or {"model": None, "reasoning": None},
+            actual={"model": actual_model, "reasoning": actual_reasoning} if verified_model_receipt else None,
+            actual_state="resolved" if verified_model_receipt else "unresolved",
+            evidence_source=evidence_source if verified_model_receipt else None,
+            observed_at=observed_at if verified_model_receipt else None,
+            diagnostics=diagnostics if isinstance(diagnostics, Mapping) else None,
+        ).to_dict()
         return cls(
             receipt_id=receipt_id,
             status=status,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 
 import pytest
 
@@ -64,6 +65,45 @@ def test_evidence_collector_exposes_pack_profiles_and_real_check_receipt(tmp_pat
         assert evidence["checks"][0]["source"] == "allinluna.check-runner"
         assert evidence["workspace_evidence"]["status"] == "not-applicable"
         EvidenceCollector(store, artifact_store=artifacts).verify(store.get_task("task-collector") or {}, evidence)
+
+
+def test_check_timeout_is_explicit_failure_evidence_not_a_hanging_or_passing_check(tmp_path):
+    with Store(tmp_path / "runtime.db") as store:
+        store.create_run("run-timeout", "timeout", {"workflow_pack": "delivery"}, "contract://root@1")
+        store.create_task({"id": "task-timeout", "run_id": "run-timeout", "outcome": "work", "done_when": ["quick check"]})
+        artifacts = ArtifactStore(store, root=tmp_path / "artifacts")
+        evidence = EvidenceCollector(
+            store, artifact_store=artifacts, check_runner=CheckRunner(artifacts), profile="projectless-analysis"
+        ).collect(
+            store.get_task("task-timeout") or {},
+            checks=[{
+                "name": "quick check", "command": [sys.executable, "-c", "import time; time.sleep(1)"],
+                "timeout_seconds": 0.02, "satisfies": ["quick check"],
+            }],
+        )
+    receipt = evidence["checks"][0]
+    assert receipt["status"] == "timeout"
+    assert receipt["details"]["error_code"] == "timeout"
+    assert receipt["stderr_artifact_ref"]
+    assert evidence["verified"] is False
+
+
+def test_callable_that_ignores_timeout_is_rejected_without_running(tmp_path):
+    called = False
+
+    def ignores_timeout(*, timeout_seconds):
+        nonlocal called
+        called = True
+        time.sleep(timeout_seconds * 100)
+        return {"status": "pass"}
+
+    started = time.monotonic()
+    receipt = CheckRunner().run({"name": "unsafe", "runner": ignores_timeout, "timeout_seconds": 0.01})
+    assert time.monotonic() - started < 0.5
+    assert called is False
+    assert receipt["status"] == "failed"
+    assert receipt["details"]["error_code"] == "execution-error"
+    assert "direct callable checks are disabled" in receipt["details"]["error"]
 
 
 def test_cli_next_actions_is_pure_scheduler_preview(tmp_path, capsys):

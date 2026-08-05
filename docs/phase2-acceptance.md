@@ -6,6 +6,21 @@ reference, and protocol modules. Host resource-route telemetry is optional
 diagnostics. Its absence leaves the actual resource state unresolved, but does
 not prevent normal execution, handoff, or root-result completion.
 
+## Core Slim boundaries
+
+`TaskGraph` is the sole compiled-graph structure and validation authority; the
+legacy Pack spelling `CompiledRunGraph` is an alias to that same type. The
+runtime root has an explicit export surface. SQLite lifecycle and transactions
+remain in `store.py`; repositories, resource claims, dispatch/receipt storage,
+cross-entity services, observability, and scheduler read models live in their
+respective Store-domain modules. `ResourceObservation` is the sole receipt
+model and normalizes actual to unresolved without explicit host evidence.
+
+Evidence collection is independent from Lane self-reporting. Checks run only
+through the bounded command runner: timeout and execution errors are persisted
+as negative evidence. Raw Python check callables are rejected rather than
+allowed to ignore a cooperative timeout and hang the runtime.
+
 ## Scale report
 
 Measured on Windows with Python 3.11 and a real temporary SQLite database:

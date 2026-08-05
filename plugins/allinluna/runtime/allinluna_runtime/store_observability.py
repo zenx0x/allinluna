@@ -7,17 +7,10 @@ class back into a monolith.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-
-def _loads(value: str | None, default: Any) -> Any:
-    if value is None:
-        return default
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError):
-        return default
+from .resource_observation import ResourceObservation
+from .store_support import _loads
 
 
 class StoreObservability:
@@ -25,7 +18,6 @@ class StoreObservability:
 
     @staticmethod
     def _resource_receipt_from_row(row: dict[str, Any]) -> dict[str, Any]:
-        state = str(row.get("resource_receipt_state") or "unresolved")
         payload = row.get("payload") if isinstance(row.get("payload"), dict) else _loads(row.get("payload_json"), {})
         payload_receipt = payload.get("resource_receipt", {}) if isinstance(payload, dict) else {}
         payload_receipt = payload_receipt if isinstance(payload_receipt, dict) else {}
@@ -41,17 +33,15 @@ class StoreObservability:
             "model": row.get("resolved_model") or payload_resolved.get("model"),
             "reasoning": row.get("resolved_reasoning") or payload_resolved.get("reasoning") or payload_resolved.get("thinking"),
         }
-        model, reasoning = row.get("actual_model"), row.get("actual_reasoning")
-        result = {
-            "requested": requested, "resolved": resolved,
-            "actual": {"model": model, "reasoning": reasoning} if state == "resolved" and model and reasoning else None,
-            "actual_state": state,
-            "evidence_source": row.get("resource_evidence_source"),
-            "observed_at": row.get("resource_observed_at"),
-        }
-        if payload_receipt.get("diagnostics") is not None:
-            result["diagnostics"] = payload_receipt["diagnostics"]
-        return result
+        return ResourceObservation(
+            requested=requested,
+            resolved=resolved,
+            actual={"model": row.get("actual_model"), "reasoning": row.get("actual_reasoning")},
+            actual_state=str(row.get("resource_receipt_state") or "unresolved"),
+            evidence_source=row.get("resource_evidence_source"),
+            observed_at=row.get("resource_observed_at"),
+            diagnostics=payload_receipt.get("diagnostics"),
+        ).to_dict()
 
     def inspect_outbox(self, identity: str) -> dict[str, Any] | None:
         row = self._fetchone(

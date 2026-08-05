@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from .resource_observation import ResourceObservation
+
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING = "high"
 DEFAULT_EXTERNAL_ACTION_POLICY = "deny"
@@ -48,26 +50,6 @@ def _resource_text(value: Any, *, name: str, default: str | None = None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class ResourcePolicyReceipt:
-    """Requested/resolved/actual resource evidence kept as three distinct lanes."""
-
-    requested: Mapping[str, Any]
-    resolved: Mapping[str, Any]
-    actual: Mapping[str, Any] | None = None
-    actual_state: str = "unresolved"
-    reason: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "requested": dict(self.requested),
-            "resolved": dict(self.resolved),
-            "actual": dict(self.actual) if self.actual is not None else None,
-            "actual_state": self.actual_state,
-            "reason": self.reason,
-        }
-
-
-@dataclass(frozen=True, slots=True)
 class SlotAllocation:
     scope: str
     entity_id: str
@@ -75,7 +57,7 @@ class SlotAllocation:
     model: str
     reasoning: str
     external_action_policy: str
-    receipt: ResourcePolicyReceipt
+    receipt: ResourceObservation
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -183,38 +165,29 @@ class ResourceBroker:
         }
         return req, resolved
 
-    def _receipt(self, requested: Mapping[str, Any] | None = None) -> ResourcePolicyReceipt:
+    def _receipt(self, requested: Mapping[str, Any] | None = None) -> ResourceObservation:
         req, resolved = self._resolved_request(requested)
-        return ResourcePolicyReceipt(
-            req, resolved, None, "unresolved", "actual host receipt required"
-        )
+        return ResourceObservation(req, resolved)
 
-    def resolve(self, request: Any = None, *, actual_receipt: Any = None) -> ResourcePolicyReceipt:
+    def resolve(self, request: Any = None, *, actual_receipt: Any = None) -> ResourceObservation:
         raw = _mapping(request) if request is not None else dict(self.requested)
         requested, resolved = self._resolved_request(raw)
-        actual = _mapping(actual_receipt) if actual_receipt is not None else None
-        actual_model = (actual.get("model") or actual.get("actual_model")) if actual else None
-        actual_reasoning = (actual.get("reasoning") or actual.get("thinking")) if actual else None
-        state = (
-            "resolved"
-            if actual_model == resolved["model"] and actual_reasoning == resolved["reasoning"]
-            else "unresolved"
-        )
-        return ResourcePolicyReceipt(
+        raw_actual = _mapping(actual_receipt)
+        return ResourceObservation(
             requested,
             resolved,
-            {"model": actual_model, "reasoning": actual_reasoning} if actual else None,
-            state,
-            (
-                None
-                if state == "resolved"
-                else "actual model/reasoning receipt unavailable or mismatched"
-            ),
+            actual={
+                "model": raw_actual.get("model") or raw_actual.get("actual_model"),
+                "reasoning": raw_actual.get("reasoning") or raw_actual.get("thinking"),
+            } if raw_actual else None,
+            actual_state=str(raw_actual.get("actual_state", "unresolved")),
+            evidence_source=raw_actual.get("evidence_source"),
+            observed_at=raw_actual.get("observed_at"),
         )
 
     def allocate_top_level_slots(self, ready: Sequence[Any]) -> list[SlotAllocation]:
         candidates = list(ready)
-        prepared: list[tuple[str, ResourcePolicyReceipt]] = []
+        prepared: list[tuple[str, ResourceObservation]] = []
         for item in candidates:
             raw = _mapping(item)
             identity = raw.get("id") or raw.get("task_id") or raw.get("entity_id")
@@ -258,7 +231,7 @@ class ResourceBroker:
     def allocate_lane_slots(self, lane_id: str, ready: Sequence[Any]) -> list[SlotAllocation]:
         lane = str(lane_id)
         limit = self._lane_limits.get(lane, self.default_lane_budget)
-        prepared: list[tuple[str, ResourcePolicyReceipt]] = []
+        prepared: list[tuple[str, ResourceObservation]] = []
         for item in list(ready):
             raw = _mapping(item)
             identity = raw.get("id") or raw.get("work_unit_id") or raw.get("entity_id")
@@ -311,15 +284,12 @@ class ResourceBroker:
                 reason="broker-release",
             )
 
-    def observe_receipt(self, receipt: Any) -> ResourcePolicyReceipt:
+    def observe_receipt(self, receipt: Any) -> ResourceObservation:
         raw = _mapping(receipt)
-        actual = raw.get("actual") if isinstance(raw.get("actual"), Mapping) else raw
-        requested = (
-            raw.get("requested") if isinstance(raw.get("requested"), Mapping) else None
-        )
-        if requested is None and isinstance(raw.get("resolved"), Mapping):
-            requested = raw["resolved"]
-        return self.resolve(requested, actual_receipt=actual)
+        if isinstance(raw.get("resource_receipt"), Mapping):
+            return ResourceObservation.from_value(raw["resource_receipt"])
+        requested, resolved = self._resolved_request(raw.get("requested"))
+        return ResourceObservation.from_value(raw, requested=requested, resolved=resolved)
 
     @staticmethod
     def is_external_action(action: Any) -> bool:
@@ -332,9 +302,6 @@ class ResourceBroker:
         """Return whether an action may cross the runtime's external boundary."""
 
         return not self.is_external_action(action) or self.external_action_policy == "allow"
-
-    def reset(self) -> None:
-        """Compatibility no-op: durable occupancy must never be reset in memory."""
 
     def recover(self) -> Mapping[str, Any]:
         if not self.store_backed:
@@ -350,6 +317,6 @@ __all__ = [
     "DEFAULT_REASONING",
     "ResourceBroker",
     "ResourceBrokerAPI",
-    "ResourcePolicyReceipt",
+    "ResourceObservation",
     "SlotAllocation",
 ]

@@ -13,7 +13,7 @@ import hashlib
 import json
 import shlex
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +61,14 @@ def _canonical(value: Any) -> str:
 
 
 class CheckRunnerProtocol(Protocol):
+    """A bounded external check runner.
+
+    The built-in implementation is intentionally the only in-process runner:
+    it delegates checks to ``subprocess.run(..., timeout=...)``.  Evidence
+    collection does not execute caller-provided Python callables because Python
+    cannot safely terminate an arbitrary blocked callable on every host.
+    """
+
     def run(self, check: Any, *, task_id: str | None = None, scope: Mapping[str, Any] | None = None) -> Mapping[str, Any]: ...
 
 
@@ -101,15 +109,37 @@ class CheckRunner:
     """Run a declared check and persist its stdout/stderr as artifacts.
 
     A mapping containing only ``status=pass`` is deliberately not executable
-    evidence.  Callers must provide a command or a callable runner.  This
-    makes fake hosts useful in tests without allowing a handoff to self-sign.
+    evidence. Callers must provide a command; direct Python callables are
+    rejected because an arbitrary callable cannot be safely terminated. This
+    prevents a Lane from self-signing or indefinitely blocking verification.
     """
 
     source = "allinluna.check-runner"
+    DEFAULT_TIMEOUT_SECONDS = 60.0
+    MAX_TIMEOUT_SECONDS = 900.0
 
-    def __init__(self, artifact_store: ArtifactStore | None = None, *, cwd: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        artifact_store: ArtifactStore | None = None,
+        *,
+        cwd: str | Path | None = None,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
         self.artifact_store = artifact_store
         self.cwd = str(cwd) if cwd is not None else None
+        self.timeout_seconds = self._timeout(timeout_seconds)
+
+    @classmethod
+    def _timeout(cls, value: Any) -> float:
+        if isinstance(value, bool):
+            raise ValueError("check timeout_seconds must be a positive number")
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("check timeout_seconds must be a positive number") from exc
+        if not 0 < seconds <= cls.MAX_TIMEOUT_SECONDS:
+            raise ValueError(f"check timeout_seconds must be between 0 and {cls.MAX_TIMEOUT_SECONDS:g}")
+        return seconds
 
     def run(
         self,
@@ -122,23 +152,23 @@ class CheckRunner:
         name = str(value.get("name") or value.get("id") or value.get("command") or "unnamed-check")
         command_value = value.get("command")
         runner = value.get("runner") or value.get("run")
+        timeout_seconds = self._timeout(value.get("timeout_seconds", self.timeout_seconds))
         started = _now()
         stdout = ""
         stderr = ""
         exit_code: int | None = None
-        details: dict[str, Any] = {"task_id": task_id, "scope": dict(scope or {})}
+        details: dict[str, Any] = {
+            "task_id": task_id,
+            "scope": dict(scope or {}),
+            "timeout_seconds": timeout_seconds,
+        }
         status = "failed"
         command: str | tuple[str, ...] = ""
         try:
             if callable(runner):
-                result = runner()
-                result_value = _raw(result) if result is not None else {}
-                status = _status(result_value.get("status", result_value.get("result")))
-                exit_code = result_value.get("exit_code")
-                stdout = str(result_value.get("stdout") or result_value.get("output") or "")
-                stderr = str(result_value.get("stderr") or "")
-                command = str(result_value.get("command") or value.get("command") or f"callable:{name}")
-                details.update({k: v for k, v in result_value.items() if k not in {"status", "result", "stdout", "stderr", "output", "exit_code", "command"}})
+                raise ValueError(
+                    "direct callable checks are disabled; use an executable command with timeout_seconds"
+                )
             elif command_value:
                 if isinstance(command_value, str):
                     command = tuple(shlex.split(command_value, posix=False))
@@ -154,6 +184,7 @@ class CheckRunner:
                     capture_output=True,
                     text=True,
                     check=False,
+                    timeout=timeout_seconds,
                 )
                 exit_code = int(completed.returncode)
                 stdout = completed.stdout
@@ -162,8 +193,16 @@ class CheckRunner:
             else:
                 details["error"] = "check has no executable command or runner"
                 command = f"unexecuted:{name}"
+        except subprocess.TimeoutExpired as exc:
+            stdout = str(exc.stdout or "")
+            timeout_error = f"check timed out after {timeout_seconds:g}s"
+            stderr = str(exc.stderr or timeout_error)
+            details.update({"error": timeout_error, "error_code": "timeout"})
+            status = "timeout"
+            command = command or f"timed-out:{name}"
         except (OSError, TypeError, ValueError) as exc:
             details["error"] = f"{type(exc).__name__}: {exc}"
+            details["error_code"] = "execution-error"
             status = "failed"
             command = command or f"failed:{name}"
 
@@ -261,6 +300,10 @@ class EvidenceCollector:
         self.workspace_adapter = workspace_adapter if workspace_adapter is not None else workspace
         self.profile = profile if profile is not None else verifier_profile
         self.profile_config = dict(profile_config or {})
+        if check_runner is not None and not isinstance(check_runner, CheckRunner):
+            raise TypeError(
+                "EvidenceCollector accepts only CheckRunner; external callable runners cannot be force-terminated"
+            )
         self.check_runner = check_runner or CheckRunner(self.artifacts)
 
     def selected_profile(self, task: Mapping[str, Any], explicit: str | EvidenceProfile | None = None) -> EvidenceProfile:
@@ -313,7 +356,14 @@ class EvidenceCollector:
         run_check = getattr(self.check_runner, "run", None) or getattr(self.check_runner, "run_check", None)
         if not callable(run_check):
             raise TypeError("check_runner must expose run or run_check")
-        check_receipts = [dict(run_check(item, task_id=str(task_value["id"]), scope=workspace_scope)) for item in check_specs]
+        check_receipts: list[dict[str, Any]] = []
+        for item in check_specs:
+            try:
+                check_receipts.append(
+                    dict(run_check(item, task_id=str(task_value["id"]), scope=workspace_scope))
+                )
+            except Exception as exc:
+                check_receipts.append(self._check_error_receipt(item, str(task_value["id"]), exc))
         errors: list[str] = []
         if selected.checks_required and (not check_receipts or any(not self._valid_check(item) for item in check_receipts)):
             errors.append("checks_not_verified")
@@ -447,6 +497,34 @@ class EvidenceCollector:
                 continue
             refs.append(ref)
         return sorted(set(refs))
+
+    def _check_error_receipt(self, spec: Any, task_id: str, exc: Exception) -> dict[str, Any]:
+        value = {"name": str(spec)} if isinstance(spec, str) else _raw(spec)
+        name = str(value.get("name") or value.get("id") or "unnamed-check")
+        error = f"{type(exc).__name__}: {exc}"
+        stderr_ref = None
+        try:
+            record = self.artifacts.put(
+                error.encode("utf-8"),
+                kind="tool-log",
+                produced_by=self.COLLECTOR,
+                metadata={"check_error": True, "task_id": task_id},
+            )
+            stderr_ref = record.ref
+        except ArtifactError:
+            pass
+        return CheckReceipt(
+            name=name,
+            status="error",
+            receipt_id="check-error-" + stable_digest({"task": task_id, "name": name, "error": error}),
+            command="collector:run-check",
+            exit_code=None,
+            source=self.COLLECTOR,
+            observed_at=_now(),
+            stderr_ref=stderr_ref,
+            satisfies=tuple(str(item) for item in value.get("satisfies", value.get("done_when", ())) or ()),
+            details={"error": error, "error_code": "runner-exception"},
+        ).to_dict()
 
     def _verified_exports(self, values: Sequence[Any], contract: Mapping[str, Any], errors: list[str]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

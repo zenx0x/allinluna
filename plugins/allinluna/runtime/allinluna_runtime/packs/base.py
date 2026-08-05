@@ -26,6 +26,7 @@ from ..domain import (
     TaskId,
     TaskRef,
     TaskState,
+    TaskGraph,
     WorkGraph,
 )
 
@@ -85,74 +86,12 @@ class PackManifest:
         }
 
 
-@dataclass(frozen=True)
-class CompiledRunGraph:
-    """Pack output aggregate around the one canonical domain TaskGraph model."""
-
-    run_id: str
-    tasks: tuple[Task, ...]
-    contracts: tuple[TaskContract, ...]
-    work_graphs: Mapping[str, WorkGraph] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        task_ids = {str(task.id) for task in self.tasks}
-        if len(task_ids) != len(self.tasks):
-            raise PackError("CompiledRunGraph task ids must be unique")
-        contract_refs = {str(contract.ref) for contract in self.contracts}
-        if any(str(task.contract_ref) not in contract_refs for task in self.tasks):
-            raise PackError("every Task must reference a graph contract")
-        self.validate()
-
-    def validate(self) -> bool:
-        task_ids = {str(task.id) for task in self.tasks}
-        edges = {str(task.id): {str(dep.task_ref).removeprefix("task://") for dep in task.dependencies} for task in self.tasks}
-        for task_id, dependencies in edges.items():
-            missing = dependencies - task_ids
-            if missing:
-                raise PackError(f"Task {task_id} has missing dependencies: {sorted(missing)}")
-        visiting: set[str] = set()
-        visited: set[str] = set()
-
-        def visit(node: str) -> None:
-            if node in visiting:
-                raise PackError("CompiledRunGraph contains a dependency cycle")
-            if node in visited:
-                return
-            visiting.add(node)
-            for dependency in edges[node]:
-                visit(dependency)
-            visiting.remove(node)
-            visited.add(node)
-
-        for node in edges:
-            visit(node)
-        return True
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "run_id": self.run_id,
-            "tasks": [task.to_dict() for task in self.tasks],
-            "contracts": [contract.to_dict() for contract in self.contracts],
-            "work_graphs": {key: value.to_dict() for key, value in self.work_graphs.items()},
-            "metadata": dict(self.metadata),
-        }
-
-    def ready_tasks(self, completed: Sequence[str] = ()) -> tuple[Task, ...]:
-        complete = {str(item).removeprefix("task://") for item in completed}
-        return tuple(
-            task for task in self.tasks
-            if task.state in {TaskState.PROPOSED, TaskState.READY}
-            and all(str(dep.task_ref).removeprefix("task://") in complete for dep in task.dependencies)
-        )
-
-
 class WorkflowPack(Protocol):
     id: str
     version: str
     manifest: PackManifest
 
-    def compile_goal(self, run_intent: RunIntent) -> CompiledRunGraph: ...
+    def compile_goal(self, run_intent: RunIntent) -> TaskGraph: ...
     def enrich_context(self, scope: Any, bundle: Any) -> Any: ...
     def verifiers(self, task: Task) -> list[Any]: ...
     def compose_result(self, run: Run) -> Mapping[str, Any]: ...
@@ -203,9 +142,10 @@ def dependency(task_id: str, *, exports: Sequence[str] = ()) -> TaskDependency:
     )
 
 
-# Read-only import compatibility. New code uses CompiledRunGraph; TaskGraph is
-# the canonical dependency graph in domain.py.
-TaskGraph = CompiledRunGraph
+# Stable Pack import for callers that adopted the pre-Core-Slim name.  It is an
+# alias, not a second graph implementation; all compilation and validation live
+# in ``domain.TaskGraph``.
+CompiledRunGraph = TaskGraph
 
 __all__ = [
     "CompiledRunGraph", "PackError", "PackManifest", "TaskGraph", "WorkflowPack", "contract_for", "dependency", "task_for",

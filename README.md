@@ -23,6 +23,8 @@ Conversation → Global Coordinator → Task Lanes → WorkUnits → tools/skill
 
 Coordinator 只维护跨 Lane 依赖、contract、资源与完成状态。Lane 拥有局部 WorkGraph、local scheduler、context slice、subagent receipts、局部综合和 handoff。子 WorkUnit 的 scope、authority、ownership、resource 只能收窄；跨 Lane 工作走 promotion request。
 
+`TaskGraph` 是编译图与图校验的唯一权威；`CompiledRunGraph` 仅保留为 Pack 的稳定导入名。SQLite `Store` 只持有连接、迁移和事务边界，实体仓储、资源 claim、host dispatch/receipt、跨实体服务、观测与调度读模型分别由独立运行时模块承担，避免将领域职责重新聚回根 Store。
+
 ## Workflow Packs
 
 - `delivery`：真实软件交付编译器，支持可配置 TaskGraph templates、contract expansion、done_when、handoff、promotion 与资源默认值。
@@ -56,6 +58,8 @@ allinluna set-policy RUN_ID POLICY.json
 
 runtime CLI 还提供 `set-policy`。legacy plan/run import 通过下方 read-only API 完成；恢复依据 SQLite state/journal、真实 host receipt、lease、Git/workspace identity 和 snapshot validity 重算 ready actions；不可恢复的问题返回 blocker，并保留 immutable artifacts。
 Host-side conformance 会同时校验 `requested`、`resolved`、`actual` 与 host `identity`，并检查 `create`、`read`、`wait`、`cancel`、`idempotency` 的完整性；缺失迹象会返回 `BLOCKED`。
+
+Evidence checks 使用受超时约束的受控命令执行并将 stdout、stderr、超时和执行错误作为证据保存；任意 Python callable 不能被安全强制终止，因此不会作为 check runner 执行。
 
 ## Legacy import
 

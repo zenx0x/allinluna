@@ -1310,26 +1310,79 @@ def _canonical_ownership(value: Ownership | Mapping[str, Any] | Sequence[str] | 
 
 
 class TaskGraph:
-    """Dependency-free, in-memory graph primitive shared by packs and schedulers.
+    """Canonical compiled Task graph used by Packs and schedulers.
 
-    The graph owns only domain values.  It deliberately has no Store, host,
-    scheduler, persistence, or signal side effects; orchestration may consume
-    its stable JSON-safe projection through :meth:`to_dict`.
+    ``TaskGraph`` is the one graph-shaped runtime value.  It accepts a complete
+    compiled projection from a Workflow Pack and retains the small incremental
+    builder API used by integrations.  That keeps graph structure, readiness,
+    and validation in the domain layer rather than splitting those invariants
+    between a pack-specific aggregate and this domain object.
     """
 
-    def __init__(self, run_id: RunId | str) -> None:
+    def __init__(
+        self,
+        run_id: RunId | str,
+        tasks: Sequence[Task | Mapping[str, Any]] = (),
+        contracts: Sequence[Contract | Mapping[str, Any]] = (),
+        work_graphs: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
         self.run_id = RunId(run_id)
         self._tasks: dict[str, Task] = {}
         self._contracts: dict[str, Contract] = {}
         self._dependencies: dict[str, list[TaskDependency]] = {}
         self._ownership: dict[str, Ownership] = {}
+        self.work_graphs: dict[str, WorkGraph] = {}
+        self.metadata: dict[str, Any] = _mapping(metadata, "task_graph.metadata")
+
+        for raw_contract in contracts:
+            contract = raw_contract if isinstance(raw_contract, Contract) else Contract.from_dict(raw_contract)
+            key = str(_canonical_contract_ref(contract.ref))
+            if key in self._contracts:
+                raise ValidationError(f"duplicate contract ref: {key}")
+            self._contracts[key] = contract
+        for raw_task in tasks:
+            task = raw_task if isinstance(raw_task, Task) else Task.from_dict(raw_task)
+            task_id = str(TaskId(task.id))
+            if task_id in self._tasks:
+                raise ValidationError(f"duplicate task id: {task_id}")
+            if str(task.run_id) != str(self.run_id):
+                raise ValidationError(f"task {task_id} is not owned by graph run {self.run_id}")
+            ref = _canonical_contract_ref(task.contract_ref)
+            if str(ref) not in self._contracts:
+                raise ValidationError(f"task {task_id} references missing contract node: {ref}")
+            self._tasks[task_id] = task
+            self._dependencies[task_id] = [_canonical_dependency(item) for item in task.dependencies]
+            self._ownership[task_id] = self._contracts[str(ref)].ownership
+        for key, value in (work_graphs or {}).items():
+            task_id = str(TaskId(key))
+            if task_id not in self._tasks:
+                raise ValidationError(f"work graph references missing task node: {task_id}")
+            self.work_graphs[task_id] = self._coerce_work_graph(task_id, value)
+        self.validate()
 
     @property
-    def tasks(self) -> dict[str, Task]:
+    def tasks(self) -> tuple[Task, ...]:
+        """Tasks in compiler order, suitable for the public Pack protocol."""
+
+        return tuple(self._tasks.values())
+
+    @property
+    def contracts(self) -> tuple[Contract, ...]:
+        """Contracts in compiler order, suitable for the public Pack protocol."""
+
+        return tuple(self._contracts.values())
+
+    @property
+    def task_nodes(self) -> dict[str, Task]:
+        """Keyed nodes for scheduler and persistence consumers."""
+
         return dict(self._tasks)
 
     @property
-    def contracts(self) -> dict[str, Contract]:
+    def contract_nodes(self) -> dict[str, Contract]:
+        """Keyed contract nodes for scheduler and persistence consumers."""
+
         return dict(self._contracts)
 
     @property
@@ -1339,6 +1392,34 @@ class TaskGraph:
     @property
     def ownership(self) -> dict[str, Ownership]:
         return dict(self._ownership)
+
+    def _coerce_work_graph(self, task_id: str, value: Any) -> "WorkGraph":
+        if isinstance(value, WorkGraph):
+            if str(value.task_id) != task_id:
+                raise ValidationError("work graph task_id does not match graph key")
+            return value
+        if not isinstance(value, Mapping):
+            raise ValidationError("work graph must be a WorkGraph or object")
+        graph = WorkGraph(value.get("task_id", task_id))
+        if str(graph.task_id) != task_id:
+            raise ValidationError("work graph task_id does not match graph key")
+        records = value.get("work_units", value.get("records", ()))
+        if not isinstance(records, Sequence) or isinstance(records, (str, bytes, bytearray)):
+            raise ValidationError("work graph work_units must be an array")
+        pending = [dict(item) for item in records if isinstance(item, Mapping)]
+        if len(pending) != len(records):
+            raise ValidationError("work graph work_units must contain objects")
+        while pending:
+            before = len(pending)
+            for record in tuple(pending):
+                parent = record.get("parent_id", record.get("parent_work_unit_id"))
+                if parent is not None and graph.get(str(parent)) is None:
+                    continue
+                graph.add(record)
+                pending.remove(record)
+            if len(pending) == before:
+                raise ValidationError("work graph contains a missing or cyclic parent")
+        return graph
 
     def add_task(
         self,
@@ -1541,6 +1622,15 @@ class TaskGraph:
                 return False
         return True
 
+    def ready_tasks(self, completed: Sequence[str] = ()) -> tuple[Task, ...]:
+        """Return proposed/ready tasks whose graph dependencies are satisfied."""
+
+        return tuple(
+            task for task in self.tasks
+            if task.state in {TaskState.PROPOSED, TaskState.READY}
+            and self.dependencies_satisfied(task.id, completed)
+        )
+
     def validate(self) -> bool:
         """Validate references, ownership bounds, uniqueness, and acyclicity."""
 
@@ -1588,6 +1678,12 @@ class TaskGraph:
 
         for node in sorted(task_ids):
             visit(node)
+        for task_id, work_graph in self.work_graphs.items():
+            if task_id not in task_ids:
+                raise ValidationError(f"work graph references missing task node: {task_id}")
+            if str(work_graph.task_id) != task_id:
+                raise ValidationError("work graph task_id does not match graph key")
+            work_graph.validate_monotonic_narrowing()
         return True
 
     def to_dict(self) -> dict[str, Any]:
@@ -1614,6 +1710,8 @@ class TaskGraph:
             "ownership": {
                 key: self._ownership[key].to_dict() for key in sorted(self._ownership)
             },
+            "work_graphs": {key: self.work_graphs[key].to_dict() for key in sorted(self.work_graphs)},
+            "metadata": _serialize(self.metadata),
         }
 
 

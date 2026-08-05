@@ -1,6 +1,13 @@
 {
   "schema_version": "1.0",
   "source_plugin": "plugins/allinluna",
+  "release": {
+    "status": "release-candidate",
+    "stable_release": false,
+    "rc_tag_namespace": "<product>/<version>",
+    "tag_owner": "T6",
+    "tag_timing": "after merged main"
+  },
   "canonical_paths": [
     "plugins/allinluna/runtime/allinluna_runtime",
     "plugins/allinluna/skills/allinluna",
@@ -21,12 +28,16 @@
       "id": "all-in-luna",
       "plugin_name": "allinluna",
       "display_name": "All in Luna",
+      "version": "2.0.0-rc.1",
+      "rc_tag": "allinluna/2.0.0-rc.1",
       "overlay": "distributions/overlays/all-in-luna"
     },
     {
       "id": "research-routes",
       "plugin_name": "research-routes",
       "display_name": "Research Routes",
+      "version": "0.3.0-rc.1",
+      "rc_tag": "research-routes/0.3.0-rc.1",
       "overlay": "distributions/overlays/research-routes"
     }
   ]

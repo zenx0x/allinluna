@@ -84,6 +84,94 @@ class ActionBridge:
         return HostAction.from_value(value) if isinstance(value, Mapping) else None
 
     @staticmethod
+    def _identity_value(identity: Mapping[str, Any] | None, *names: str) -> str | None:
+        if not isinstance(identity, Mapping):
+            return None
+        for name in names:
+            value = identity.get(name)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
+
+    def _receipt_trust_error(
+        self, raw: Mapping[str, Any], action: HostAction, existing: Mapping[str, Any] | None = None
+    ) -> str | None:
+        """Reject external observations that contradict the persisted intent.
+
+        A receipt is evidence about an already-persisted dispatch; it is not a
+        second source of dispatch identity.  In particular, ``idempotency_key``
+        cannot be allowed to replace the action's dispatch key, and workspace
+        facts must agree with the action identity before they are persisted.
+        """
+
+        for name, expected in (
+            ("dispatch_key", action.idempotency_key),
+            ("idempotency_key", action.idempotency_key),
+            ("action_id", action.action_id),
+            ("dispatch_id", action.dispatch_id),
+            ("task_id", action.task_id),
+        ):
+            supplied = raw.get(name)
+            if supplied is not None and expected is not None and str(supplied) != str(expected):
+                return f"receipt {name} does not match the persisted dispatch intent"
+
+        if existing is not None:
+            for name in ("host_id", "thread_id"):
+                supplied = raw.get(name) or raw.get(name.replace("_", ""))
+                persisted = existing.get(name)
+                if supplied and persisted and str(supplied) != str(persisted):
+                    return f"receipt {name} would replace the trusted persisted identity"
+
+        identity = action.identity if isinstance(action.identity, Mapping) else {}
+        repository = identity.get("repository_identity") if isinstance(identity.get("repository_identity"), Mapping) else {}
+        worktree = identity.get("worktree_identity") if isinstance(identity.get("worktree_identity"), Mapping) else {}
+        target = action.arguments.get("target") if isinstance(action.arguments, Mapping) else {}
+        target = target if isinstance(target, Mapping) else {}
+        environment = worktree.get("environment") if isinstance(worktree.get("environment"), Mapping) else target.get("environment")
+        environment = environment if isinstance(environment, Mapping) else {}
+        expected = {
+            "worktree": self._identity_value(worktree, "path", "worktree", "worktreePath")
+            or self._identity_value(environment, "path", "directory", "directoryName")
+            or self._identity_value(repository, "root", "path"),
+            "branch": self._identity_value(worktree, "branch") or self._identity_value(environment, "branch") or self._identity_value(repository, "branch"),
+            "base_commit": self._identity_value(worktree, "base_commit", "baseCommit") or self._identity_value(repository, "head"),
+            "project_id": self._identity_value(target, "projectId", "project_id") or self._identity_value(repository, "projectId", "project_id"),
+        }
+        for name, aliases in (
+            ("worktree", ("worktree", "worktreePath", "workspace", "workspace_path")),
+            ("branch", ("branch",)),
+            ("base_commit", ("base_commit", "baseCommit")),
+            ("project_id", ("projectId", "project_id")),
+        ):
+            supplied = next((raw.get(alias) for alias in aliases if raw.get(alias) is not None), None)
+            if supplied is not None and expected[name] is None:
+                return f"receipt {name} has no trusted persisted identity"
+            if supplied is not None and expected[name] is not None and str(supplied) != str(expected[name]):
+                return f"receipt {name} does not match the persisted workspace identity"
+        return None
+
+    def _receipt_trust_blocker(self, action: HostAction, reason: str) -> dict[str, Any]:
+        if self._is_top_level_action(action):
+            # Keep the durable signal within the vNext signal vocabulary while
+            # exposing the more precise receipt-trust blocker to callers.
+            result = self._record_top_level_blocker(
+                action, code="HOST_PROTOCOL_VIOLATION", reason=reason
+            )
+            result["status"] = "HOST_RECEIPT_TRUST_VIOLATION"
+            result["blocker"] = {
+                **result["blocker"],
+                "code": "HOST_RECEIPT_TRUST_VIOLATION",
+            }
+            return result
+        return {
+            "status": "HOST_RECEIPT_TRUST_VIOLATION",
+            "action": action.to_dict(),
+            "receipt": None,
+            "dispatch_intent_preserved": True,
+            "blocker": {"code": "HOST_RECEIPT_TRUST_VIOLATION", "message": reason, "recoverable": True},
+        }
+
+    @staticmethod
     def _persisted_receipt(row: Mapping[str, Any]) -> dict[str, Any]:
         """Rehydrate the host observation, preferring its immutable payload."""
 
@@ -286,7 +374,7 @@ class ActionBridge:
         # the normalized observation onward so the adapter's explicit
         # actual_tool/capability/hash signature is preserved at the ingest
         # boundary; an external file/CLI ingest still remains untrusted.
-        result = self.ingest_receipt(observed, action=value)
+        result = self.ingest_receipt(observed, action=value, trusted=True)
         return {"status": "host-reconciled", "action": value.to_dict(), **result}
 
     def enqueue(self, action: Any) -> HostAction:
@@ -538,7 +626,9 @@ class ActionBridge:
         raw.setdefault("received_at", None)
         return HostReceipt.from_value(raw, action=action, default_source=self.adapter)
 
-    def ingest_receipt(self, receipt: Any, *, action: HostAction | None = None) -> dict[str, Any]:
+    def ingest_receipt(
+        self, receipt: Any, *, action: HostAction | None = None, trusted: bool = False
+    ) -> dict[str, Any]:
         raw = _raw(receipt)
         if action is None:
             key = raw.get("dispatch_key") or raw.get("idempotency_key")
@@ -555,6 +645,23 @@ class ActionBridge:
                 task_id=raw.get("task_id"),
                 dispatch_id=raw.get("dispatch_id"),
             )
+        existing = self._existing_dispatch(action.idempotency_key)
+        if not trusted:
+            violation = self._receipt_trust_error(raw, action, existing)
+            if violation is not None:
+                return self._receipt_trust_blocker(action, violation)
+            # Provenance is owned by the runtime adapter.  Keep the external
+            # claim in diagnostics, but never persist it as the trusted source.
+            if raw.get("source") or raw.get("host_adapter"):
+                raw = dict(raw)
+                raw["untrusted_provenance"] = {
+                    "source": raw.get("source"),
+                    "host_adapter": raw.get("host_adapter"),
+                }
+                raw["source"] = self.adapter
+                raw["host_adapter"] = self.adapter
+            raw["dispatch_key"] = action.idempotency_key
+            raw["idempotency_key"] = action.idempotency_key
         normalized = self._normalize(raw, action)
         fallback_code = str(normalized.fallback or normalized.payload.get("code") or "")
         if self._is_top_level_action(action) and fallback_code == "HOST_CAPABILITY_BLOCKED":
@@ -710,7 +817,7 @@ class ActionBridge:
                 reason=violation,
                 receipt=normalized,
             )
-        return self.ingest_receipt(normalized, action=value)
+        return self.ingest_receipt(normalized, action=value, trusted=True)
 
     def create(self, action: Any) -> Any:
         return self.dispatch(action)

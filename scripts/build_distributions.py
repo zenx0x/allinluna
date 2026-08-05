@@ -96,6 +96,15 @@ def plugin_root_for(artifact: Path, spec: dict) -> Path:
 
 
 def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, provenance: dict) -> Path:
+    release = manifest.get("release", {})
+    version = spec.get("version")
+    rc_tag = spec.get("rc_tag")
+    if release.get("status") != "release-candidate" or release.get("stable_release") is not False:
+        raise ValueError("distribution manifest must describe an unreleased release candidate")
+    if not isinstance(version, str) or not version.endswith("-rc.1"):
+        raise ValueError(f"{spec['id']} must declare an RC version")
+    if not isinstance(rc_tag, str) or not rc_tag.startswith(f"{spec['plugin_name']}/"):
+        raise ValueError(f"{spec['id']} must declare a namespaced RC tag")
     artifact = output / spec["id"]
     if artifact.exists():
         shutil.rmtree(artifact)
@@ -135,6 +144,11 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     metadata_root = root / "plugins" / spec["plugin_name"]
     metadata_path = metadata_root / ".codex-plugin" / "plugin.json"
     source_plugin_json = read_json(metadata_path if metadata_path.is_file() else source_plugin / ".codex-plugin" / "plugin.json")
+    if source_plugin_json.get("version") != version:
+        raise ValueError(
+            f"{spec['id']} source plugin version {source_plugin_json.get('version')!r} "
+            f"does not match distribution manifest {version!r}"
+        )
     default_prompts = list(source_plugin_json.get("interface", {}).get("defaultPrompt", []))
     while len(default_prompts) < 3:
         default_prompts.append("Use the canonical vNext runtime and report requested, resolved, actual, and receipt evidence separately.")
@@ -189,6 +203,11 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
         "distribution_id": spec["id"],
         "plugin_name": spec["plugin_name"],
         "display_name": spec["display_name"],
+        "version": version,
+        "release_status": release["status"],
+        "rc_tag": rc_tag,
+        "tag_owner": release["tag_owner"],
+        "tag_timing": release["tag_timing"],
         "canonical_runtime": "runtime/allinluna_runtime",
         "canonical_skill": "skills/allinluna/SKILL.md",
         "overlay": spec["overlay"],

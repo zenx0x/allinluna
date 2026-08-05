@@ -12,6 +12,16 @@ from build_distributions import ROOT, build, expand_sources, plugin_root_for, re
 
 
 SOURCE_ONLY_README_PATHS = ("shared/", "runtime/shared", "allinluna-plan", "allinluna-run")
+EXPECTED_RELEASE = {
+    "status": "release-candidate",
+    "stable_release": False,
+    "tag_owner": "T6",
+    "tag_timing": "after merged main",
+}
+EXPECTED_DISTRIBUTIONS = {
+    "all-in-luna": {"plugin_name": "allinluna", "version": "2.0.0-rc.1", "rc_tag": "allinluna/2.0.0-rc.1"},
+    "research-routes": {"plugin_name": "research-routes", "version": "0.3.0-rc.1", "rc_tag": "research-routes/0.3.0-rc.1"},
+}
 
 
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
@@ -20,6 +30,17 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     specs = manifest.get("distributions", [])
     if {spec.get("id") for spec in specs} != {"all-in-luna", "research-routes"}:
         errors.append("manifest must define exactly all-in-luna and research-routes")
+    release = manifest.get("release", {})
+    for field, expected in EXPECTED_RELEASE.items():
+        if release.get(field) != expected:
+            errors.append(f"release.{field} must be {expected!r}")
+    for spec in specs:
+        expected = EXPECTED_DISTRIBUTIONS.get(spec.get("id"))
+        if expected is None:
+            continue
+        for field, value in expected.items():
+            if spec.get(field) != value:
+                errors.append(f"{spec['id']} manifest {field} must be {value!r}")
     if not manifest.get("overlay_allowlist") or not manifest.get("canonical_paths"):
         errors.append("overlay allowlist is missing")
     try:
@@ -48,6 +69,8 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             plugin = read_json(plugin_root / ".codex-plugin/plugin.json")
             if plugin.get("name") != spec["plugin_name"]:
                 errors.append(f"{spec['id']} plugin name mismatch")
+            if plugin.get("version") != spec.get("version"):
+                errors.append(f"{spec['id']} plugin version does not match the RC manifest")
             prompts = plugin.get("interface", {}).get("defaultPrompt")
             if not isinstance(prompts, list) or len(prompts) != 3:
                 errors.append(f"{spec['id']} must expose exactly 3 defaultPrompt entries")
@@ -68,6 +91,20 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             provenance = read_json(artifact / ".source-provenance.json")
             if provenance != expected_provenance:
                 errors.append(f"{spec['id']} source provenance does not match current HEAD")
+            artifact_manifest = read_json(artifact / "distribution-manifest.json")
+            for field, expected in {
+                "distribution_id": spec["id"],
+                "plugin_name": spec["plugin_name"],
+                "version": spec["version"],
+                "release_status": release.get("status"),
+                "rc_tag": spec["rc_tag"],
+                "tag_owner": release.get("tag_owner"),
+                "tag_timing": release.get("tag_timing"),
+            }.items():
+                if artifact_manifest.get(field) != expected:
+                    errors.append(f"{spec['id']} artifact {field} is stale or mismatched")
+            if artifact_manifest.get("provenance") != expected_provenance:
+                errors.append(f"{spec['id']} artifact provenance does not match current HEAD")
             if (artifact / "LICENSE").read_bytes() != (root / "LICENSE").read_bytes():
                 errors.append(f"{spec['id']} LICENSE differs from source LICENSE")
             if spec["id"] == "research-routes":

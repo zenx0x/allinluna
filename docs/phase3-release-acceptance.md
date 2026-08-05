@@ -13,6 +13,10 @@ Kernel, GSD, or Research Routes.
 - Baseline: `fc1b6dc`
 - Release-hardening commit: recorded in the local Git handoff for this RC
 - Stable tag/publication: intentionally not created
+- Distribution artifacts must be rebuilt from the candidate and must carry
+  both RC versions plus current commit/tree/parent provenance; stale generated
+  artifacts are invalid. RC tags and releases remain T6-only, after merged
+  main, and are not created during T4.
 
 ## Acceptance claims
 
@@ -47,6 +51,11 @@ python scripts/validate_core_slim.py
 python scripts/validate_distributions.py
 python scripts/validate_installations.py
 ```
+
+The two distribution validators rebuild into a temporary directory when no
+`--dist` is supplied, so ignored pre-T6 `dist/` contents are neither required
+nor published. Passing `--dist` explicitly validates that supplied artifact
+tree and rejects stale versions or provenance.
 
 ## Minimal real Desktop canary
 

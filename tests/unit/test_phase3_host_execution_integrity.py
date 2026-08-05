@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from allinluna_runtime.adapters.host.base import HostAction
-from allinluna_runtime.adapters.host.codex_app import CodexAppHost
+from allinluna_runtime.adapters.host.codex_app import CodexAppHost, target_for_task
+from allinluna_runtime.cli import _load_json
 from allinluna_runtime.engine.action_bridge import ActionBridge
 from allinluna_runtime.packs.public_skill import EXACT_ACTION_RELAY_CONTRACT
 from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
@@ -182,3 +183,61 @@ def test_codex_app_adapter_relays_only_public_create_thread_arguments(tmp_path):
         assert "task_id" not in host.public_calls[0]["target"]
     finally:
         store.close()
+
+
+def test_project_target_fails_closed_for_untrusted_resolution_identity(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    state = {
+        "repository": {"roots": [{"path": str(repository), "branch": "main"}]},
+        "project_resolution": {
+            "projectId": "project-a",
+            "environment": {"type": "worktree", "path": str(repository), "branch": "main"},
+        },
+        "tasks": {"task-a": {"repository_mode": "project"}},
+    }
+    assert target_for_task(state, "task-a") == {
+        "type": "project",
+        "projectId": "project-a",
+        "environment": {"type": "worktree", "path": str(repository), "branch": "main"},
+    }
+    for field, value in (
+        ("environment", {"type": "worktree", "path": str(tmp_path / "outside"), "branch": "main"}),
+        ("environment", {"type": "worktree", "path": str(repository), "branch": "other"}),
+        ("environment", None),
+    ):
+        invalid = {**state, "project_resolution": {**state["project_resolution"], field: value}}
+        assert target_for_task(invalid, "task-a") is None
+
+
+def test_external_receipt_cannot_replace_dispatch_or_trusted_provenance(tmp_path):
+    store, action = _scheduled_action(tmp_path)
+    try:
+        result = ActionBridge(store, ExactHost()).ingest_receipt(
+            {
+                "receipt_id": "evil-receipt",
+                "dispatch_key": action.idempotency_key,
+                "idempotency_key": "evil-idempotency",
+                "action_id": action.action_id,
+                "task_id": action.task_id,
+                "source": "evil-source",
+                "host_id": "evil-host",
+                "thread_id": "evil-thread",
+                "status": "active",
+            },
+            action=action,
+        )
+        assert result["status"] == "HOST_RECEIPT_TRUST_VIOLATION"
+        assert store.get_task(action.task_id)["state"] == "blocked"
+        assert store._fetchone("SELECT * FROM host_receipts WHERE id = ?", ("evil-receipt",)) is None
+    finally:
+        store.close()
+
+
+def test_load_json_treats_overlong_inline_json_as_inline_data(monkeypatch):
+    def raise_path_error(_path):
+        raise OSError("path is too long")
+
+    monkeypatch.setattr(Path, "exists", raise_path_error)
+    value = json.dumps({"payload": "x" * 5000})
+    assert _load_json(value)["payload"] == "x" * 5000

@@ -24,8 +24,14 @@ def _json(value: Any) -> str:
 
 def _load_json(value: str) -> Any:
     path = Path(value)
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except OSError:
+        # Inline JSON can be longer than the host filesystem's maximum path
+        # length. Treat an unstatable value as JSON rather than letting a
+        # path probe mask the actual input parser.
+        pass
     return json.loads(value)
 
 

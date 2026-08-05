@@ -10,6 +10,7 @@ thread receipt.
 from __future__ import annotations
 
 import inspect
+import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
@@ -200,11 +201,29 @@ def _project_candidate_matches_root(candidate: Mapping[str, Any], root: str | No
         _first(candidate, "root", "path", "directory", "directoryName"),
         _first(environment, "root", "path", "directory", "directoryName") if isinstance(environment, Mapping) else None,
     ]
-    return any(isinstance(item, str) and item == root for item in values)
+    expected = _canonical_path(root)
+    return any(isinstance(item, str) and _canonical_path(item) == expected for item in values)
+
+
+def _canonical_path(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return os.path.normcase(os.path.abspath(os.path.normpath(value)))
+
+
+def _path_within_root(path: Any, root: str | None) -> bool:
+    candidate = _canonical_path(path)
+    expected = _canonical_path(root)
+    if candidate is None or expected is None:
+        return False
+    try:
+        return os.path.commonpath((candidate, expected)) == expected
+    except ValueError:
+        return False
 
 
 def project_resolution_from_receipt(
-    receipt: Any, *, project_root: str | None = None
+    receipt: Any, *, project_root: str | None = None, project_branch: str | None = None
 ) -> dict[str, Any] | None:
     """Extract project identity only from an explicit host resolution receipt."""
 
@@ -224,33 +243,40 @@ def project_resolution_from_receipt(
         selected: Mapping[str, Any] | None = None
         for candidate in candidates:
             candidate_id = _string(candidate, "project_id", "projectId", "id")
-            if explicit_id and candidate_id == explicit_id:
-                selected = candidate
-                break
-            if project_root and _project_candidate_matches_root(candidate, project_root):
-                selected = candidate
-                break
-        if selected is None and candidates:
-            if len(candidates) == 1:
-                selected = candidates[0]
-            elif explicit_id:
-                selected = layer
-        project_id_value = explicit_id or (_string(selected or {}, "project_id", "projectId", "id"))
+            if explicit_id and candidate_id != explicit_id:
+                continue
+            if project_root and not _project_candidate_matches_root(candidate, project_root):
+                # An explicit project id does not override repository-root
+                # identity.  A host may return several projects; only the
+                # candidate rooted at the requested repository is admissible.
+                continue
+            selected = candidate
+            break
+        if selected is None:
+            continue
+        project_id_value = _string(selected, "project_id", "projectId", "id") or explicit_id
         if not project_id_value:
             continue
         source_environment = _first(
-            selected or layer,
+            selected,
             "environment",
             "worktree_environment",
             "worktreeEnvironment",
         )
-        environment = dict(source_environment) if isinstance(source_environment, Mapping) else {}
-        if not environment:
-            for key in ("path", "directory", "directoryName", "branch", "base_commit", "baseCommit"):
-                value = _first(selected or layer, key)
-                if value is not None:
-                    environment[key] = value
-        environment.setdefault("type", "worktree")
+        # Do not invent an environment when the host did not provide one.
+        if not isinstance(source_environment, Mapping) or not source_environment:
+            continue
+        environment = dict(source_environment)
+        environment_path = _first(environment, "path", "directory", "directoryName")
+        if project_root and not _path_within_root(environment_path, project_root):
+            continue
+        environment_branch = _string(environment, "branch")
+        if project_branch and environment_branch and environment_branch != project_branch:
+            continue
+        if project_branch and not environment_branch:
+            continue
+        if not _string(environment, "type"):
+            continue
         return {
             "projectId": project_id_value,
             "project_id": project_id_value,
@@ -265,6 +291,8 @@ def _project_resolution(state: Mapping[str, Any]) -> dict[str, Any] | None:
     raw = mapping_from(state)
     root = project_root(raw)
     repository = raw.get("repository") if isinstance(raw.get("repository"), Mapping) else {}
+    repository_root = (repository.get("roots") or [{}])[0] if isinstance(repository, Mapping) else {}
+    branch = _string(repository_root, "branch") if isinstance(repository_root, Mapping) else None
     capabilities = raw.get("capabilities") if isinstance(raw.get("capabilities"), Mapping) else {}
     sources = (
         raw.get("project_resolution"),
@@ -278,7 +306,7 @@ def _project_resolution(state: Mapping[str, Any]) -> dict[str, Any] | None:
     )
     for source in sources:
         if isinstance(source, Mapping):
-            resolved = project_resolution_from_receipt(source, project_root=root)
+            resolved = project_resolution_from_receipt(source, project_root=root, project_branch=branch)
             if resolved:
                 return resolved
     return None
@@ -374,8 +402,9 @@ def target_for_task(state: Mapping[str, Any], task_id: str | None = None) -> dic
     resolved = _project_resolution(raw)
     if not resolved:
         return None
-    environment = dict(resolved.get("environment") or {"type": "worktree"})
-    environment.setdefault("type", "worktree")
+    environment = dict(resolved.get("environment") or {})
+    if not environment or not _string(environment, "type"):
+        return None
     return {"type": "project", "projectId": resolved["projectId"], "environment": environment}
 
 

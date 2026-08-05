@@ -199,7 +199,7 @@ def _project_candidate_matches_root(candidate: Mapping[str, Any], root: str | No
     environment = _first(candidate, "environment", "worktree_environment", "worktreeEnvironment")
     values = [
         _first(candidate, "root", "path", "directory", "directoryName"),
-        _first(environment, "root", "path", "directory", "directoryName") if isinstance(environment, Mapping) else None,
+        _first(environment, "root", "path", "directory", "directoryName", "worktree") if isinstance(environment, Mapping) else None,
     ]
     expected = _canonical_path(root)
     return any(isinstance(item, str) and _canonical_path(item) == expected for item in values)
@@ -267,7 +267,7 @@ def project_resolution_from_receipt(
         if not isinstance(source_environment, Mapping) or not source_environment:
             continue
         environment = dict(source_environment)
-        environment_path = _first(environment, "path", "directory", "directoryName")
+        environment_path = _first(environment, "path", "directory", "directoryName", "worktree", "root")
         if project_root and not _path_within_root(environment_path, project_root):
             continue
         environment_branch = _string(environment, "branch")
@@ -275,7 +275,16 @@ def project_resolution_from_receipt(
             continue
         if project_branch and not environment_branch:
             continue
-        if not _string(environment, "type"):
+        environment_type = _string(environment, "type")
+        if not environment_type:
+            # Some Codex project receipts expose the worktree identity using
+            # explicit ``worktree``/``root`` aliases without repeating the
+            # canonical target type.  Normalize that source-backed shape;
+            # never infer a project target from an untyped environment.
+            if not _string(environment, "worktree"):
+                continue
+            environment = {**environment, "type": "worktree"}
+        elif environment_type != "worktree":
             continue
         return {
             "projectId": project_id_value,

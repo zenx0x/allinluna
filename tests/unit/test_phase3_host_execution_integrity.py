@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from allinluna_runtime.adapters.host.base import HostAction
-from allinluna_runtime.adapters.host.codex_app import CodexAppHost, target_for_task
+from allinluna_runtime.adapters.host.codex_app import CodexAppHost, project_resolution_from_receipt, target_for_task
 from allinluna_runtime.cli import _load_json
 from allinluna_runtime.engine.action_bridge import ActionBridge
 from allinluna_runtime.packs.public_skill import EXACT_ACTION_RELAY_CONTRACT
@@ -208,6 +208,35 @@ def test_project_target_fails_closed_for_untrusted_resolution_identity(tmp_path)
     ):
         invalid = {**state, "project_resolution": {**state["project_resolution"], field: value}}
         assert target_for_task(invalid, "task-a") is None
+
+
+def test_project_resolution_accepts_explicit_worktree_aliases_without_relaxing_identity(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    receipt = {
+        "projects": [{
+            "projectId": "project-a",
+            "root": str(repository),
+            "environment": {
+                "worktree": str(repository),
+                "root": str(repository),
+                "branch": "main",
+            },
+        }],
+    }
+    resolved = project_resolution_from_receipt(
+        receipt,
+        project_root=str(repository),
+        project_branch="main",
+    )
+    assert resolved is not None
+    assert resolved["environment"]["type"] == "worktree"
+    assert resolved["environment"]["worktree"] == str(repository)
+    assert project_resolution_from_receipt(
+        receipt,
+        project_root=str(tmp_path / "outside"),
+        project_branch="main",
+    ) is None
 
 
 def test_external_receipt_cannot_replace_dispatch_or_trusted_provenance(tmp_path):

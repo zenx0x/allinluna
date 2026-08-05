@@ -77,7 +77,7 @@
     },
     "thread_receipt": {
       "type": "object",
-      "required": ["source", "actual_tool", "thread_id", "host_id", "worktree", "repo"],
+      "required": ["source", "actual_tool", "thread_id", "host_id", "worktree", "repo", "resource_receipt"],
       "properties": {
         "source": { "enum": ["fixture", "codex_app"] },
         "actual_tool": { "type": "string", "minLength": 1 },
@@ -87,7 +87,28 @@
         "worktree": { "type": "string", "minLength": 1 },
         "repo": { "type": "string", "minLength": 1 },
         "status": { "type": "string" },
+        "resource_receipt": { "$ref": "#/$defs/resource_receipt" },
         "failure_class": { "enum": ["product_failure", "host_tool_unavailable", "checker_error"] }
+      }
+    },
+    "resource_values": {
+      "type": "object",
+      "required": ["model", "reasoning"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "reasoning": { "type": "string", "minLength": 1 }
+      }
+    },
+    "resource_receipt": {
+      "type": "object",
+      "required": ["requested", "resolved", "actual", "actual_state", "evidence_source", "observed_at"],
+      "properties": {
+        "requested": { "$ref": "#/$defs/resource_values" },
+        "resolved": { "$ref": "#/$defs/resource_values" },
+        "actual": { "$ref": "#/$defs/resource_values" },
+        "actual_state": { "const": "resolved" },
+        "evidence_source": { "type": "string", "minLength": 1 },
+        "observed_at": { "type": "string", "format": "date-time" }
       }
     },
     "failure": {

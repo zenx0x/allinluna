@@ -17,8 +17,7 @@ from typing import Any
 from .base import (
     ACTION_BRIDGE_PROTOCOL,
     HOST_RECEIPT_PROTOCOL,
-    REQUIRED_MODEL,
-    REQUIRED_REASONING,
+    DEFAULT_MODEL,
     HostAction,
     HostActionError,
     HostAdapter,
@@ -285,16 +284,16 @@ def create_thread_action(
 ) -> dict[str, Any]:
     if state is not None:
         _require_declared_tool(state, CREATE_THREAD_TOOL)
-    if model != REQUIRED_MODEL:
-        raise HostActionError("model policy requires gpt-5.6-luna")
+    if not isinstance(model, str) or not model.strip():
+        raise HostActionError("model must be a non-empty host model identifier")
     action: dict[str, Any] = {
         "kind": kind, "tool": CREATE_THREAD_TOOL, "target": deepcopy(dict(target)), "prompt": prompt,
         "model": model, "title": title, "dispatch_id": entity_id, "receipt_required": True,
         "expected_receipt": HOST_RECEIPT_PROTOCOL, "record_with": record_with,
     }
     if thinking is not None:
-        if thinking != REQUIRED_REASONING:
-            raise HostActionError("reasoning policy requires max")
+        if not isinstance(thinking, str) or not thinking.strip():
+            raise HostActionError("thinking must be a non-empty host reasoning identifier")
         action["thinking"] = thinking
     if metadata:
         action.update(deepcopy(dict(metadata)))
@@ -508,9 +507,9 @@ class CodexAppHost(HostAdapter):
         self._invocations.append(value)
         tool = value.tool or CREATE_THREAD_TOOL
         args = dict(value.arguments)
-        args.setdefault("model", value.model or REQUIRED_MODEL)
-        if args.get("model") != REQUIRED_MODEL:
-            return self._remember(value, HostReceipt(receipt_id="receipt-" + stable_digest(value.to_dict()), status="unresolved", source=CODEX_APP_SOURCE, host_id=self.host_id, action_id=value.action_id, action_kind=value.kind, idempotency_key=value.idempotency_key, dispatch_id=value.dispatch_id, task_id=value.task_id, fallback="model-policy-mismatch", action=value.to_dict()))
+        args.setdefault("model", value.model or DEFAULT_MODEL)
+        if not isinstance(args.get("model"), str) or not str(args["model"]).strip():
+            return self._remember(value, HostReceipt(receipt_id="receipt-" + stable_digest(value.to_dict()), status="unresolved", source=CODEX_APP_SOURCE, host_id=self.host_id, action_id=value.action_id, action_kind=value.kind, idempotency_key=value.idempotency_key, dispatch_id=value.dispatch_id, task_id=value.task_id, fallback="invalid-model-request", action=value.to_dict()))
         if value.reasoning:
             args.setdefault("thinking", value.reasoning)
         args.pop("reasoning", None)

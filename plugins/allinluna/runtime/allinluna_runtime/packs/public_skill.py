@@ -15,9 +15,9 @@ from typing import Any, Callable, Mapping
 
 from ..domain import RunIntent
 from ..engine.coordinator import CoordinatorEngine
+from ..resource import ResourceBroker
 from ..store import Store
-from ..compat import LegacyPlanImportAPI, LegacyRunStateImportAPI
-from .base import TaskGraph
+from .base import CompiledRunGraph
 from .manifest import PackRegistry, builtin_registry
 from .research_routes import ResearchRoutesBridge
 
@@ -53,7 +53,7 @@ class JITPermissionRouter:
 @dataclass(frozen=True)
 class SkillCompilation:
     intent: RunIntent
-    task_graph: TaskGraph
+    task_graph: CompiledRunGraph
     input_kind: str
     compatibility: Mapping[str, Any] = field(default_factory=dict)
     permission_intents: tuple[PermissionIntent, ...] = ()
@@ -72,7 +72,7 @@ class SinglePublicSkillAPI:
     """Public API for one Skill and all supported input forms."""
 
     id = "allinluna"
-    version = "1.0.0"
+    version = "1.1.0"
 
     def __init__(self, *, registry: PackRegistry | None = None, permission_router: JITPermissionRouter | None = None) -> None:
         self.registry = registry or builtin_registry()
@@ -92,9 +92,11 @@ class SinglePublicSkillAPI:
             bridge = self.registry.require("research-routes-bridge")
             return bridge.to_intent(packet, repository=repository), "research-route", {}
         if raw.get("existing_plan") is not None or raw.get("plan") is not None:
+            from ..compat.legacy_plan import LegacyPlanImportAPI
             imported = LegacyPlanImportAPI().translate(raw.get("existing_plan", raw.get("plan")))
             return imported.intent, "existing-plan", imported.report.to_dict()
         if raw.get("active_run") is not None or raw.get("run_state") is not None:
+            from ..compat.legacy_run_state import LegacyRunStateImportAPI
             imported = LegacyRunStateImportAPI().translate(raw.get("active_run", raw.get("run_state")))
             return imported.intent, "active-run", imported.report.to_dict()
         goal = raw.get("goal") or raw.get("idea") or raw.get("objective")
@@ -106,16 +108,10 @@ class SinglePublicSkillAPI:
         intent, input_kind, compatibility = self.compile_run_intent(request, repository=repository, pack=pack)
         workflow_pack = self.registry.require(str(intent.pack.id), str(intent.pack.version))
         graph = workflow_pack.compile_goal(intent)
-        permissions = tuple(
-            self.permissions.request(
-                action=action,
-                policy=intent.resource_envelope.external_action_policy,
-                authorized=bool(getattr(intent.authorization_intent, "live_external_mutation", False)),
-                reason="requested by the compiled task contract",
-            )
-            for action in self._external_actions(intent)
-        )
-        return SkillCompilation(intent, graph, input_kind, compatibility, permissions)
+        # Permissions are intentionally absent at compile time. The Action
+        # Bridge persists a PermissionIntent only when a concrete external
+        # action reaches the dispatch boundary.
+        return SkillCompilation(intent, graph, input_kind, compatibility, ())
 
     def start(self, request: str | Mapping[str, Any] | RunIntent, *, store: Store | None = None, db_path: str | Path | None = None, repository: Mapping[str, Any] | None = None, pack: str | None = None, dispatch: bool = False) -> Mapping[str, Any]:
         compilation = self.compile(request, repository=repository, pack=pack)
@@ -123,26 +119,21 @@ class SinglePublicSkillAPI:
         runtime_store = store or Store(str(db_path or "runtime.db"))
         try:
             run_id = compilation.task_graph.run_id
-            root = compilation.task_graph.contracts[0]
-            runtime_store.create_run(run_id, compilation.intent.goal, policy=compilation.intent.resource_envelope.to_dict(), root_contract_id=str(root.ref))
-            for contract in compilation.task_graph.contracts:
-                runtime_store.put_contract(contract.to_dict())
-            for task in compilation.task_graph.tasks:
-                runtime_store.create_task(task.to_dict())
+            engine = CoordinatorEngine(runtime_store, resource_broker=ResourceBroker(compilation.intent.resource_envelope))
+            engine.start(compilation.intent, compilation.task_graph, run_id=run_id)
             result: dict[str, Any] = {"run_ref": f"run://{run_id}", "compilation": compilation.to_dict(), "status": "created", "actions": []}
-            engine = CoordinatorEngine(runtime_store)
             if dispatch:
                 tick = engine.tick(run_id)
                 result.update({"status": tick.status, "actions": list(tick.actions), "receipts": list(tick.receipts)})
             else:
-                result["actions"] = list(CoordinatorEngine(runtime_store).tick(run_id, dispatch=False).actions)
+                result["actions"] = [action.to_dict() for action in engine.scheduler.preview(run_id)]
             return result
         finally:
             if owned_store:
                 runtime_store.close()
 
     def next_actions(self, run_id: str, *, store: Store) -> list[Any]:
-        return list(CoordinatorEngine(store).tick(run_id, dispatch=False).actions)
+        return [action.to_dict() for action in CoordinatorEngine(store).scheduler.preview(run_id)]
 
     def permission_at_action(self, action: str, *, scopes: tuple[str, ...] = (), policy: str = "ask", authorized: bool = False, reason: str = "") -> PermissionIntent:
         return self.permissions.request(action, scopes=scopes, policy=policy, authorized=authorized, reason=reason)
@@ -172,7 +163,7 @@ class SinglePublicSkillAPI:
             done_when=tuple(str(item) for item in raw.get("done_when", ("the requested outcome is evidenced",))),
             repository=repository or {"mode": "projectless", "roots": (), "protected_paths": ()},
             authorization_intent=raw.get("authorization_intent", {"implementation_writes": True, "git_operations": False, "destructive_operations": False, "live_external_mutation": False, "publication": False}),
-            resource_envelope=raw.get("resource_envelope", {"top_level_slots": "auto", "total_subagent_slots": "auto", "subagent_slots_per_lane": "auto", "model_policy": "explicit", "model": "gpt-5.6-luna", "reasoning_policy": "explicit", "reasoning": "high", "external_action_policy": "ask"}),
+            resource_envelope=raw.get("resource_envelope", {"top_level_slots": "auto", "total_subagent_slots": "auto", "subagent_slots_per_lane": "auto", "model_policy": "auto", "model": None, "reasoning_policy": "auto", "reasoning": None, "external_action_policy": "ask"}),
             pack=pack_ref,
             constraints=tuple(str(item) for item in raw.get("constraints", ())),
         )

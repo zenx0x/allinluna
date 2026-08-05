@@ -33,7 +33,9 @@ Packs use Store, Context, Artifact, Host, and Capability only through public Cor
 
 ## Resources and permissions
 
-Semantic work uses Luna-high. Keep requested, resolved, and actual evidence separate; if an actual host receipt is unavailable, record `unresolved` and never invent success or fallback. A clearly allowlisted mechanical README/wording/format/terminology synchronization may use `gpt-5.3-codex-spark` with a separate receipt, followed by final Luna-owner review. Spark does not perform semantic design, manifest behavior, compatibility, Pack, runtime, or contract work.
+Model and reasoning choices come from the Run resource policy and may be overridden by a narrower Task or WorkUnit policy; Luna-high is no longer hard locked. Callers may select Luna medium/high/xhigh/max, Codex Spark, or another host-supported model. Keep requested, resolved, and actual evidence separate; if an actual host receipt is unavailable, record `unresolved` and never invent success or fallback.
+
+A real host receipt must return `resource_receipt.requested/resolved/actual`, `actual_state`, `evidence_source`, and `observed_at`. All three model/reasoning pairs must agree and match the persisted dispatch action; missing fields, an invalid timestamp, a missing action baseline, or any mismatch remains `unresolved`. `runtime.db` schema v5 persists all three resource pairs for crash recovery, replay, and status queries.
 
 Permissions are requested JIT at the action boundary. Credentials, push, deploy, publish, destructive work, and live external mutation do not happen by default; they proceed only after explicit authorization at the reached action.
 

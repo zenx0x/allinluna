@@ -79,17 +79,28 @@ class LocalScheduler:
             raise ValueError("task_id must match work_graph.task_id")
         self.task_id = str(task_id if task_id is not None else graph_task_id)
         self.resource_broker = resource_broker or ResourceBroker()
+        task = store.get_task(self.task_id) if work_graph is None else None
+        if task is not None:
+            self.resource_broker.bind(store, str(task["run_id"]))
+            self.resource_broker.recover()
         self.owner_id = owner_id or f"lane:{self.task_id}"
         self.adapter = adapter
         self.recovery = LeaseRecoveryBehavior(store, ttl_seconds=lease_ttl_seconds)
         self.action_factory = action_factory or self._default_action
         self._policies: dict[str, dict[str, tuple[str, ...]]] = {}
         self._promotion_requests: list[dict[str, Any]] = []
+        self._snapshot: dict[str, Any] | None = None
+        self._snapshot_units: dict[str, dict[str, Any]] = {}
 
     def _units(self) -> list[dict[str, Any]]:
         if self.work_graph is not None:
             return [dict(item) for item in self.work_graph.records()]
-        return self.store._fetchall("SELECT * FROM work_units WHERE task_id = ? ORDER BY id", (self.task_id,))
+        if self._snapshot is None:
+            self._snapshot = self.store.lane_scheduler_snapshot(self.task_id)
+            self._snapshot_units = {
+                str(unit["id"]): unit for unit in self._snapshot.get("units", ())
+            }
+        return list(self._snapshot.get("units", ()))
 
     def _unit(self, unit_id: str) -> dict[str, Any]:
         if self.work_graph is not None:
@@ -97,7 +108,7 @@ class LocalScheduler:
             if value is None or str(value.get("task_id")) != self.task_id:
                 raise KeyError(unit_id)
             return dict(value)
-        value = self.store.get_work_unit(unit_id)
+        value = self._snapshot_units.get(str(unit_id)) or self.store.get_work_unit(unit_id)
         if value is None or str(value.get("task_id")) != self.task_id:
             raise KeyError(unit_id)
         return value
@@ -131,12 +142,12 @@ class LocalScheduler:
                 if isinstance(dependency, Mapping)
                 else dependency
             )
-            upstream = self._unit(str(dependency_id)) if self.work_graph is not None else self.store.get_work_unit(str(dependency_id))
+            upstream = self._unit(str(dependency_id))
             if upstream is None or upstream.get("state") != "completed":
                 return False
         parent_id = unit.get("parent_id")
         if parent_id:
-            parent = self._unit(str(parent_id)) if self.work_graph is not None else self.store.get_work_unit(str(parent_id))
+            parent = self._unit(str(parent_id))
             if parent is None or parent.get("state") in {"cancelled", "failed"}:
                 return False
         return True
@@ -155,7 +166,7 @@ class LocalScheduler:
         ready = [
             unit
             for unit in units
-            if str(unit["state"]) in {"proposed", "ready", "blocked"}
+            if str(unit["state"]) in {"proposed", "ready"}
             and self._dependencies_ready(unit)
         ]
         if self.work_graph is not None:
@@ -165,7 +176,9 @@ class LocalScheduler:
 
     def _default_action(self, unit: Mapping[str, Any], allocation: Mapping[str, Any]) -> HostAction:
         unit_id = str(unit["id"])
-        key = "intent:work-unit:" + stable_digest({"task_id": self.task_id, "work_unit_id": unit_id})
+        latest = (unit.get("latest_attempt") or self.store._fetchone("SELECT COALESCE(MAX(attempt_no), 0) AS attempt_no FROM work_unit_attempts WHERE work_unit_id = ?", (unit_id,))) if self.work_graph is None else {"attempt_no": 0}
+        attempt_no = int((latest or {}).get("attempt_no", 0)) + 1
+        key = "intent:work-unit:" + stable_digest({"run_id": self._task_run_id(), "task_id": self.task_id, "work_unit_id": unit_id, "attempt_no": attempt_no, "execution_mode": "lane-local"})
         policy = self._policies.get(unit_id, {})
         parent_policy = self._policies.get(str(unit.get("parent_id")), {}) if unit.get("parent_id") else {}
         envelope = {
@@ -203,13 +216,13 @@ class LocalScheduler:
             action_id="action-" + stable_digest({"work_unit": unit_id, "key": key}),
             kind="spawn-subagent",
             tool="native_subagent.spawn",
-            arguments={"envelope": envelope, "model": self.resource_broker.model, "thinking": self.resource_broker.reasoning},
+            arguments={"envelope": envelope, "model": str(allocation.get("model", self.resource_broker.model)), "thinking": str(allocation.get("reasoning", self.resource_broker.reasoning))},
             idempotency_key=key,
             task_id=self.task_id,
             dispatch_id="dispatch-" + stable_digest({"work_unit": unit_id}),
             host_id=self.adapter,
-            model=self.resource_broker.model,
-            reasoning=self.resource_broker.reasoning,
+            model=str(allocation.get("model", self.resource_broker.model)),
+            reasoning=str(allocation.get("reasoning", self.resource_broker.reasoning)),
             payload={"work_unit_envelope": envelope, "resource_receipt": allocation.get("receipt")},
         )
 
@@ -251,23 +264,34 @@ class LocalScheduler:
                     raise ValueError("capacity must be non-negative")
                 ready = ready[:capacity]
             allocations = self.resource_broker.allocate_lane_slots(self.task_id, ready)
+            allocation_by_unit = {item.entity_id: item for item in allocations}
             selected: list[LocalAction] = []
-            for unit, allocation in zip(ready, allocations):
+            for unit in ready:
+                allocation = allocation_by_unit.get(str(unit["id"]))
+                if allocation is None:
+                    continue
                 action = self.action_factory(unit, allocation.to_dict())
                 self._dispatch_compat_host(action)
                 selected.append(LocalAction(str(unit["id"]), action, allocation.to_dict(), "", ""))
             return selected
 
         self.recovery.expire()
-        ready = filter_ownership_conflicts(self.ready_units(), self.store._fetchall("SELECT * FROM leases WHERE state = 'active' AND scope_type = 'work_unit'"))
+        self._snapshot = None
+        self._snapshot_units = {}
+        ready = self.ready_units()
+        ready = filter_ownership_conflicts(ready, list((self._snapshot or {}).get("active_leases", ())))
         if capacity is not None:
             if capacity < 0:
                 raise ValueError("capacity must be non-negative")
             ready = ready[:capacity]
         allocations = self.resource_broker.allocate_lane_slots(self.task_id, ready)
+        allocation_by_unit = {item.entity_id: item for item in allocations}
         selected: list[LocalAction] = []
-        for unit, allocation in zip(ready, allocations):
+        for unit in ready:
             unit_id = str(unit["id"])
+            allocation = allocation_by_unit.get(unit_id)
+            if allocation is None:
+                continue
             ownership = _ownership(unit)
             try:
                 lease = self.recovery.acquire("work_unit", unit_id, self.owner_id, ownership)
@@ -345,10 +369,12 @@ class LocalScheduler:
     ) -> dict[str, Any]:
         """Create a same-lane correction envelope without replacing work."""
 
-        self._unit(str(work_unit_id))
-        return {
+        unit = self._unit(str(work_unit_id))
+        correction_id = "correction-" + uuid.uuid4().hex[:20]
+        correction = {
             "type": "Correction",
-            "target": str(work_unit_id),
+            "correction_id": correction_id,
+            "target": str(unit["id"]),
             "task_id": self.task_id,
             "scope": "same-lane",
             "expected_contract_revision": expected_contract_revision,
@@ -358,6 +384,13 @@ class LocalScheduler:
             "replacement": False,
             "new_work_unit_id": str(work_unit_id),
         }
+        if self.work_graph is None:
+            attempt = self.store._fetchone("SELECT id FROM work_unit_attempts WHERE work_unit_id = ? ORDER BY attempt_no DESC LIMIT 1", (unit["id"],))
+            self.store._execute(
+                "INSERT INTO corrections (id, run_id, target_type, target_id, attempt_id, payload_json, state, created_at, resolved_at) VALUES (?, ?, 'work_unit', ?, ?, ?, 'requested', ?, NULL)",
+                (correction_id, self._task_run_id(), unit["id"], attempt.get("id") if attempt else None, json.dumps(correction, sort_keys=True), _now()),
+            )
+        return correction
 
     def request_promotion(
         self,
@@ -373,7 +406,7 @@ class LocalScheduler:
     ) -> dict[str, Any]:
         """Return an explicit promotion request; do not promote locally."""
 
-        self._unit(str(work_unit_id))
+        unit = self._unit(str(work_unit_id))
         request = {
             "type": "PromotionRequest",
             "request_id": "promotion-" + uuid.uuid4().hex[:16],
@@ -385,22 +418,83 @@ class LocalScheduler:
             "requested_authority": list(map(str, requested_authority)),
             "requested_ownership": list(map(str, ownership if ownership is not None else requested_ownership)),
             "dependencies": list(map(str, dependencies)),
+            "context_seed_refs": [],
+            "cost_delta": {"top_level_slots": 1, "subagent_slots": 0, "time_budget": 0},
             "user_decision_required": False,
         }
         self._promotion_requests.append(request)
+        if self.work_graph is None:
+            run_id = self._task_run_id()
+            with self.store.transaction():
+                self.store._execute(
+                    "INSERT INTO promotion_requests (id, run_id, source_task_id, source_work_unit_id, payload_json, state, promoted_task_id, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, 'requested', NULL, ?, NULL)",
+                    (request["request_id"], run_id, self.task_id, unit["id"], json.dumps(request, sort_keys=True), _now()),
+                )
+                self.store._append_signal_in_transaction(
+                    run_id, "work_unit", str(unit["id"]), "PROMOTION_REQUESTED",
+                    {"request_id": request["request_id"], "source_task_id": self.task_id},
+                )
         return request
+
+    def persisted_promotion_requests(self) -> list[dict[str, Any]]:
+        """Return this lane's durable promotion boundary records."""
+
+        if self.work_graph is not None:
+            return [dict(item) for item in self._promotion_requests]
+        rows = self.store._fetchall(
+            "SELECT id, payload_json, state, promoted_task_id, resolved_at FROM promotion_requests WHERE source_task_id = ? ORDER BY created_at, id",
+            (self.task_id,),
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row.get("payload_json") or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            payload.update({
+                "request_id": str(row["id"]),
+                "state": str(row["state"]),
+                "promoted_task_id": row.get("promoted_task_id"),
+                "resolved_at": row.get("resolved_at"),
+            })
+            result.append(payload)
+        return result
+
+    def unresolved_boundaries(self) -> dict[str, list[dict[str, Any]]]:
+        """Load unresolved promotions/corrections from SQLite, not process memory."""
+
+        if self.work_graph is not None:
+            return {"promotions": [dict(item) for item in self._promotion_requests], "corrections": []}
+        promotions = self.store._fetchall(
+            "SELECT id, state FROM promotion_requests WHERE source_task_id = ? AND state = 'requested' ORDER BY created_at, id",
+            (self.task_id,),
+        )
+        corrections = self.store._fetchall(
+            """SELECT c.id, c.state, c.target_id, c.attempt_id
+               FROM corrections c JOIN work_units wu ON wu.id = c.target_id
+               WHERE wu.task_id = ? AND c.state IN ('requested','sent','failed')
+               ORDER BY c.created_at, c.id""",
+            (self.task_id,),
+        )
+        return {"promotions": promotions, "corrections": corrections}
 
     def synthesize(self, *, done_when: Sequence[str] = ()) -> dict[str, Any]:
         """Summarize local work and retain promotion requests as boundary records."""
 
         units = self._units()
-        terminal = {"completed", "failed", "cancelled", "blocked"}
-        status = "completed" if units and all(str(unit["state"]) in terminal for unit in units) else "verifying"
+        states = {str(unit["state"]) for unit in units}
+        status = (
+            "completed"
+            if units and states == {"completed"}
+            else "blocked"
+            if states.intersection({"blocked", "failed", "cancelled"})
+            else "verifying"
+        )
         return {
             "status": status,
             "task_id": self.task_id,
             "done_when": list(map(str, done_when)),
-            "promotion_requests": ["PromotionRequest" for _ in self._promotion_requests],
+            "promotion_requests": [dict(item) for item in self._promotion_requests],
         }
 
     def graph(self) -> dict[str, Any]:
@@ -430,9 +524,9 @@ def _ownership(unit: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _subset(children: Sequence[str], parents: Sequence[str]) -> bool:
-    from .conflicts import path_overlaps
+    from ..core.policy import contains_all
 
-    return all(any(path_overlaps(child, parent) for parent in parents) for child in children)
+    return contains_all(parents, children)
 
 
 LocalSchedulerAPI = LocalScheduler

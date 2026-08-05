@@ -19,7 +19,7 @@ from ..domain import (
     TaskState,
     WorkGraph,
 )
-from .base import PackManifest, TaskGraph, contract_for, dependency, task_for
+from .base import CompiledRunGraph, PackManifest, contract_for, dependency, task_for
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -48,7 +48,7 @@ class DeliveryPack:
         external_action_policy="ask",
     )
 
-    def compile_goal(self, run_intent: RunIntent) -> TaskGraph:
+    def compile_goal(self, run_intent: RunIntent) -> CompiledRunGraph:
         run_id = f"run-{run_intent.intent_id}"
         templates = _as_list(run_intent.pack.config.get("tasks"))
         if not templates:
@@ -57,7 +57,7 @@ class DeliveryPack:
                     "id": "deliver",
                     "outcome": run_intent.goal,
                     "done_when": list(run_intent.done_when),
-                    "ownership": list(run_intent.repository.protected_paths),
+                    "ownership": [],
                     "checks": ["changed paths satisfy ownership", "declared done_when is evidenced"],
                 }
             ]
@@ -86,7 +86,7 @@ class DeliveryPack:
                 exports=tuple({"name": str(item), "kind": "artifact", "version": 1, "description": f"Delivery artifact {item}"} for item in raw.get("exports", ())),
             )
             contracts.append(contract)
-            task = task_for(run_id=run_id, task_id=task_id, outcome=outcome, contract=contract, dependencies=dependencies, priority=int(raw.get("priority", 0)))
+            task = task_for(run_id=run_id, task_id=task_id, outcome=outcome, contract=contract, dependencies=dependencies, priority=int(raw.get("priority", 0)), resource_envelope=raw.get("resource_envelope"))
             tasks.append(task)
             graph = WorkGraph(task_id)
             root_id = f"{task_id}-root"
@@ -97,15 +97,16 @@ class DeliveryPack:
                 authority=(AuthorityAction.READ.value, AuthorityAction.WRITE.value, AuthorityAction.EXECUTE_LOCAL.value, AuthorityAction.DELEGATE_RECURSIVE.value, AuthorityAction.REPORT.value),
                 ownership=ownership,
                 checks=tuple(str(item) for item in raw.get("checks", done_when or run_intent.done_when)),
+                resource_envelope=raw.get("work_unit_resource_envelope", raw.get("resource_envelope", {})),
                 state="ready",
             )
             work_graphs[task_id] = graph
-        return TaskGraph(
+        return CompiledRunGraph(
             run_id=run_id,
             tasks=tuple(tasks),
             contracts=tuple(contracts),
             work_graphs=work_graphs,
-            metadata={"pack": self.id, "templates": len(templates), "resource_defaults": {"subagent_slots_per_lane": "auto", "external_action_policy": run_intent.resource_envelope.external_action_policy}},
+            metadata={"pack": self.id, "templates": len(templates), "forbidden_scope": list(run_intent.repository.protected_paths), "resource_defaults": {"subagent_slots_per_lane": "auto", "external_action_policy": run_intent.resource_envelope.external_action_policy}},
         )
 
     def enrich_context(self, scope: Any, bundle: Any) -> Any:

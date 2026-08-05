@@ -2,8 +2,9 @@
 
 The product API is still being introduced by the other lanes.  This module
 keeps the expected test protocol in one place without implementing runtime
-behaviour.  Module absence is a planned skip; an available module with a
-missing symbol is an actionable contract failure.
+behaviour.  Module or symbol absence is an actionable contract failure: the
+runtime is part of this repository and the full CI suite must never turn a
+missing implementation into a planned skip.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ PACKAGE_CANDIDATES = (
 
 
 def require_package() -> ModuleType:
-    """Import only the vNext package, or skip while it is not present."""
+    """Import only the vNext package, failing if it is not present."""
 
     errors: list[str] = []
     for name in PACKAGE_CANDIDATES:
@@ -39,16 +40,14 @@ def require_package() -> ModuleType:
             if exc.name != name:
                 raise
             errors.append(f"{name}: {exc}")
-    pytest.skip(
+    raise ModuleNotFoundError(
         "vNext runtime is not available; legacy runtime is intentionally excluded "
-        f"from these contract tests ({'; '.join(errors)})",
-        allow_module_level=False,
+        f"from these contract tests ({'; '.join(errors)})"
     )
-    raise AssertionError("pytest.skip should have interrupted execution")
 
 
 def require_module(suffix: str) -> ModuleType:
-    """Import a vNext submodule; absence is a bounded implementation skip."""
+    """Import a required vNext submodule; absence fails the contract."""
 
     package = require_package()
     package_name = package.__name__
@@ -57,10 +56,9 @@ def require_module(suffix: str) -> ModuleType:
         return importlib.import_module(name)
     except ModuleNotFoundError as exc:
         if exc.name == name:
-            pytest.skip(
-                f"vNext module {name!r} is not available yet; this contract is pending",
-                allow_module_level=False,
-            )
+            raise ModuleNotFoundError(
+                f"required vNext module {name!r} is not available"
+            ) from exc
         raise
 
 

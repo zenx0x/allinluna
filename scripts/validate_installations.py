@@ -60,6 +60,16 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             installed_plugin_root = install_root / name / source_path[2:]
             if not (installed_plugin_root / "skills").is_dir():
                 errors.append(f"{name} has no installable skills directory")
+            skill = installed_plugin_root / "skills" / "allinluna" / "SKILL.md"
+            if not skill.is_file():
+                errors.append(f"{name} has no installed All in Luna Skill entrypoint")
+            elif name == "allinluna":
+                text = skill.read_text(encoding="utf-8")
+                installed_manifest = read_json(installed_plugin_root / ".codex-plugin/plugin.json")
+                if installed_manifest.get("version") != "1.1.0":
+                    errors.append("installed All in Luna plugin version is not 1.1.0")
+                if not all(needle in text for needle in ("not hard", "locked", "resource_receipt.requested")):
+                    errors.append("installed All in Luna Skill lacks configurable-resource receipt guidance")
             if not (install_root / name / "canonical-files.json").is_file():
                 errors.append(f"{name} has no canonical source manifest")
             if not (installed_plugin_root / "runtime" / "allinluna_runtime").is_dir():

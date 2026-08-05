@@ -16,6 +16,7 @@ from ..resource import ResourceBroker, SlotAllocation
 from ..store import LeaseConflictError
 from ..adapters.host.base import HostAction, stable_digest
 from ..domain import ExportPort, TaskGraph, TaskState
+from ..handoff import HandoffProcessor, HandoffVerificationError
 from .conflicts import critical_path_lengths, detect_cycles, filter_ownership_conflicts
 from .leases import LeaseRecoveryBehavior
 
@@ -58,6 +59,7 @@ class GlobalScheduler:
         adapter: str = "codex-app",
         lease_ttl_seconds: int | float = 300,
         action_factory: Callable[[Mapping[str, Any], Mapping[str, Any]], HostAction] | None = None,
+        handoff_processor: HandoffProcessor | None = None,
     ) -> None:
         self.store = store
         self.resource_broker = resource_broker or ResourceBroker()
@@ -67,13 +69,25 @@ class GlobalScheduler:
         self.action_factory = action_factory or self._default_action
         self.last_decision: SchedulerDecision | None = None
         self.host = host
+        self.handoff_processor = handoff_processor or HandoffProcessor(store)
         self._compat_run_id: str | None = None
         self._compat_graph: TaskGraph | None = None
         self._compat_exports: dict[str, set[str]] = {}
         self._compat_blocked: set[str] = set()
+        self._snapshot: dict[str, Any] | None = None
+        self._snapshot_tasks: dict[str, dict[str, Any]] = {}
+
+    def _invalidate_snapshot(self) -> None:
+        self._snapshot = None
+        self._snapshot_tasks = {}
 
     def _tasks(self, run_id: str) -> list[dict[str, Any]]:
-        return self.store._fetchall("SELECT * FROM tasks WHERE run_id = ? ORDER BY id", (run_id,))
+        if self._snapshot is None or str(self._snapshot.get("run_id")) != str(run_id):
+            self._snapshot = self.store.scheduler_snapshot(run_id)
+            self._snapshot_tasks = {
+                str(task["id"]): task for task in self._snapshot.get("tasks", ())
+            }
+        return list(self._snapshot.get("tasks", ()))
 
     def _task(self, task_id: str) -> dict[str, Any]:
         value = self.store.get_task(task_id)
@@ -82,10 +96,14 @@ class GlobalScheduler:
         return value
 
     def _dependencies(self, task: Mapping[str, Any]) -> list[dict[str, Any]]:
+        if "dependencies" in task:
+            return list(task.get("dependencies", ()))
         return list(self.store.get_task(str(task["id"])).get("dependencies", ()))
 
     def _dependency_ready(self, dependency: Mapping[str, Any]) -> bool:
-        upstream = self.store.get_task(str(dependency["depends_on_task_id"]))
+        upstream = self._snapshot_tasks.get(str(dependency["depends_on_task_id"]))
+        if upstream is None:
+            upstream = self.store.get_task(str(dependency["depends_on_task_id"]))
         if upstream is None:
             return False
         condition = dependency.get("condition") or {}
@@ -97,27 +115,25 @@ class GlobalScheduler:
         return upstream["state"] == "completed"
 
     def _available_exports(self, task_id: str) -> set[str]:
-        """Read completed exports from the Store-backed contract projection."""
+        """Read only verified export values, never contract declarations."""
 
         available = set(self._compat_exports.get(str(task_id), set()))
-        task = self.store.get_task(str(task_id))
+        task = self._snapshot_tasks.get(str(task_id)) or self.store.get_task(str(task_id))
         if task is None:
             return available
-        contract = self.store.get_contract(str(task["contract_id"]), int(task["contract_version"]))
-        for item in (contract or {}).get("exports", ()):
-            if isinstance(item, Mapping):
-                name = item.get("name")
-            else:
-                name = item
-            if name:
-                available.add(str(name))
+        if "actual_exports" in task:
+            available.update(map(str, task.get("actual_exports", ())))
+        elif hasattr(self.store, "task_exports"):
+            available.update(str(item["port_name"]) for item in self.store.task_exports(str(task["id"])))
         return available
 
     def _graph(self, tasks: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Sequence[str]], tuple[str, ...]]:
         deps = {str(task["id"]): tuple(str(item["depends_on_task_id"]) for item in self._dependencies(task)) for task in tasks}
         return deps, detect_cycles((str(task["id"]) for task in tasks), deps)
 
-    def ready_tasks(self, run_id: str) -> list[dict[str, Any]]:
+    def ready_tasks(self, run_id: str, *, _reuse_snapshot: bool = False) -> list[dict[str, Any]]:
+        if not _reuse_snapshot:
+            self._invalidate_snapshot()
         tasks = self._tasks(run_id)
         deps, cycle = self._graph(tasks)
         if cycle:
@@ -125,12 +141,12 @@ class GlobalScheduler:
         result: list[dict[str, Any]] = []
         for task in tasks:
             state = str(task["state"])
-            if state not in {"proposed", "ready", "blocked"}:
+            if state not in {"proposed", "ready"}:
                 continue
             if str(task["id"]) in self._compat_blocked:
                 continue
             if all(self._dependency_ready(item) for item in self._dependencies(task)):
-                result.append(self.store.get_task(str(task["id"])) or task)
+                result.append(task)
         return result
 
     # ------------------------------------------------------------------
@@ -288,7 +304,9 @@ class GlobalScheduler:
     def add_task(self, task_id: str, *, priority: int = 0, ownership: Sequence[str] = (), lane_id: str | None = None, **kwargs: Any) -> dict[str, Any]:
         run_id = self._ensure_compat_run()
         value = {"id": str(task_id), "run_id": run_id, "outcome": str(kwargs.get("outcome") or task_id), "priority": priority, "ownership": {"paths": list(ownership)}, "state": "proposed", "contract_id": f"contract-{task_id}", "done_when": [str(kwargs.get("outcome") or task_id)]}
-        return self.store.create_task(value, run_id=run_id)
+        created = self.store.create_task(value, run_id=run_id)
+        self._invalidate_snapshot()
+        return created
 
     def add_dependency(self, parent_id: str, child_id: str, *, condition: Mapping[str, Any] | None = None) -> None:
         run_id = self._ensure_compat_run()
@@ -303,6 +321,7 @@ class GlobalScheduler:
             raise ValueError("cyclic task dependency")
         with self.store.transaction():
             self.store._execute("INSERT INTO task_dependencies (task_id, depends_on_task_id, condition_json) VALUES (?, ?, ?)", (child_id, parent_id, json.dumps(dict(condition or {"type": "completed"}), sort_keys=True)))
+        self._invalidate_snapshot()
 
     def dependencies_satisfied(self, task_id: str) -> bool:
         task = self._task(task_id)
@@ -319,6 +338,7 @@ class GlobalScheduler:
 
     def age(self, task_id: str, *, ticks: int = 1) -> dict[str, Any]:
         self.store._execute("UPDATE tasks SET updated_at = ? WHERE id = ?", ("1970-01-01T00:00:00Z", task_id))
+        self._invalidate_snapshot()
         return self._task(task_id)
 
     def rank_ready(self) -> list[dict[str, Any]]:
@@ -328,6 +348,7 @@ class GlobalScheduler:
         return [{"task_id": str(task["id"]), **task} for task in sorted(tasks, key=lambda item: self._score(item, critical_path_lengths(deps, deps), {}), reverse=True)]
 
     def block(self, task_id: str, *, reason: str = "blocked") -> dict[str, Any]:
+        self._invalidate_snapshot()
         self._compat_blocked.add(task_id)
         current = self._task(task_id)
         if current["state"] in {"proposed", "ready"}:
@@ -342,7 +363,9 @@ class GlobalScheduler:
         return self._task(task_id)
 
     def complete(self, task_id: str, *, exports: Sequence[str] = ()) -> dict[str, Any]:
+        self._invalidate_snapshot()
         task = self._task(task_id)
+        task_id = str(task["id"])
         completed_exports = tuple(sorted({str(item) for item in exports}))
         self._compat_exports.setdefault(task_id, set()).update(completed_exports)
         self._compat_blocked.discard(task_id)
@@ -351,26 +374,16 @@ class GlobalScheduler:
         def finish() -> dict[str, Any]:
             self.store._execute("UPDATE tasks SET state = 'completed', updated_at = ? WHERE id = ?", (_now(), task_id))
             if completed_exports:
-                contract = self.store.get_contract(str(task["contract_id"]), int(task["contract_version"]))
-                existing_exports = list((contract or {}).get("exports", ()))
-                known = {
-                    str(item.get("name")) if isinstance(item, Mapping) else str(item)
-                    for item in existing_exports
-                }
-                existing_exports.extend(
-                    {
-                        "name": name,
-                        "kind": "artifact",
-                        "version": 1,
-                        "description": f"Completed export {name}",
-                    }
-                    for name in completed_exports
-                    if name not in known
+                self.store.install_task_exports(
+                    task_id,
+                    completed_exports,
+                    source_handoff_id=f"compat-completion:{task_id}",
+                    contract_version=int(task["contract_version"]),
                 )
-                self.store._execute(
-                    "UPDATE contracts SET exports_json = ? WHERE id = ? AND version = ?",
-                    (json.dumps(existing_exports, sort_keys=True, separators=(",", ":")), task["contract_id"], task["contract_version"]),
-                )
+            self.store._execute(
+                "UPDATE dispatch_outbox SET state = 'reconciled', updated_at = ? WHERE target_type = 'task' AND target_id = ? AND state IN ('pending','emitted','acknowledged')",
+                (_now(), task_id),
+            )
             return self._task(task_id)
 
         completed = self.store._write(finish)
@@ -395,16 +408,30 @@ class GlobalScheduler:
         return len(self.store.attempts_for_task(task_id))
 
     def recover(self, *, unfinished: Sequence[Any] = ()) -> list[dict[str, Any]]:
+        # Lazy import keeps scheduler package initialization cycle-free:
+        # engine.__init__ also exposes CoordinatorEngine, which imports us.
+        from ..engine.action_bridge import ActionBridge
+
         result = []
+        bridge = ActionBridge(self.store, self.host, adapter=self.adapter, resource_broker=self.resource_broker)
         for item in unfinished:
             raw = _raw(item)
-            result.append({"task_id": raw.get("task_id"), "dispatch_id": raw.get("dispatch_id"), "receipt_checked": True})
+            action = HostAction.from_value(raw)
+            reconciled = bridge.reconcile(action)
+            result.append({
+                "task_id": action.task_id,
+                "dispatch_id": action.dispatch_id,
+                "receipt_checked": True,
+                "reconciliation": reconciled,
+            })
         return result
 
     def ingest_receipt(self, receipt: Any) -> dict[str, Any]:
         return self.store.ingest_receipt(receipt)
 
     def _active_ownership(self) -> list[dict[str, Any]]:
+        if self._snapshot is not None:
+            return list(self._snapshot.get("active_leases", ()))
         rows = self.store._fetchall("SELECT write_set_json FROM leases WHERE state = 'active'")
         for row in rows:
             try:
@@ -419,8 +446,11 @@ class GlobalScheduler:
             waited = int(datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(updated.replace("Z", "+00:00")).timestamp())
         except (TypeError, ValueError):
             waited = 0
+        # One priority point per five minutes guarantees eventual service for
+        # a continuously-ready lane without erasing explicit short-term order.
+        effective_priority = int(task.get("priority", 0)) + max(0, waited // 300)
         return (
-            int(task.get("priority", 0)),
+            effective_priority,
             downstream.get(str(task["id"]), 0),
             critical.get(str(task["id"]), 0),
             min(waited, 2**31 - 1),
@@ -430,17 +460,46 @@ class GlobalScheduler:
 
     def _default_action(self, task: Mapping[str, Any], allocation: Mapping[str, Any]) -> HostAction:
         task_id = str(task["id"])
-        dispatch_id = f"lane-{task_id}"
-        key = "intent:lane:" + stable_digest({"task_id": task_id, "dispatch_id": dispatch_id})
+        latest = task.get("latest_attempt") or self.store._fetchone("SELECT COALESCE(MAX(attempt_no), 0) AS attempt_no FROM task_attempts WHERE task_id = ?", (task_id,))
+        attempt_no = int((latest or {}).get("attempt_no", 0)) + 1
+        dispatch_id = f"lane-{task_id}-attempt-{attempt_no}"
+        key = "intent:lane:" + stable_digest({
+            "run_id": str(task["run_id"]),
+            "task_id": task_id,
+            "contract_revision": int(task["contract_version"]),
+            "attempt_no": attempt_no,
+            "workspace": allocation.get("workspace_identity"),
+            "execution_mode": "top-level-lane",
+        })
+        attempt_id = "lane-attempt-" + stable_digest({"dispatch_key": key})
         ownership = [str(item.get("path")) for item in task.get("ownership", ()) if str(item.get("access", "write")) == "write"]
         envelope = {
+            "kind": "task-envelope",
+            "schema_version": "1.0",
             "protocol": "task-envelope/v1",
+            "message_id": "message-" + stable_digest({"dispatch_key": key}),
             "run_ref": f"run://{task['run_id']}",
             "task_id": task_id,
+            "lane_attempt_ref": f"lane-attempt://{attempt_id}",
+            "idempotency_key": key,
             "contract_ref": f"contract://task/{task['contract_id']}@{task['contract_version']}",
-            "context_ref": task.get("lane_snapshot_id") and f"context://{task['lane_snapshot_id']}",
+            "context_ref": f"context://{task.get('lane_snapshot_id') or 'task/' + task_id}",
             "ownership": ownership,
+            "resource_envelope": {
+                "subagent_slots": int(getattr(self.resource_broker, "default_lane_budget", 1)),
+                "model_policy": "explicit",
+                "model": str(allocation.get("model", self.resource_broker.model)),
+                "reasoning_policy": "explicit",
+                "reasoning": str(allocation.get("reasoning", self.resource_broker.reasoning)),
+                "external_action_policy": str(allocation.get("external_action_policy", self.resource_broker.external_action_policy)),
+            },
             "response_contract": "lane-handoff/v1",
+            "attempt": attempt_no,
+            "created_at": _now(),
+            "extensions": {
+                "local_graph_ref": f"runtime-db://work-graph/{task_id}",
+                "local_work_units": [str(item["id"]) for item in self.store._fetchall("SELECT id FROM work_units WHERE task_id = ? ORDER BY created_at", (task_id,))],
+            },
         }
         arguments = {
             "target": {"type": "project", "task_id": task_id},
@@ -458,27 +517,48 @@ class GlobalScheduler:
             task_id=task_id,
             dispatch_id=dispatch_id,
             host_id=self.adapter,
-            model=self.resource_broker.model,
-            reasoning=self.resource_broker.reasoning,
+            model=str(allocation.get("model", self.resource_broker.model)),
+            reasoning=str(allocation.get("reasoning", self.resource_broker.reasoning)),
             identity={"run_id": str(task["run_id"]), "task_id": task_id},
-            payload={"task_envelope": envelope, "resource_receipt": allocation.get("receipt")},
+            payload={"task_envelope": envelope, "resource_receipt": allocation.get("receipt"), "attempt_id": attempt_id},
         )
 
     def _pending_actions(self, run_id: str) -> list[HostAction]:
+        if hasattr(self.store, "pending_outbox"):
+            return [HostAction.from_value(item["action"]) for item in self.store.pending_outbox(run_id)]
+        return []
+
+    def preview(self, run_id: str) -> list[HostAction]:
+        """Build a read-only action preview without leases, attempts, or outbox writes."""
+
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise KeyError(run_id)
+        ready = self.ready_tasks(run_id)
+        policy = run.get("policy") or run.get("policy_json") or {}
+        if isinstance(policy, str):
+            try:
+                policy = json.loads(policy)
+            except json.JSONDecodeError:
+                policy = {}
         actions: list[HostAction] = []
-        for task in self._tasks(run_id):
-            if str(task["state"]) != "dispatching":
-                continue
-            attempt = self.store._fetchone("SELECT * FROM task_attempts WHERE task_id = ? ORDER BY attempt_no DESC LIMIT 1", (task["id"],))
-            if not attempt or attempt.get("receipt_id"):
-                continue
-            allocation = {"model": self.resource_broker.model, "reasoning": self.resource_broker.reasoning, "receipt": self.resource_broker._receipt().to_dict()}
-            actions.append(self.action_factory(self.store.get_task(str(task["id"])) or task, allocation))
+        for task in ready:
+            requested = task.get("resource_envelope") or policy
+            receipt = self.resource_broker._receipt(requested)
+            allocation = {
+                "model": receipt.resolved["model"],
+                "reasoning": receipt.resolved["reasoning"],
+                "external_action_policy": receipt.resolved["external_action_policy"],
+                "receipt": receipt.to_dict(),
+            }
+            actions.append(self.action_factory(task, allocation))
         return actions
 
     def step(self, run_id: str | None = None, *, capacity: int | None = None) -> list[Any]:
         compat = run_id is None
         run_id = run_id or self._ensure_compat_run()
+        self.resource_broker.bind(self.store, run_id)
+        self.resource_broker.recover()
         if capacity is not None:
             previous = self.resource_broker.top_level_budget
             self.resource_broker.top_level_budget = min(previous, max(0, int(capacity)))
@@ -490,12 +570,16 @@ class GlobalScheduler:
         if run["status"] == "created":
             self.store.update_run_status(run_id, "active", signal_type="RUN_STARTED", payload={"source": "global_scheduler"})
         self.recovery.expire()
+        # One coherent Store view per scheduling step.  Any writes below are
+        # dispatch effects and become visible to the next step/reconciliation.
+        self._snapshot = None
+        self._snapshot_tasks = {}
         tasks = self._tasks(run_id)
         dependencies, cycle = self._graph(tasks)
         if cycle:
             self.last_decision = SchedulerDecision(run_id, (), (), (), (), cycle)
             return []
-        ready = self.ready_tasks(run_id)
+        ready = self.ready_tasks(run_id, _reuse_snapshot=True)
         downstream: dict[str, int] = {str(task["id"]): 0 for task in tasks}
         for task, deps in dependencies.items():
             for dep in deps:
@@ -503,11 +587,26 @@ class GlobalScheduler:
         critical = critical_path_lengths((str(task["id"]) for task in tasks), dependencies)
         ready.sort(key=lambda item: self._score(item, critical, downstream), reverse=True)
         ready = filter_ownership_conflicts(ready, self._active_ownership())
-        allocations = self.resource_broker.allocate_top_level_slots(ready)
+        policy = run.get("policy") or run.get("policy_json") or {}
+        if isinstance(policy, str):
+            try:
+                policy = json.loads(policy)
+            except json.JSONDecodeError:
+                policy = {}
+        backlog_limit = int(policy.get("max_outbox_backlog", max(1, self.resource_broker.top_level_budget * 2)))
+        backlog = int((self._snapshot or {}).get("outbox_backlog", 0))
+        # Preserve already-durable actions, but do not create unbounded new
+        # intents while the host/reconciler is behind.
+        allocation_candidates = ready if backlog < backlog_limit else []
+        allocations = self.resource_broker.allocate_top_level_slots(allocation_candidates)
+        allocation_by_task = {item.entity_id: item for item in allocations}
         actions: list[HostAction] = []
         selected: list[str] = []
-        for task, allocation in zip(ready, allocations):
+        for task in allocation_candidates:
             task_id = str(task["id"])
+            allocation = allocation_by_task.get(task_id)
+            if allocation is None:
+                continue
             ownership = [str(item.get("path")) for item in task.get("ownership", ()) if str(item.get("access", "write")) == "write"]
             try:
                 self.recovery.acquire("task", task_id, self.owner_id, ownership)
@@ -533,21 +632,47 @@ class GlobalScheduler:
         return row.get("id") if row else None
 
     def reconcile(self, run_id: str, receipts: Sequence[Any] = ()) -> dict[str, Any]:
+        from ..engine.action_bridge import ActionBridge
+
         ingested = []
         for receipt in receipts:
             ingested.append(self.store.ingest_receipt(receipt))
+        bridge = ActionBridge(self.store, self.host, adapter=self.adapter, resource_broker=self.resource_broker)
+        reconciled = [bridge.reconcile(action) for action in self._pending_actions(run_id)]
         recovery = self.recovery.recover()
         actions = self.step(run_id)
-        return {"run_id": run_id, "ingested": ingested, "expired": len(recovery.expired), "actions": [action.to_dict() for action in actions]}
+        return {"run_id": run_id, "ingested": ingested, "reconciled": reconciled, "expired": len(recovery.expired), "actions": [action.to_dict() for action in actions]}
 
     def accept_handoff(self, task_id: str, handoff: Mapping[str, Any]) -> dict[str, Any]:
         task = self._task(task_id)
+        task_id = str(task["id"])
         status = str(handoff.get("status"))
         if status == "completed":
-            if task["state"] == "active":
-                self.store.update_task_status(task_id, "verifying", signal_type="LANE_VERIFY_REQUIRED", payload=dict(handoff))
-            if (self.store.get_task(task_id) or {}).get("state") == "verifying":
+            try:
+                handoff = self.handoff_processor.verify(task, handoff)
+            except HandoffVerificationError as exc:
+                self.store.append_signal(
+                    str(task["run_id"]), "HANDOFF_VERIFICATION_FAILED",
+                    {"task_id": task_id, "stage": exc.stage, "message": str(exc)},
+                    scope_type="task", scope_id=task_id,
+                )
+                raise
+            with self.store.transaction():
+                current = self.store.get_task(task_id) or task
+                if current["state"] == "active":
+                    self.store.update_task_status(task_id, "verifying", signal_type="LANE_VERIFY_REQUIRED", payload={"handoff_id": handoff.get("handoff_id")})
+                elif current["state"] != "verifying":
+                    raise ValueError(f"task {task_id} cannot accept a completed handoff from {current['state']}")
+                self.store.install_task_exports(task_id, list(handoff.get("exports") or ()), source_handoff_id=str(handoff["handoff_id"]), contract_version=int(task["contract_version"]))
+                for promotion in handoff.get("promotion_requests", ()) or ():
+                    request_id = str(promotion.get("request_id"))
+                    self.store._execute(
+                        "INSERT OR IGNORE INTO promotion_requests (id, run_id, source_task_id, source_work_unit_id, payload_json, state, promoted_task_id, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, 'requested', NULL, ?, NULL)",
+                        (request_id, task["run_id"], task_id, promotion.get("from_work_unit"), json.dumps(dict(promotion), sort_keys=True), _now()),
+                    )
                 self.store.update_task_status(task_id, "completed", signal_type="TASK_COMPLETED", payload={"handoff_id": handoff.get("handoff_id")})
+                self.store._execute("UPDATE task_attempts SET state = 'closed', ended_at = COALESCE(ended_at, ?) WHERE task_id = ? AND state IN ('active','handoff_ready','acknowledged')", (_now(), task_id))
+                self.store._execute("UPDATE dispatch_outbox SET state = 'reconciled', updated_at = ? WHERE target_type = 'task' AND target_id = ? AND state IN ('pending','emitted','acknowledged')", (_now(), task_id))
         elif status in {"blocked", "failed", "cancelled"}:
             current = self.store.get_task(task_id) or task
             if status == "blocked" and current["state"] in {"active", "waiting", "verifying"}:

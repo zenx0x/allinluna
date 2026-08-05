@@ -90,8 +90,14 @@
         "contract_ref": {"$ref": "#/$defs/contract_ref"},
         "lane_attempt_ref": {"anyOf": [{"$ref": "#/$defs/lane_attempt_ref"}, {"type": "null"}]},
         "requested_model": {"type": ["string", "null"], "minLength": 1},
+        "requested_reasoning": {"type": ["string", "null"], "minLength": 1},
+        "resolved_model": {"type": ["string", "null"], "minLength": 1},
+        "resolved_reasoning": {"type": ["string", "null"], "minLength": 1},
         "actual_model": {"type": ["string", "null"], "minLength": 1},
+        "actual_reasoning": {"type": ["string", "null"], "minLength": 1},
         "actual_model_state": {"enum": ["resolved", "unresolved"]},
+        "resource_evidence_source": {"type": ["string", "null"], "minLength": 1},
+        "resource_observed_at": {"type": ["string", "null"], "minLength": 1},
         "receipt_ref": {"anyOf": [{"$ref": "#/$defs/receipt_ref"}, {"type": "null"}]},
         "active_children": {"type": "integer", "minimum": 0},
         "contract_revision": {"type": "integer", "minimum": 1}
@@ -103,8 +109,13 @@
             "properties": {"actual_model_state": {"const": "resolved"}}
           },
           "then": {
-            "required": ["actual_model"],
-            "properties": {"actual_model": {"type": "string", "minLength": 1}}
+            "required": ["resolved_model", "resolved_reasoning", "actual_model", "actual_reasoning", "resource_evidence_source", "resource_observed_at"],
+            "properties": {
+              "actual_model": {"type": "string", "minLength": 1},
+              "actual_reasoning": {"type": "string", "minLength": 1},
+              "resource_evidence_source": {"type": "string", "minLength": 1},
+              "resource_observed_at": {"$ref": "#/$defs/timestamp"}
+            }
           }
         },
         {
@@ -113,7 +124,12 @@
             "properties": {"actual_model_state": {"const": "unresolved"}}
           },
           "then": {
-            "properties": {"actual_model": {"type": "null"}}
+            "properties": {
+              "actual_model": {"type": "null"},
+              "actual_reasoning": {"type": "null"},
+              "resource_evidence_source": {"type": "null"},
+              "resource_observed_at": {"type": "null"}
+            }
           }
         }
       ]

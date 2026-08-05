@@ -1,5 +1,5 @@
 {
-  "source": "../../../shared",
-  "generated_by": "scripts/sync_distribution_runtime.py",
-  "contract": "shared source is canonical; bundled runtime makes this plugin independently installable"
+  "source": "./allinluna_runtime",
+  "generated_by": "repository source",
+  "contract": "the bundled vNext runtime is canonical and independently installable; duplicate shared runtimes are forbidden"
 }

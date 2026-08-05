@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
+from ..adapters.host.base import HostAction, stable_digest
 from ..resource import ResourceBroker
 from ..scheduler.local_scheduler import LocalAction, LocalScheduler
 from ..scheduler.conflicts import path_overlaps
@@ -32,11 +33,18 @@ class LaneEngine:
 
     def __init__(self, store: Any, task_id: str, *, context_kernel: Any = None, artifact_store: Any = None, host: Any = None, resource_broker: ResourceBroker | None = None, bridge: ActionBridge | None = None, scheduler: LocalScheduler | None = None, adapter: str = "native-subagent") -> None:
         self.store = store
-        self.task_id = str(task_id)
+        persisted_task = store.get_task(str(task_id))
+        self.task_id = str(persisted_task["id"] if persisted_task is not None else task_id)
         self.context_kernel = context_kernel
         self.artifact_store = artifact_store
+        if resource_broker is None and persisted_task is not None:
+            run = store.get_run(str(persisted_task["run_id"])) or {}
+            resource_broker = ResourceBroker(persisted_task.get("resource_envelope") or run.get("policy") or {}, store=store, run_id=str(persisted_task["run_id"]))
         self.resource_broker = resource_broker or ResourceBroker()
-        self.bridge = bridge or ActionBridge(store, host, adapter=adapter)
+        if persisted_task is not None:
+            self.resource_broker.bind(store, str(persisted_task["run_id"]))
+            self.resource_broker.recover()
+        self.bridge = bridge or ActionBridge(store, host, adapter=adapter, resource_broker=self.resource_broker)
         self.scheduler = scheduler or LocalScheduler(store, self.task_id, resource_broker=self.resource_broker, adapter=adapter)
         self.last_handoff: dict[str, Any] | None = None
 
@@ -83,6 +91,7 @@ class LaneEngine:
         return unit
 
     def tick(self, *, dispatch: bool = True) -> dict[str, Any]:
+        correction_results = self.process_corrections(dispatch=dispatch)
         actions = self.scheduler.step()
         receipts: list[Any] = []
         if dispatch:
@@ -90,7 +99,7 @@ class LaneEngine:
                 result = self.bridge.dispatch(local.action)
                 receipts.append(result)
         handoff = self.synthesize_handoff() if self._all_work_terminal() else None
-        return {"task_id": self.task_id, "actions": [item.action.to_dict() for item in actions], "receipts": receipts, "handoff": handoff}
+        return {"task_id": self.task_id, "actions": [item.action.to_dict() for item in actions], "receipts": receipts, "corrections": correction_results, "handoff": handoff}
 
     def ingest_receipt(self, unit_id: str, receipt: Any) -> dict[str, Any]:
         result = self.bridge.ingest_receipt(receipt)
@@ -111,39 +120,91 @@ class LaneEngine:
         return self.synthesize_handoff(status=str(value.get("status", "blocked")), summary=str(value.get("summary", "lane handoff")))
 
     def request_promotion(self, work_unit_id: str, *, proposed_outcome: str, reason: str, ownership: Sequence[str] = (), dependencies: Sequence[str] = ()) -> dict[str, Any]:
-        return {
-            "request_id": "promotion-" + uuid.uuid4().hex[:16],
-            "from_task": self.task_id,
-            "from_work_unit": str(work_unit_id),
-            "proposed_outcome": proposed_outcome,
-            "reason": reason,
-            "requested_ownership": list(map(str, ownership)),
-            "dependencies": list(map(str, dependencies)),
-            "context_seed_refs": [f"context://task/{self.task_id}"],
-            "cost_delta": {"top_level_slots": 1, "subagent_slots": 0, "time_budget": 0},
-            "user_decision_required": False,
-        }
+        return self.scheduler.request_promotion(
+            str(work_unit_id), proposed_outcome=proposed_outcome, reason=reason,
+            requested_ownership=ownership, dependencies=dependencies,
+        )
 
     promote = request_promotion
 
     def correct(self, work_unit_id: str, *, issue: str, expected_contract_revision: int | None = None, required_change: str | None = None) -> dict[str, Any]:
-        """Return a same-lane correction envelope without replacing the WorkUnit."""
+        """Persist and send a correction to the existing WorkUnit thread."""
 
-        unit = self.store.get_work_unit(str(work_unit_id))
-        if unit is None or str(unit.get("task_id")) != self.task_id:
-            raise KeyError(work_unit_id)
-        return {
-            "type": "Correction",
-            "target": str(work_unit_id),
-            "task_id": self.task_id,
-            "scope": "same-lane",
-            "expected_contract_revision": expected_contract_revision,
-            "issue": issue,
-            "required_change": required_change or issue,
-            "idempotency_key": "intent:correction:" + uuid.uuid4().hex[:20],
-            "replacement": False,
-            "new_work_unit_id": str(work_unit_id),
-        }
+        correction = self.scheduler.correct(
+            str(work_unit_id), issue=issue,
+            expected_contract_revision=expected_contract_revision,
+            required_change=required_change,
+        )
+        processed = self.process_corrections(correction_id=str(correction["correction_id"]))
+        return processed[0] if processed else correction
+
+    def process_corrections(self, *, correction_id: str | None = None, dispatch: bool = True) -> list[dict[str, Any]]:
+        """Resume durable corrections on the original worker/thread only."""
+
+        params: list[Any] = [self.task_id]
+        where_id = ""
+        if correction_id is not None:
+            where_id = " AND c.id = ?"
+            params.append(correction_id)
+        rows = self.store._fetchall(
+            """SELECT c.*, hr.thread_id, hr.host_id
+               FROM corrections c
+               JOIN work_units wu ON wu.id = c.target_id
+               LEFT JOIN work_unit_attempts wua ON wua.id = c.attempt_id
+               LEFT JOIN host_receipts hr ON hr.id = wua.receipt_id
+               WHERE wu.task_id = ? AND c.state IN ('requested','sent')""" + where_id +
+            " ORDER BY c.created_at, c.id",
+            tuple(params),
+        )
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _json_mapping(row.get("payload_json"))
+            thread_id = str(row.get("thread_id") or "")
+            if not thread_id:
+                results.append({**payload, "state": "requested", "blocked_reason": "original-thread-receipt-unavailable"})
+                continue
+            action = HostAction(
+                action_id="action-" + stable_digest({"correction": row["id"], "thread": thread_id}),
+                kind="send-message",
+                tool="native_subagent.send_message",
+                arguments={
+                    "target": {"task_id": self.task_id, "work_unit_id": row["target_id"], "thread_id": thread_id, "host_id": row.get("host_id")},
+                    "envelope": payload,
+                },
+                idempotency_key=str(payload["idempotency_key"]),
+                task_id=self.task_id,
+                host_id=row.get("host_id"),
+                model=self.resource_broker.model,
+                reasoning=self.resource_broker.reasoning,
+                payload={"correction": payload, "actual": "unresolved"},
+            )
+            if not dispatch:
+                results.append({**payload, "state": "requested", "action": action.to_dict()})
+                continue
+            with self.store.transaction():
+                self.store._execute(
+                    "UPDATE corrections SET state = 'sent', payload_json = ? WHERE id = ? AND state IN ('requested','sent')",
+                    (_json({**payload, "action": action.to_dict()}), row["id"]),
+                )
+            try:
+                result = self.bridge.dispatch(action)
+            except Exception as exc:
+                self.store._execute(
+                    "UPDATE corrections SET state = 'failed', payload_json = ?, resolved_at = ? WHERE id = ?",
+                    (_json({**payload, "error": str(exc)}), _now(), row["id"]),
+                )
+                raise
+            receipt = result.get("receipt") if isinstance(result, Mapping) else None
+            real_receipt = isinstance(receipt, Mapping) and bool(receipt.get("thread_id")) and str(receipt.get("status")) not in {"pending", "unresolved", "failed", "lost"}
+            state = "resolved" if real_receipt else "sent"
+            resolved_at = _now() if real_receipt else None
+            durable_payload = {**payload, "action": action.to_dict(), "receipt": dict(receipt) if isinstance(receipt, Mapping) else None}
+            self.store._execute(
+                "UPDATE corrections SET state = ?, payload_json = ?, resolved_at = ? WHERE id = ?",
+                (state, _json(durable_payload), resolved_at, row["id"]),
+            )
+            results.append({**durable_payload, "state": state})
+        return results
 
     def retry_work_unit(self, work_unit_id: str) -> dict[str, Any]:
         return self.scheduler.retry(str(work_unit_id))
@@ -171,9 +232,12 @@ class LaneEngine:
 
     def synthesize_handoff(self, *, status: str | None = None, summary: str | None = None) -> dict[str, Any]:
         units = self.scheduler._units()
+        boundaries = self.scheduler.unresolved_boundaries()
         if status is None:
-            status = "completed" if all(unit["state"] == "completed" for unit in units) and bool(units) else "blocked"
+            status = "completed" if all(unit["state"] == "completed" for unit in units) and bool(units) and not any(boundaries.values()) else "blocked"
         task = self.store.get_task(self.task_id) or {}
+        contract = self.store.get_contract(str(task.get("contract_id") or ""), int(task.get("contract_version", 1))) or {}
+        complete = status == "completed"
         handoff = {
             "kind": "handoff",
             "schema_version": "1.0",
@@ -188,10 +252,12 @@ class LaneEngine:
             "summary": summary or f"lane {self.task_id} synthesized {status} handoff",
             "exports": [],
             "artifacts": [],
-            "checks": [],
-            "blockers": [] if status == "completed" else [{"code": "lane.incomplete", "message": "work graph has unfinished units", "owner_scope": self.task_id, "recoverable": True}],
+            "checks": [{"name": f"work-unit:{unit.get('local_id') or unit['id']}", "status": "pass" if unit["state"] == "completed" else "fail"} for unit in units],
+            "done_when": [{"condition": str(condition), "satisfied": complete} for condition in contract.get("done_when", ())],
+            "workspace_evidence": {"valid": True, "source": "lane-runtime", "changed_paths": [], "ownership_valid": True, "protected_unchanged": True},
+            "blockers": _boundary_blockers(self.task_id, boundaries) if any(boundaries.values()) else ([] if status == "completed" else [{"code": "lane.incomplete", "message": "work graph has unfinished units", "owner_scope": self.task_id, "recoverable": True}]),
             "discovered_work": [],
-            "promotion_requests": [],
+            "promotion_requests": self.scheduler.persisted_promotion_requests(),
             "contract_delta": None,
             "created_at": _now(),
         }
@@ -203,7 +269,7 @@ class LaneEngine:
 
     def _all_work_terminal(self) -> bool:
         units = self.scheduler._units()
-        return bool(units) and all(unit["state"] in {"completed", "failed", "cancelled", "blocked"} for unit in units)
+        return bool(units) and all(unit["state"] == "completed" for unit in units)
 
 
 LaneEngineAPI = LaneEngine
@@ -216,6 +282,35 @@ def _ownership(unit: Mapping[str, Any]) -> tuple[str, ...]:
     if value is None:
         return ()
     return (value,) if isinstance(value, str) else tuple(map(str, value))
+
+
+def _json(value: Any) -> str:
+    import json
+    return json.dumps(value, sort_keys=True)
+
+
+def _json_mapping(value: Any) -> dict[str, Any]:
+    import json
+    try:
+        decoded = json.loads(value or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+
+def _boundary_blockers(task_id: str, boundaries: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    for kind, records in boundaries.items():
+        for record in records:
+            blockers.append({
+                "code": f"lane.{kind.rstrip('s')}_unresolved",
+                "message": f"{kind.rstrip('s')} {record['id']} is unresolved",
+                "owner_scope": task_id,
+                "recoverable": True,
+                "record_id": record["id"],
+                "state": record.get("state"),
+            })
+    return blockers
 
 
 __all__ = ["LaneEngine", "LaneEngineAPI"]

@@ -3,9 +3,9 @@
 from .adapter import (
     CapabilityAdapterError,
     CapabilityAdapterImpl,
+    DEFAULT_MODEL,
+    DEFAULT_REASONING,
     DefaultCapabilityAdapter,
-    REQUIRED_MODEL,
-    REQUIRED_REASONING,
     RegistryCapabilityAdapter,
 )
 from .models import (
@@ -49,13 +49,13 @@ __all__ = [
     "CapabilityResolution",
     "CapabilityStatus",
     "DefaultCapabilityAdapter",
+    "DEFAULT_MODEL",
+    "DEFAULT_REASONING",
     "DiscoveryEvidence",
     "HOST_RECEIPT_PROTOCOL",
     "Permission",
     "PermissionEvidence",
     "PermissionStatus",
-    "REQUIRED_MODEL",
-    "REQUIRED_REASONING",
     "Registry",
     "RegistryCapabilityAdapter",
 ]

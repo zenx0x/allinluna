@@ -23,6 +23,13 @@ import sqlite3
 from threading import RLock
 from typing import Any, Final, Literal
 
+from .core.policy import overlaps as path_patterns_overlap
+from .core.state import (
+    LANE_ATTEMPT_STATES, LANE_ATTEMPT_TRANSITIONS, RUN_STATES, RUN_TRANSITIONS,
+    SIGNAL_TYPES, STATE_TRANSITIONS as _STATE_TRANSITIONS, TASK_STATES,
+    TASK_TRANSITIONS, WORK_UNIT_STATES, WORK_UNIT_TRANSITIONS,
+)
+
 
 SCHEMA_VERSION: Final[str] = "1.0"
 CONTRACT_SCHEMA_VERSION: Final[str] = SCHEMA_VERSION
@@ -46,105 +53,6 @@ ARTIFACT_REF_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 PATH_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(?!/)(?!.*\.\.)(?!.*//).+$")
 
-RUN_STATES: Final[frozenset[str]] = frozenset(
-    {"created", "active", "paused", "blocked", "completed", "cancelled", "aborted"}
-)
-TASK_STATES: Final[frozenset[str]] = frozenset(
-    {
-        "proposed",
-        "ready",
-        "dispatching",
-        "active",
-        "waiting",
-        "verifying",
-        "blocked",
-        "completed",
-        "superseded",
-        "cancelled",
-    }
-)
-WORK_UNIT_STATES: Final[frozenset[str]] = frozenset(
-    {"proposed", "ready", "delegated", "active", "blocked", "completed", "failed", "cancelled"}
-)
-LANE_ATTEMPT_STATES: Final[frozenset[str]] = frozenset(
-    {"created", "dispatched", "acknowledged", "active", "handoff_ready", "lost", "failed", "closed"}
-)
-SIGNAL_TYPES: Final[frozenset[str]] = frozenset(
-    {
-        "RUN_STARTED",
-        "TASK_CREATED",
-        "TASK_READY",
-        "LANE_DISPATCH_INTENT",
-        "LANE_ACK",
-        "LANE_PULSE",
-        "LANE_HANDOFF",
-        "TASK_BLOCKED",
-        "TASK_COMPLETED",
-        "CONTRACT_CHANGED",
-        "PROMOTION_REQUESTED",
-        "DECISION_REQUIRED",
-        "PERMISSION_REQUIRED",
-        "LEASE_EXPIRED",
-        "RUN_COMPLETED",
-        "WORK_UNIT_CREATED",
-        "WORK_UNIT_READY",
-        "WORK_UNIT_DELEGATED",
-        "WORK_UNIT_PULSE",
-        "WORK_UNIT_HANDOFF",
-        "WORK_UNIT_BLOCKED",
-        "WORK_GRAPH_CHANGED",
-        "LANE_VERIFY_REQUIRED",
-    }
-)
-
-RUN_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
-    "created": frozenset({"active"}),
-    "active": frozenset({"paused", "blocked", "completed", "cancelled", "aborted"}),
-    "paused": frozenset({"active", "completed", "cancelled", "aborted"}),
-    "blocked": frozenset({"active", "completed", "cancelled", "aborted"}),
-    "completed": frozenset(),
-    "cancelled": frozenset(),
-    "aborted": frozenset(),
-}
-TASK_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
-    "proposed": frozenset({"ready", "cancelled"}),
-    "ready": frozenset({"dispatching", "cancelled"}),
-    "dispatching": frozenset({"active"}),
-    "active": frozenset({"waiting", "verifying", "blocked", "superseded"}),
-    "waiting": frozenset({"active", "blocked"}),
-    "verifying": frozenset({"completed", "blocked"}),
-    "blocked": frozenset({"ready", "active", "cancelled", "superseded"}),
-    "completed": frozenset(),
-    "superseded": frozenset(),
-    "cancelled": frozenset(),
-}
-WORK_UNIT_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
-    "proposed": frozenset({"ready", "delegated", "active"}),
-    "ready": frozenset({"delegated", "active"}),
-    "delegated": frozenset({"active"}),
-    "active": frozenset({"completed", "blocked", "failed"}),
-    "blocked": frozenset({"ready", "cancelled"}),
-    "failed": frozenset({"ready", "cancelled"}),
-    "completed": frozenset(),
-    "cancelled": frozenset(),
-}
-LANE_ATTEMPT_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
-    "created": frozenset({"dispatched"}),
-    "dispatched": frozenset({"acknowledged"}),
-    "acknowledged": frozenset({"active", "lost", "failed", "closed"}),
-    "active": frozenset({"handoff_ready", "lost", "failed", "closed"}),
-    "handoff_ready": frozenset(),
-    "lost": frozenset(),
-    "failed": frozenset(),
-    "closed": frozenset(),
-}
-
-_STATE_TRANSITIONS: Final[dict[str, dict[str, frozenset[str]]]] = {
-    "run": RUN_TRANSITIONS,
-    "task": TASK_TRANSITIONS,
-    "work_unit": WORK_UNIT_TRANSITIONS,
-    "lane_attempt": LANE_ATTEMPT_TRANSITIONS,
-}
 ALLOWED_TRANSITIONS: Final[dict[str, dict[str, frozenset[str]]]] = _STATE_TRANSITIONS
 
 
@@ -1691,7 +1599,9 @@ class StoreTransactionRules:
             return None
         row = connection.execute(
             "SELECT id, action_id, dispatch_key, host_adapter, host_id, thread_id, status, payload_json, "
-            "actual_tool, received_at FROM host_receipts WHERE host_adapter = ? AND dispatch_key = ?",
+            "actual_tool, received_at, requested_model, requested_reasoning, resolved_model, resolved_reasoning, "
+            "actual_model, actual_reasoning, resource_receipt_state, resource_evidence_source, resource_observed_at "
+            "FROM host_receipts WHERE host_adapter = ? AND dispatch_key = ?",
             (host_adapter, dispatch_key),
         ).fetchone()
         if row is None:
@@ -1707,6 +1617,15 @@ class StoreTransactionRules:
             "payload_json": row[7],
             "actual_tool": row[8],
             "received_at": row[9],
+            "requested_model": row[10],
+            "requested_reasoning": row[11],
+            "resolved_model": row[12],
+            "resolved_reasoning": row[13],
+            "actual_model": row[14],
+            "actual_reasoning": row[15],
+            "resource_receipt_state": row[16],
+            "resource_evidence_source": row[17],
+            "resource_observed_at": row[18],
         }
         def comparable(value: Mapping[str, Any]) -> dict[str, Any]:
             raw_payload = value.get("payload")
@@ -1762,15 +1681,7 @@ class StoreTransactionRules:
 
     @staticmethod
     def _path_overlap(left: str, right: str) -> bool:
-        def matches(pattern: str, path: str) -> bool:
-            if pattern == path:
-                return True
-            if pattern.endswith("/**"):
-                prefix = pattern[:-3].rstrip("/")
-                return path == prefix or path.startswith(prefix + "/")
-            return False
-
-        return matches(left, right) or matches(right, left)
+        return path_patterns_overlap(left, right)
 
     @classmethod
     def write_sets_overlap(cls, left: Any, right: Any) -> bool:

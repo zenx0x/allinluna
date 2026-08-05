@@ -72,4 +72,4 @@ def test_promotion_request_and_lane_synthesis_are_explicit(vnext_module, tmp_pat
     assert request["from_work_unit"] == "discover"
     synthesis = invoke(lane, "synthesize", done_when=["all local work complete"])
     assert synthesis["status"] in {"verifying", "completed"}
-    assert "PromotionRequest" in synthesis["promotion_requests"]
+    assert synthesis["promotion_requests"] == [request]

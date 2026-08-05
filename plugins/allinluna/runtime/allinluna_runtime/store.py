@@ -19,6 +19,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+from .core.model import valid_observed_at
+from .core.protocol import STATUS_PROTOCOL
+from .store_observability import StoreObservability
+from .store_scheduling import StoreScheduling
+
 try:  # The sibling is authored by the migrations lane and is intentionally small.
     from .migrations import MigrationRunner, SCHEMA_VERSION, apply_migrations
 except ImportError:  # pragma: no cover - useful while the lane is being assembled.
@@ -69,6 +74,10 @@ class LeaseConflictError(StoreError):
 
 class DuplicateIdentityError(StoreError):
     """Raised when two semantic identities collide with different payloads."""
+
+
+class ResourceClaimError(StoreError):
+    """Raised when a resource claim does not match its persisted run/lane scope."""
 
 
 def _now() -> str:
@@ -160,7 +169,7 @@ class StatusProjection(dict[str, Any]):
         return dict.__contains__(self, key)
 
 
-class Store:
+class Store(StoreObservability, StoreScheduling):
     """Thread-safe SQLite store implementing the T1 task/store contract."""
 
     def __init__(self, path: str | Path | sqlite3.Connection, *, auto_migrate: bool = True) -> None:
@@ -471,7 +480,8 @@ class Store:
 
     def create_task(self, task: Any, run_id: str | None = None, outcome: str | None = None, **kwargs: Any) -> dict[str, Any]:
         value = _as_mapping(task) if not isinstance(task, str) else {}
-        task_id = str(value.get("id") or value.get("task_id") or task)
+        local_id = str(value.get("local_id") or value.get("id") or value.get("task_id") or task)
+        task_id = str(value.get("uid") or value.get("physical_uid") or value.get("id") or value.get("task_id") or task)
         run_id = str(run_id or value.get("run_id"))
         outcome = str(outcome or value.get("outcome") or value.get("title") or "")
         if not run_id:
@@ -524,8 +534,8 @@ class Store:
             self._execute(
                 """INSERT INTO tasks
                    (id, run_id, outcome, state, priority, required, contract_id,
-                    contract_version, lane_snapshot_id, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    contract_version, lane_snapshot_id, created_at, updated_at, local_id, resource_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task_id,
                     run_id,
@@ -538,6 +548,8 @@ class Store:
                     value.get("lane_snapshot_id"),
                     now,
                     now,
+                    local_id,
+                    _json(value.get("resource_envelope", {})),
                 ),
             )
             ownership = value.get("ownership") or kwargs.get("ownership") or {}
@@ -567,9 +579,16 @@ class Store:
 
     add_task = create_task
 
-    def get_task(self, task_id: str) -> dict[str, Any] | None:
+    def get_task(self, task_id: str, *, run_id: str | None = None) -> dict[str, Any] | None:
         row = self._fetchone("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        if row is None and run_id is not None:
+            row = self._fetchone("SELECT * FROM tasks WHERE run_id = ? AND local_id = ?", (run_id, task_id))
+        if row is None and run_id is None:
+            matches = self._fetchall("SELECT * FROM tasks WHERE local_id = ? ORDER BY created_at", (task_id,))
+            if len(matches) == 1:
+                row = matches[0]
         if row is not None:
+            row["resource_envelope"] = _loads(row.pop("resource_json", None), {})
             row["dependencies"] = self._fetchall(
                 "SELECT depends_on_task_id, condition_json FROM task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id",
                 (task_id,),
@@ -592,10 +611,15 @@ class Store:
             if current is None:
                 raise KeyError(task_id)
             validate_transition("task", current["state"], state)
-            self._execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (state, _now(), task_id))
+            physical_id = str(current["id"])
+            self._execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (state, _now(), physical_id))
+            if state in {"blocked", "completed", "superseded", "cancelled"}:
+                self._release_resource_claims_in_transaction(
+                    current["run_id"], physical_id, scope="top-level", reason=f"task-{state}"
+                )
             if signal_type:
-                self._append_signal_in_transaction(current["run_id"], "task", task_id, signal_type, payload or {"state": state})
-            return self.get_task(task_id) or {}
+                self._append_signal_in_transaction(current["run_id"], "task", physical_id, signal_type, payload or {"state": state})
+            return self.get_task(physical_id) or {}
 
         return self._write(update)
 
@@ -603,7 +627,8 @@ class Store:
 
     def create_work_unit(self, work_unit: Any, task_id: str | None = None, objective: str | None = None, **kwargs: Any) -> dict[str, Any]:
         value = _as_mapping(work_unit) if not isinstance(work_unit, str) else {}
-        unit_id = str(value.get("id") or value.get("work_unit_id") or work_unit)
+        local_id = str(value.get("local_id") or value.get("id") or value.get("work_unit_id") or work_unit)
+        unit_id = str(value.get("uid") or value.get("physical_uid") or value.get("id") or value.get("work_unit_id") or work_unit)
         task_id = str(task_id or value.get("task_id"))
         objective = str(objective or value.get("objective") or "")
         if not task_id or not objective:
@@ -611,6 +636,8 @@ class Store:
         task = self.get_task(task_id)
         if task is None:
             raise KeyError(f"task {task_id!r} does not exist")
+        task_id = str(task["id"])
+        task_id = str(task["id"])
         state = str(value.get("state") or value.get("status") or kwargs.get("state", "proposed"))
         if state not in WORK_UNIT_STATES:
             raise ValueError(f"unknown work unit state: {state}")
@@ -620,8 +647,8 @@ class Store:
             self._execute(
                 """INSERT INTO work_units
                    (id, task_id, parent_id, objective, state, context_snapshot_id,
-                    ownership_json, return_contract, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ownership_json, return_contract, created_at, updated_at, local_id, resource_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     unit_id,
                     task_id,
@@ -633,6 +660,8 @@ class Store:
                     value.get("return_contract", "work-handoff/v1"),
                     now,
                     now,
+                    local_id,
+                    _json(value.get("resource_envelope", {})),
                 ),
             )
             for dependency in value.get("dependencies", []) or []:
@@ -654,10 +683,19 @@ class Store:
 
     add_work_unit = create_work_unit
 
-    def get_work_unit(self, work_unit_id: str) -> dict[str, Any] | None:
+    def get_work_unit(self, work_unit_id: str, *, task_id: str | None = None) -> dict[str, Any] | None:
         row = self._fetchone("SELECT * FROM work_units WHERE id = ?", (work_unit_id,))
+        if row is None and task_id is not None:
+            task = self.get_task(task_id)
+            physical_task_id = str(task["id"]) if task else task_id
+            row = self._fetchone("SELECT * FROM work_units WHERE task_id = ? AND local_id = ?", (physical_task_id, work_unit_id))
+        if row is None and task_id is None:
+            matches = self._fetchall("SELECT * FROM work_units WHERE local_id = ? ORDER BY created_at", (work_unit_id,))
+            if len(matches) == 1:
+                row = matches[0]
         if row is not None:
             row["ownership"] = _loads(row.pop("ownership_json", None), {})
+            row["resource_envelope"] = _loads(row.pop("resource_json", None), {})
             row["dependencies"] = self._fetchall(
                 "SELECT depends_on_work_unit_id, condition_json FROM work_unit_dependencies WHERE work_unit_id = ? ORDER BY depends_on_work_unit_id",
                 (work_unit_id,),
@@ -668,6 +706,52 @@ class Store:
 
     read_work_unit = get_work_unit
 
+    def lane_scheduler_snapshot(self, task_id: str) -> dict[str, Any]:
+        """Return a batched, authoritative local WorkGraph scheduling view."""
+
+        task = self.get_task(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        physical_id = str(task["id"])
+        with self._lock:
+            units = self._fetchall(
+                "SELECT * FROM work_units WHERE task_id = ? ORDER BY id", (physical_id,)
+            )
+            by_id = {str(row["id"]): row for row in units}
+            for row in units:
+                row["ownership"] = _loads(row.pop("ownership_json", None), {})
+                row["resource_envelope"] = _loads(row.pop("resource_json", None), {})
+                row["dependencies"] = []
+            dependencies = self._fetchall(
+                """SELECT d.work_unit_id, d.depends_on_work_unit_id, d.condition_json
+                   FROM work_unit_dependencies d JOIN work_units w ON w.id = d.work_unit_id
+                   WHERE w.task_id = ? ORDER BY d.work_unit_id, d.depends_on_work_unit_id""",
+                (physical_id,),
+            )
+            for dependency in dependencies:
+                owner = by_id.get(str(dependency.pop("work_unit_id")))
+                dependency["condition"] = _loads(dependency.pop("condition_json", None), {})
+                if owner is not None:
+                    owner["dependencies"].append(dependency)
+            latest_attempts = self._fetchall(
+                """SELECT a.* FROM work_unit_attempts a JOIN work_units w ON w.id = a.work_unit_id
+                   WHERE w.task_id = ? AND a.attempt_no = (
+                     SELECT MAX(a2.attempt_no) FROM work_unit_attempts a2 WHERE a2.work_unit_id = a.work_unit_id
+                   ) ORDER BY a.work_unit_id""",
+                (physical_id,),
+            )
+            attempt_by_unit = {str(item["work_unit_id"]): item for item in latest_attempts}
+            for unit_id, unit in by_id.items():
+                unit["latest_attempt"] = attempt_by_unit.get(unit_id)
+            leases = self._fetchall(
+                "SELECT * FROM leases WHERE state = 'active' AND scope_type = 'work_unit' "
+                "AND scope_id IN (SELECT id FROM work_units WHERE task_id = ?) ORDER BY acquired_at, id",
+                (physical_id,),
+            )
+            for lease in leases:
+                lease["ownership"] = _loads(lease.get("write_set_json"), [])
+            return {"task_id": physical_id, "units": units, "active_leases": leases}
+
     def update_work_unit_status(self, work_unit_id: str, state: str, *, signal_type: str | None = None, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         if state not in WORK_UNIT_STATES:
             raise ValueError(f"unknown work unit state: {state}")
@@ -677,12 +761,19 @@ class Store:
             if current is None:
                 raise KeyError(work_unit_id)
             validate_transition("work_unit", current["state"], state)
-            self._execute("UPDATE work_units SET state = ?, updated_at = ? WHERE id = ?", (state, _now(), work_unit_id))
+            physical_id = str(current["id"])
+            self._execute("UPDATE work_units SET state = ?, updated_at = ? WHERE id = ?", (state, _now(), physical_id))
+            if state in {"blocked", "completed", "failed", "cancelled"}:
+                task = self.get_task(current["task_id"])
+                if task is not None:
+                    self._release_resource_claims_in_transaction(
+                        task["run_id"], physical_id, scope="lane", reason=f"work-unit-{state}"
+                    )
             if signal_type:
                 task = self.get_task(current["task_id"])
                 if task is not None:
-                    self._append_signal_in_transaction(task["run_id"], "work_unit", work_unit_id, signal_type, payload or {"state": state})
-            return self.get_work_unit(work_unit_id) or {}
+                    self._append_signal_in_transaction(task["run_id"], "work_unit", physical_id, signal_type, payload or {"state": state})
+            return self.get_work_unit(physical_id) or {}
 
         return self._write(update)
 
@@ -691,6 +782,350 @@ class Store:
     # ------------------------------------------------------------------
     # Dispatch, attempts, receipts and leases
     # ------------------------------------------------------------------
+
+    # Resource claims are run-scoped scheduling facts.  The whole
+    # occupancy-check + claim batch runs under BEGIN IMMEDIATE so independent
+    # Store connections cannot oversubscribe a shared database.
+    def claim_resources(
+        self,
+        run_id: str,
+        scope: str,
+        candidates: Sequence[Mapping[str, Any]],
+        *,
+        lane_id: str | None = None,
+        top_level_limit: int = 0,
+        total_subagent_limit: int = 0,
+        lane_limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        validate_identifier(run_id, "run_id")
+        if scope not in {"top-level", "lane"}:
+            raise ValueError("resource claim scope must be top-level or lane")
+        if scope == "lane" and not lane_id:
+            raise ValueError("lane resource claims require lane_id")
+        if scope == "top-level" and lane_id is not None:
+            raise ValueError("top-level resource claims cannot have lane_id")
+        limits = (top_level_limit, total_subagent_limit, lane_limit)
+        if any(isinstance(value, bool) or int(value) < 0 for value in limits):
+            raise ValueError("resource limits must be non-negative integers")
+
+        normalized: list[dict[str, Any]] = []
+        for candidate in candidates:
+            value = dict(candidate)
+            entity_id = validate_identifier(str(value.get("entity_id") or ""), "entity_id")
+            slots = int(value.get("slots", 1))
+            if slots <= 0:
+                raise ValueError("resource claim slots must be positive")
+            normalized.append(
+                {
+                    "entity_id": entity_id,
+                    "slots": slots,
+                    "requested": dict(value.get("requested") or {}),
+                    "resolved": dict(value.get("resolved") or {}),
+                }
+            )
+
+        def claim() -> list[dict[str, Any]]:
+            if self.get_run(run_id) is None:
+                raise KeyError(f"run {run_id!r} does not exist")
+            top_used = int(
+                (self._fetchone(
+                    "SELECT COALESCE(SUM(slots), 0) AS used FROM resource_claims "
+                    "WHERE run_id = ? AND scope = 'top-level' AND state = 'active'",
+                    (run_id,),
+                ) or {}).get("used", 0)
+            )
+            subagent_used = int(
+                (self._fetchone(
+                    "SELECT COALESCE(SUM(slots), 0) AS used FROM resource_claims "
+                    "WHERE run_id = ? AND scope = 'lane' AND state = 'active'",
+                    (run_id,),
+                ) or {}).get("used", 0)
+            )
+            lane_used = 0
+            if lane_id is not None:
+                lane_used = int(
+                    (self._fetchone(
+                        "SELECT COALESCE(SUM(slots), 0) AS used FROM resource_claims "
+                        "WHERE run_id = ? AND scope = 'lane' AND lane_id = ? AND state = 'active'",
+                        (run_id, lane_id),
+                    ) or {}).get("used", 0)
+                )
+
+            acquired: list[dict[str, Any]] = []
+            for value in normalized:
+                existing = self._fetchone(
+                    "SELECT id FROM resource_claims WHERE run_id = ? AND scope = ? "
+                    "AND entity_id = ? AND state = 'active'",
+                    (run_id, scope, value["entity_id"]),
+                )
+                if existing is not None:
+                    continue
+                if scope == "top-level":
+                    task = self.get_task(value["entity_id"])
+                    if task is None or task.get("run_id") != run_id:
+                        raise ResourceClaimError(
+                            f"task {value['entity_id']!r} does not belong to run {run_id!r}"
+                        )
+                    if top_used + value["slots"] > int(top_level_limit):
+                        continue
+                else:
+                    unit = self.get_work_unit(value["entity_id"])
+                    task = self.get_task(str(unit.get("task_id"))) if unit else None
+                    if unit is None or task is None or task.get("run_id") != run_id:
+                        raise ResourceClaimError(
+                            f"work unit {value['entity_id']!r} does not belong to run {run_id!r}"
+                        )
+                    if str(unit.get("task_id")) != str(lane_id):
+                        raise ResourceClaimError(
+                            f"work unit {value['entity_id']!r} does not belong to lane {lane_id!r}"
+                        )
+                    if subagent_used + value["slots"] > int(total_subagent_limit):
+                        continue
+                    if lane_used + value["slots"] > int(lane_limit):
+                        continue
+
+                claim_id = f"resource-claim-{uuid.uuid4().hex}"
+                self._execute(
+                    """INSERT INTO resource_claims
+                       (id, run_id, scope, lane_id, entity_id, slots,
+                        requested_json, resolved_json, state, acquired_at,
+                        released_at, release_reason)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL)""",
+                    (
+                        claim_id, run_id, scope, lane_id, value["entity_id"], value["slots"],
+                        _json(value["requested"]), _json(value["resolved"]), _now(),
+                    ),
+                )
+                if scope == "top-level":
+                    top_used += value["slots"]
+                else:
+                    subagent_used += value["slots"]
+                    lane_used += value["slots"]
+                row = self._fetchone("SELECT * FROM resource_claims WHERE id = ?", (claim_id,))
+                if row is not None:
+                    acquired.append(self._resource_claim_result(row))
+            return acquired
+
+        return self._write(claim)
+
+    acquire_resource_claims = claim_resources
+
+    @staticmethod
+    def _resource_claim_result(row: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(row)
+        result["requested"] = _loads(result.pop("requested_json", None), {})
+        result["resolved"] = _loads(result.pop("resolved_json", None), {})
+        return result
+
+    def resource_claims(
+        self, run_id: str, *, state: str | None = "active", scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        clauses = ["run_id = ?"]
+        parameters: list[Any] = [run_id]
+        if state is not None:
+            clauses.append("state = ?")
+            parameters.append(state)
+        if scope is not None:
+            clauses.append("scope = ?")
+            parameters.append(scope)
+        rows = self._fetchall(
+            "SELECT * FROM resource_claims WHERE " + " AND ".join(clauses) +
+            " ORDER BY acquired_at, id",
+            parameters,
+        )
+        return [self._resource_claim_result(row) for row in rows]
+
+    def resource_occupancy(self, run_id: str) -> dict[str, Any]:
+        rows = self._fetchall(
+            "SELECT scope, lane_id, COALESCE(SUM(slots), 0) AS slots "
+            "FROM resource_claims WHERE run_id = ? AND state = 'active' "
+            "GROUP BY scope, lane_id ORDER BY scope, lane_id",
+            (run_id,),
+        )
+        lane_slots = {
+            str(row["lane_id"]): int(row["slots"])
+            for row in rows if row["scope"] == "lane"
+        }
+        return {
+            "run_id": run_id,
+            "top_level_slots": sum(int(row["slots"]) for row in rows if row["scope"] == "top-level"),
+            "total_subagent_slots": sum(lane_slots.values()),
+            "lane_slots": lane_slots,
+        }
+
+    def _release_resource_claims_in_transaction(
+        self,
+        run_id: str,
+        entity_id: str,
+        *,
+        scope: str,
+        lane_id: str | None = None,
+        reason: str = "released",
+        state: str = "released",
+    ) -> int:
+        clauses = ["run_id = ?", "scope = ?", "entity_id = ?", "state = 'active'"]
+        parameters: list[Any] = [run_id, scope, entity_id]
+        if lane_id is not None:
+            clauses.append("lane_id = ?")
+            parameters.append(lane_id)
+        cursor = self._execute(
+            "UPDATE resource_claims SET state = ?, released_at = ?, release_reason = ? WHERE "
+            + " AND ".join(clauses),
+            (state, _now(), reason, *parameters),
+        )
+        return int(cursor.rowcount)
+
+    def release_resource_claim(
+        self,
+        run_id: str,
+        entity_id: str,
+        *,
+        scope: str,
+        lane_id: str | None = None,
+        reason: str = "released",
+    ) -> int:
+        return self._write(
+            lambda: self._release_resource_claims_in_transaction(
+                run_id, entity_id, scope=scope, lane_id=lane_id, reason=reason
+            )
+        )
+
+    def reconcile_resource_claims(self, run_id: str) -> dict[str, Any]:
+        """Rebuild occupancy from active facts and release unsupported claims."""
+
+        def reconcile() -> dict[str, Any]:
+            if self.get_run(run_id) is None:
+                raise KeyError(run_id)
+            self._expire_leases_in_transaction(datetime.now(UTC))
+            recovered: list[str] = []
+            active_top = self._fetchall(
+                """SELECT DISTINCT t.id AS entity_id, t.resource_json, r.policy_json
+                   FROM tasks t
+                   JOIN runs r ON r.id = t.run_id
+                   WHERE t.run_id = ?
+                     AND (
+                       t.state IN ('dispatching','active','waiting','verifying')
+                       OR EXISTS (SELECT 1 FROM task_attempts a WHERE a.task_id = t.id
+                                  AND a.state IN ('created','dispatched','acknowledged','active','handoff_ready'))
+                       OR EXISTS (SELECT 1 FROM dispatch_outbox o WHERE o.run_id = t.run_id
+                                  AND o.target_id = t.id AND o.state IN ('pending','emitted'))
+                       OR EXISTS (SELECT 1 FROM leases l WHERE l.scope_type = 'task'
+                                  AND l.scope_id = t.id AND l.state = 'active')
+                     )""",
+                (run_id,),
+            )
+            active_lane = self._fetchall(
+                """SELECT DISTINCT w.id AS entity_id, w.task_id AS lane_id,
+                                  w.resource_json, t.resource_json AS task_resource_json,
+                                  r.policy_json
+                   FROM work_units w
+                   JOIN tasks t ON t.id = w.task_id
+                   JOIN runs r ON r.id = t.run_id
+                   WHERE t.run_id = ?
+                     AND (
+                       w.state IN ('delegated','active')
+                       OR EXISTS (SELECT 1 FROM work_unit_attempts a WHERE a.work_unit_id = w.id
+                                  AND a.state IN ('created','delegated','active','blocked'))
+                       OR EXISTS (SELECT 1 FROM dispatch_outbox o WHERE o.run_id = t.run_id
+                                  AND o.target_id = w.id AND o.state IN ('pending','emitted'))
+                       OR EXISTS (SELECT 1 FROM leases l WHERE l.scope_type = 'work_unit'
+                                  AND l.scope_id = w.id AND l.state = 'active')
+                     )""",
+                (run_id,),
+            )
+
+            def recover_claim(row: Mapping[str, Any], scope: str) -> None:
+                entity_id = str(row["entity_id"])
+                exists = self._fetchone(
+                    "SELECT 1 AS present FROM resource_claims WHERE run_id = ? AND scope = ? "
+                    "AND entity_id = ? AND state = 'active'",
+                    (run_id, scope, entity_id),
+                )
+                if exists is not None:
+                    return
+                run_policy = _loads(row.get("policy_json"), {})
+                task_resource = _loads(row.get("task_resource_json"), {})
+                entity_resource = _loads(row.get("resource_json"), {})
+                requested = entity_resource or task_resource or run_policy
+                resolved = {
+                    "model": requested.get("model") or run_policy.get("model") or "gpt-5.6-luna",
+                    "reasoning": requested.get("reasoning") or requested.get("thinking")
+                    or run_policy.get("reasoning") or run_policy.get("thinking") or "high",
+                    "external_action_policy": run_policy.get("external_action_policy") or "deny",
+                }
+                self._execute(
+                    """INSERT INTO resource_claims
+                       (id, run_id, scope, lane_id, entity_id, slots,
+                        requested_json, resolved_json, state, acquired_at,
+                        released_at, release_reason)
+                       VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'active', ?, NULL, NULL)""",
+                    (
+                        f"resource-recovered-{uuid.uuid4().hex}", run_id, scope, row.get("lane_id"),
+                        entity_id, _json(requested), _json(resolved), _now(),
+                    ),
+                )
+                recovered.append(entity_id)
+
+            for row in active_top:
+                recover_claim(row, "top-level")
+            for row in active_lane:
+                recover_claim(row, "lane")
+
+            released: list[str] = []
+            for claim in self.resource_claims(run_id):
+                entity_id = str(claim["entity_id"])
+                if claim["scope"] == "top-level":
+                    supported = self._fetchone(
+                        """SELECT 1 AS supported
+                           WHERE EXISTS (SELECT 1 FROM tasks
+                                         WHERE id = ? AND run_id = ?
+                                           AND state IN ('dispatching','active','waiting','verifying'))
+                              OR EXISTS (SELECT 1 FROM task_attempts
+                                         WHERE task_id = ?
+                                           AND state IN ('created','dispatched','acknowledged','active','handoff_ready'))
+                              OR EXISTS (SELECT 1 FROM dispatch_outbox
+                                         WHERE run_id = ? AND target_id = ?
+                                           AND state IN ('pending','emitted'))
+                              OR EXISTS (SELECT 1 FROM leases
+                                         WHERE scope_type = 'task' AND scope_id = ? AND state = 'active')""",
+                        (entity_id, run_id, entity_id, run_id, entity_id, entity_id),
+                    )
+                else:
+                    supported = self._fetchone(
+                        """SELECT 1 AS supported
+                           WHERE EXISTS (SELECT 1 FROM work_units
+                                         WHERE id = ? AND state IN ('delegated','active'))
+                              OR EXISTS (SELECT 1 FROM work_unit_attempts
+                                         WHERE work_unit_id = ?
+                                           AND state IN ('created','delegated','active','blocked'))
+                              OR EXISTS (SELECT 1 FROM dispatch_outbox
+                                         WHERE run_id = ? AND target_id = ?
+                                           AND state IN ('pending','emitted'))
+                              OR EXISTS (SELECT 1 FROM leases
+                                         WHERE scope_type = 'work_unit' AND scope_id = ? AND state = 'active')""",
+                        (entity_id, entity_id, run_id, entity_id, entity_id),
+                    )
+                if supported is None:
+                    self._release_resource_claims_in_transaction(
+                        run_id,
+                        entity_id,
+                        scope=str(claim["scope"]),
+                        lane_id=claim.get("lane_id"),
+                        reason="recovery-no-active-fact",
+                        state="reconciled",
+                    )
+                    released.append(entity_id)
+            return {
+                "run_id": run_id,
+                "recovered": recovered,
+                "released": released,
+                "occupancy": self.resource_occupancy(run_id),
+            }
+
+        return self._write(reconcile)
+
+    recover_resource_occupancy = reconcile_resource_claims
+
     def persist_dispatch_intent(self, action: Any, **kwargs: Any) -> dict[str, Any]:
         value = _as_mapping(action)
         value.update(kwargs)
@@ -731,7 +1166,8 @@ class Store:
             validate_transition("task", task_state, "dispatching")
             latest = self._fetchone("SELECT COALESCE(MAX(attempt_no), 0) AS attempt_no FROM task_attempts WHERE task_id = ?", (task_id,))
             attempt_no = int((latest or {}).get("attempt_no", 0)) + 1
-            attempt_id = str(value.get("attempt_id") or f"lane-attempt-{uuid.uuid4().hex}")
+            payload_value = value.get("payload") if isinstance(value.get("payload"), Mapping) else {}
+            attempt_id = str(value.get("attempt_id") or payload_value.get("attempt_id") or f"lane-attempt-{uuid.uuid4().hex}")
             self._execute(
                 """INSERT INTO task_attempts
                    (id, task_id, attempt_no, adapter, thread_id, host_id,
@@ -754,6 +1190,16 @@ class Store:
             self._execute(
                 "UPDATE tasks SET state = 'dispatching', updated_at = ? WHERE id = ? AND state IN ('ready','dispatching')",
                 (_now(), task_id),
+            )
+            outbox_id = str(value.get("outbox_id") or f"outbox-{uuid.uuid4().hex}")
+            action_payload = dict(value)
+            action_payload.setdefault("task_id", task_id)
+            self._execute(
+                """INSERT INTO dispatch_outbox
+                   (id, run_id, target_type, target_id, attempt_id, action_json,
+                    idempotency_key, state, emit_count, next_retry_at, created_at, updated_at)
+                   VALUES (?, ?, 'task', ?, ?, ?, ?, 'pending', 0, NULL, ?, ?)""",
+                (outbox_id, task["run_id"], task_id, attempt_id, _json(action_payload), dispatch_key, _now(), _now()),
             )
             self._append_signal_in_transaction(
                 task["run_id"],
@@ -785,6 +1231,46 @@ class Store:
         rows = self._fetchall("SELECT * FROM task_attempts WHERE task_id = ? ORDER BY attempt_no", (task_id,))
         return [self._attempt_result(row) for row in rows]
 
+    @staticmethod
+    def _resource_receipt_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
+        state = str(row.get("resource_receipt_state") or "unresolved")
+        payload = _loads(row.get("payload_json"), {})
+        payload_receipt = payload.get("resource_receipt", {}) if isinstance(payload, Mapping) else {}
+        payload_receipt = payload_receipt if isinstance(payload_receipt, Mapping) else {}
+        payload_requested = payload_receipt.get("requested", {})
+        payload_requested = payload_requested if isinstance(payload_requested, Mapping) else {}
+        payload_resolved = payload_receipt.get("resolved", {})
+        payload_resolved = payload_resolved if isinstance(payload_resolved, Mapping) else {}
+        requested = {
+            "model": row.get("requested_model") or payload_requested.get("model"),
+            "reasoning": row.get("requested_reasoning") or payload_requested.get("reasoning") or payload_requested.get("thinking"),
+        }
+        resolved = {
+            "model": row.get("resolved_model") or payload_resolved.get("model"),
+            "reasoning": row.get("resolved_reasoning") or payload_resolved.get("reasoning") or payload_resolved.get("thinking"),
+        }
+        model = row.get("actual_model")
+        reasoning = row.get("actual_reasoning")
+        return {
+            "requested": requested,
+            "resolved": resolved,
+            "actual": (
+                {"model": model, "reasoning": reasoning}
+                if state == "resolved" and model and reasoning else None
+            ),
+            "actual_state": state,
+            "evidence_source": row.get("resource_evidence_source"),
+            "observed_at": row.get("resource_observed_at"),
+        }
+
+    def get_host_receipt(self, receipt_id: str) -> dict[str, Any] | None:
+        row = self._fetchone("SELECT * FROM host_receipts WHERE id = ?", (receipt_id,))
+        if row is None:
+            return None
+        row["payload"] = _loads(row.pop("payload_json", None), {})
+        row["resource_receipt"] = self._resource_receipt_from_row(row)
+        return row
+
     def ingest_receipt(self, receipt: Any) -> dict[str, Any]:
         value = _as_mapping(receipt)
         payload = dict(value)
@@ -794,10 +1280,47 @@ class Store:
         dispatch_key = value.get("dispatch_key") or value.get("idempotency_key")
         adapter = str(value.get("host_adapter") or value.get("adapter") or "unknown")
         status = str(value.get("status") or value.get("state") or "received")
-        incoming_thread_id = value.get("thread_id") or value.get("client_thread_id")
+        incoming_thread_id = value.get("thread_id")
         received_at = str(value.get("received_at") or _now())
+        resource_receipt = value.get("resource_receipt")
+        resource_receipt = dict(resource_receipt) if isinstance(resource_receipt, Mapping) else {}
+        requested_resource = resource_receipt.get("requested")
+        requested_resource = dict(requested_resource) if isinstance(requested_resource, Mapping) else {}
+        resolved_resource = resource_receipt.get("resolved")
+        resolved_resource = dict(resolved_resource) if isinstance(resolved_resource, Mapping) else {}
+        actual_resource = resource_receipt.get("actual")
+        actual_resource = dict(actual_resource) if isinstance(actual_resource, Mapping) else {}
+        requested_model = requested_resource.get("model")
+        requested_reasoning = requested_resource.get("reasoning") or requested_resource.get("thinking")
+        resolved_model = resolved_resource.get("model")
+        resolved_reasoning = resolved_resource.get("reasoning") or resolved_resource.get("thinking")
+        actual_model = actual_resource.get("model")
+        actual_reasoning = actual_resource.get("reasoning") or actual_resource.get("thinking")
+        resource_state = str(resource_receipt.get("actual_state") or "unresolved")
+        evidence_source = resource_receipt.get("evidence_source")
+        resource_observed_at = resource_receipt.get("observed_at")
+        if not (
+            resource_state == "resolved"
+            and isinstance(requested_model, str) and requested_model.strip()
+            and isinstance(requested_reasoning, str) and requested_reasoning.strip()
+            and isinstance(resolved_model, str) and resolved_model.strip()
+            and isinstance(resolved_reasoning, str) and resolved_reasoning.strip()
+            and isinstance(actual_model, str) and actual_model.strip()
+            and isinstance(actual_reasoning, str) and actual_reasoning.strip()
+            and requested_model == resolved_model == actual_model
+            and requested_reasoning == resolved_reasoning == actual_reasoning
+            and isinstance(evidence_source, str) and evidence_source.strip()
+            and valid_observed_at(resource_observed_at)
+        ):
+            actual_model = None
+            actual_reasoning = None
+            resource_state = "unresolved"
+            evidence_source = None
+            resource_observed_at = None
 
         def ingest() -> dict[str, Any]:
+            nonlocal requested_model, requested_reasoning, resolved_model, resolved_reasoning
+            nonlocal actual_model, actual_reasoning, resource_state, evidence_source, resource_observed_at, payload
             existing = self._fetchone("SELECT * FROM host_receipts WHERE id = ?", (receipt_id,))
             if existing is None and dispatch_key:
                 existing = self._fetchone(
@@ -809,8 +1332,11 @@ class Store:
                     self._execute(
                         """INSERT INTO host_receipts
                            (id, action_id, dispatch_key, host_adapter, host_id,
-                            thread_id, status, payload_json, actual_tool, received_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            thread_id, status, payload_json, actual_tool, received_at,
+                            actual_model, actual_reasoning, resource_receipt_state,
+                            resource_evidence_source, resource_observed_at,
+                            requested_model, requested_reasoning, resolved_model, resolved_reasoning)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             receipt_id,
                             value.get("action_id"),
@@ -822,6 +1348,15 @@ class Store:
                             _json(payload),
                             value.get("actual_tool") or value.get("tool"),
                             received_at,
+                            actual_model,
+                            actual_reasoning,
+                            resource_state,
+                            evidence_source,
+                            resource_observed_at,
+                            requested_model,
+                            requested_reasoning,
+                            resolved_model,
+                            resolved_reasoning,
                         ),
                     )
                 except sqlite3.IntegrityError:
@@ -855,7 +1390,12 @@ class Store:
                         and incoming_status in terminal_statuses
                     )
                 )
-                if not can_progress:
+                resource_progress = (
+                    str(existing.get("resource_receipt_state") or "unresolved") != "resolved"
+                    and resource_state == "resolved"
+                )
+                identity_progress = bool(incoming_thread_id and not existing.get("thread_id"))
+                if not (can_progress or resource_progress or identity_progress):
                     effective_id = str(existing.get("id") or receipt_id)
                     effective_key = existing.get("dispatch_key") or dispatch_key
                     attempt = None
@@ -869,10 +1409,30 @@ class Store:
                         "attempt_id": attempt["id"] if attempt else None,
                         "status": str(existing.get("status") or status),
                         "idempotent": True,
+                        "resource_receipt": self._resource_receipt_from_row(existing),
                     }
+                if str(existing.get("resource_receipt_state") or "unresolved") == "resolved":
+                    requested_model = existing.get("requested_model")
+                    requested_reasoning = existing.get("requested_reasoning")
+                    resolved_model = existing.get("resolved_model")
+                    resolved_reasoning = existing.get("resolved_reasoning")
+                    actual_model = existing.get("actual_model")
+                    actual_reasoning = existing.get("actual_reasoning")
+                    resource_state = "resolved"
+                    evidence_source = existing.get("resource_evidence_source")
+                    resource_observed_at = existing.get("resource_observed_at")
+                    old_payload = _loads(existing.get("payload_json"), {})
+                    if isinstance(old_payload, Mapping) and isinstance(old_payload.get("resource_receipt"), Mapping):
+                        payload["resource_receipt"] = dict(old_payload["resource_receipt"])
                 self._execute(
                     "UPDATE host_receipts SET status = ?, payload_json = ?, host_id = COALESCE(?, host_id), "
-                    "thread_id = COALESCE(?, thread_id), actual_tool = COALESCE(?, actual_tool), received_at = ? "
+                    "thread_id = COALESCE(?, thread_id), actual_tool = COALESCE(?, actual_tool), received_at = ?, "
+                    "actual_model = COALESCE(?, actual_model), actual_reasoning = COALESCE(?, actual_reasoning), "
+                    "resource_receipt_state = CASE WHEN ? = 'resolved' THEN 'resolved' ELSE resource_receipt_state END, "
+                    "resource_evidence_source = COALESCE(?, resource_evidence_source), "
+                    "resource_observed_at = COALESCE(?, resource_observed_at), "
+                    "requested_model = COALESCE(?, requested_model), requested_reasoning = COALESCE(?, requested_reasoning), "
+                    "resolved_model = COALESCE(?, resolved_model), resolved_reasoning = COALESCE(?, resolved_reasoning) "
                     "WHERE id = ?",
                     (
                         status,
@@ -881,6 +1441,15 @@ class Store:
                         incoming_thread_id,
                         value.get("actual_tool") or value.get("tool"),
                         received_at,
+                        actual_model,
+                        actual_reasoning,
+                        resource_state,
+                        evidence_source,
+                        resource_observed_at,
+                        requested_model,
+                        requested_reasoning,
+                        resolved_model,
+                        resolved_reasoning,
                         existing["id"],
                     ),
                 )
@@ -918,6 +1487,15 @@ class Store:
                         attempt["id"],
                     ),
                 )
+                if next_state in {"closed", "failed", "lost"}:
+                    task_for_claim = self.get_task(str(attempt["task_id"]))
+                    if task_for_claim is not None:
+                        self._release_resource_claims_in_transaction(
+                            str(task_for_claim["run_id"]),
+                            str(attempt["task_id"]),
+                            scope="top-level",
+                            reason=f"attempt-{next_state}",
+                        )
                 if next_state == "active":
                     self._execute("UPDATE tasks SET state = 'active', updated_at = ? WHERE id = ? AND state IN ('dispatching','ready','proposed')", (_now(), attempt["task_id"]))
                 elif next_state == "handoff_ready":
@@ -927,12 +1505,18 @@ class Store:
                     signal = "LANE_ACK" if next_state == "active" else "LANE_HANDOFF" if next_state == "handoff_ready" else None
                     if signal:
                         self._append_signal_in_transaction(task["run_id"], "task", task["id"], signal, {"receipt_id": effective_id, "attempt_id": attempt["id"], "status": status})
+                if effective_key:
+                    self._execute(
+                        "UPDATE dispatch_outbox SET state = 'acknowledged', updated_at = ? WHERE idempotency_key = ? AND state IN ('pending','emitted')",
+                        (_now(), str(effective_key)),
+                    )
             result = {
                 "receipt_id": effective_id,
                 "dispatch_key": effective_key,
                 "attempt_id": attempt["id"] if attempt else None,
                 "status": str(receipt_row.get("status") or status),
                 "idempotent": True,
+                "resource_receipt": self._resource_receipt_from_row(receipt_row),
             }
             return result
 
@@ -940,12 +1524,168 @@ class Store:
 
     ingest_host_receipt = ingest_receipt
 
-    def count_receipts(self, receipt_id: str | None = None) -> int:
-        if receipt_id is None:
-            row = self._fetchone("SELECT COUNT(*) AS count FROM host_receipts")
-        else:
-            row = self._fetchone("SELECT COUNT(*) AS count FROM host_receipts WHERE id = ?", (receipt_id,))
-        return int((row or {}).get("count", 0))
+    def mark_outbox_emitted(self, idempotency_key: str) -> dict[str, Any] | None:
+        def update() -> dict[str, Any] | None:
+            self._execute(
+                "UPDATE dispatch_outbox SET state = 'emitted', emit_count = emit_count + 1, updated_at = ? "
+                "WHERE idempotency_key = ? AND state IN ('pending','emitted')",
+                (_now(), idempotency_key),
+            )
+            row = self._fetchone("SELECT * FROM dispatch_outbox WHERE idempotency_key = ?", (idempotency_key,))
+            if row:
+                row["action"] = _loads(row.pop("action_json", None), {})
+            return row
+        return self._write(update)
+
+    def install_task_exports(
+        self,
+        task_id: str,
+        exports: Sequence[Mapping[str, Any] | str],
+        *,
+        source_handoff_id: str,
+        contract_version: int | None = None,
+    ) -> list[dict[str, Any]]:
+        task = self.get_task(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        physical_id = str(task["id"])
+        version = int(contract_version or task["contract_version"])
+
+        def install() -> list[dict[str, Any]]:
+            for item in exports:
+                value = {"name": str(item)} if isinstance(item, str) else dict(item)
+                name = str(value.get("name") or value.get("port_name") or "")
+                if not name:
+                    raise ValueError("task export requires a port name")
+                self._execute(
+                    """INSERT INTO task_exports
+                       (task_id, contract_version, port_name, artifact_ref, value_json, verified_at, source_handoff_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(task_id, contract_version, port_name) DO UPDATE SET
+                         artifact_ref = excluded.artifact_ref,
+                         value_json = excluded.value_json,
+                         verified_at = excluded.verified_at,
+                         source_handoff_id = excluded.source_handoff_id""",
+                    (physical_id, version, name, value.get("artifact_ref"), _json(value.get("value")), _now(), source_handoff_id),
+                )
+            return self.task_exports(physical_id, contract_version=version)
+
+        return self._write(install)
+
+    def task_exports(self, task_id: str, *, contract_version: int | None = None) -> list[dict[str, Any]]:
+        task = self.get_task(task_id)
+        if task is None:
+            return []
+        version = int(contract_version or task["contract_version"])
+        rows = self._fetchall(
+            "SELECT * FROM task_exports WHERE task_id = ? AND contract_version = ? ORDER BY port_name",
+            (task["id"], version),
+        )
+        for row in rows:
+            row["value"] = _loads(row.pop("value_json", None), None)
+        return rows
+
+    def replace_snapshot_inputs(self, snapshot_id: str, inputs: Sequence[Mapping[str, Any] | str]) -> None:
+        def replace() -> None:
+            self._execute("DELETE FROM snapshot_inputs WHERE snapshot_id = ?", (snapshot_id,))
+            for item in inputs:
+                value = {"input_ref": str(item)} if isinstance(item, str) else dict(item)
+                input_ref = str(value.get("input_ref") or value.get("ref") or "")
+                if not input_ref:
+                    raise ValueError("snapshot input requires input_ref")
+                self._execute(
+                    "INSERT INTO snapshot_inputs (snapshot_id, input_ref, input_kind) VALUES (?, ?, ?)",
+                    (snapshot_id, input_ref, str(value.get("input_kind") or value.get("kind") or "reference")),
+                )
+        self._write(replace)
+
+    def list_snapshot_dependents(self, input_refs: Sequence[str], *, transitive: bool = True) -> list[str]:
+        frontier = {str(item) for item in input_refs}
+        found: set[str] = set()
+        while frontier:
+            placeholders = ",".join("?" for _ in frontier)
+            rows = self._fetchall(
+                f"SELECT DISTINCT snapshot_id FROM snapshot_inputs WHERE input_ref IN ({placeholders})",
+                tuple(sorted(frontier)),
+            )
+            current = {str(row["snapshot_id"]) for row in rows} - found
+            found.update(current)
+            if not transitive:
+                break
+            frontier = current
+        return sorted(found)
+
+    def put_snapshot_supersession(self, snapshot_id: str, replacement_snapshot_id: str, reason: str) -> None:
+        self._write(lambda: self._execute(
+            """INSERT INTO snapshot_supersessions (snapshot_id, replacement_snapshot_id, reason, created_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(snapshot_id) DO UPDATE SET replacement_snapshot_id = excluded.replacement_snapshot_id,
+                 reason = excluded.reason, created_at = excluded.created_at""",
+            (snapshot_id, replacement_snapshot_id, reason, _now()),
+        ))
+
+    def resolve_snapshot_ref(self, snapshot_id: str) -> str:
+        current = str(snapshot_id)
+        seen: set[str] = set()
+        while current not in seen:
+            seen.add(current)
+            row = self._fetchone(
+                "SELECT replacement_snapshot_id FROM snapshot_supersessions WHERE snapshot_id = ?",
+                (current,),
+            )
+            if row is None:
+                return current
+            current = str(row["replacement_snapshot_id"])
+        raise StoreError(f"snapshot supersession cycle detected at {current!r}")
+
+    def request_permission(
+        self,
+        run_id: str,
+        *,
+        scope_type: str,
+        scope_id: str,
+        action: str,
+    ) -> dict[str, Any]:
+        if scope_type not in {"run", "task", "work_unit"}:
+            raise ValueError("permission scope_type must be run, task, or work_unit")
+
+        def request() -> dict[str, Any]:
+            existing = self._fetchone(
+                "SELECT * FROM permission_intents WHERE run_id = ? AND scope_type = ? AND scope_id = ? AND action = ? ORDER BY requested_at DESC LIMIT 1",
+                (run_id, scope_type, scope_id, action),
+            )
+            if existing is not None and existing["status"] in {"pending", "allowed", "denied"}:
+                return existing
+            intent_id = "permission-" + uuid.uuid4().hex[:20]
+            self._execute(
+                "INSERT INTO permission_intents (id, run_id, scope_type, scope_id, action, status, requested_at, decided_at, decision_id) VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL)",
+                (intent_id, run_id, scope_type, scope_id, action, _now()),
+            )
+            self._append_signal_in_transaction(run_id, scope_type, scope_id, "PERMISSION_REQUIRED", {"permission_id": intent_id, "action": action})
+            return self._fetchone("SELECT * FROM permission_intents WHERE id = ?", (intent_id,)) or {}
+
+        return self._write(request)
+
+    def decide_permission(self, permission_id: str, *, allowed: bool, rationale: str | None = None) -> dict[str, Any]:
+        def decide() -> dict[str, Any]:
+            intent = self._fetchone("SELECT * FROM permission_intents WHERE id = ?", (permission_id,))
+            if intent is None:
+                raise KeyError(permission_id)
+            status = "allowed" if allowed else "denied"
+            decision_id = "decision-" + uuid.uuid4().hex[:20]
+            now = _now()
+            self._execute(
+                "INSERT INTO decisions (id, run_id, scope_type, scope_id, question, options_json, selected_option, rationale, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (decision_id, intent["run_id"], intent["scope_type"], intent["scope_id"], f"Allow action {intent['action']}?", _json(["allow", "deny"]), "allow" if allowed else "deny", rationale, intent["requested_at"], now),
+            )
+            self._execute(
+                "UPDATE permission_intents SET status = ?, decided_at = ?, decision_id = ? WHERE id = ?",
+                (status, now, decision_id, permission_id),
+            )
+            self._append_signal_in_transaction(intent["run_id"], intent["scope_type"], intent["scope_id"], "PERMISSION_GRANTED" if allowed else "PERMISSION_DENIED", {"permission_id": permission_id, "status": status})
+            return self._fetchone("SELECT * FROM permission_intents WHERE id = ?", (permission_id,)) or {}
+
+        return self._write(decide)
 
     def acquire_lease(
         self,
@@ -1056,18 +1796,6 @@ class Store:
     ) -> dict[str, Any]:
         return self._write(lambda: self._append_signal_in_transaction(run_id, scope_type, scope_id or run_id, signal_type, payload))
 
-    def read_signals(self, run_id: str, cursor: int = 0, limit: int = 256) -> list[dict[str, Any]]:
-        rows = self._fetchall(
-            "SELECT * FROM signals WHERE run_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
-            (run_id, int(cursor), max(0, int(limit))),
-        )
-        for row in rows:
-            row["payload"] = _loads(row.pop("payload_json", None), {})
-            row["consumed_by"] = _loads(row.pop("consumed_by_json", None), {})
-        return rows
-
-    signals_for_run = read_signals
-
     def export_status(self, run_id: str) -> StatusProjection:
         run = self.get_run(run_id)
         if run is None:
@@ -1088,8 +1816,14 @@ class Store:
                 "contract_ref": f"contract://task/{task['contract_id']}@{task['contract_version']}",
                 "lane_attempt_ref": f"lane-attempt://{attempt['id']}" if attempt else None,
                 "requested_model": None,
+                "requested_reasoning": None,
+                "resolved_model": None,
+                "resolved_reasoning": None,
                 "actual_model": None,
+                "actual_reasoning": None,
                 "actual_model_state": "unresolved",
+                "resource_evidence_source": None,
+                "resource_observed_at": None,
                 "receipt_ref": f"receipt://host/{attempt['receipt_id']}" if attempt and attempt.get("receipt_id") else None,
                 "active_children": sum(1 for unit in work_units if unit["task_id"] == task["id"] and unit["state"] == "active"),
                 "contract_revision": int(task["contract_version"]),
@@ -1111,7 +1845,7 @@ class Store:
             {
                 "kind": "status",
                 "schema_version": "1.0",
-                "protocol": "status/v1",
+                "protocol": STATUS_PROTOCOL,
                 "run_ref": f"run://{run_id}",
                 "projection_source": "runtime.db",
                 "projection_revision": max(1, int(run["revision"])),
@@ -1154,6 +1888,7 @@ except ImportError:  # pragma: no cover - only during partial lane assembly.
 __all__ = [
     "DuplicateIdentityError",
     "LeaseConflictError",
+    "ResourceClaimError",
     "ReceiptIngestionAPI",
     "StatusProjection",
     "Store",

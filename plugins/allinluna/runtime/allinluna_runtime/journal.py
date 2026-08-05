@@ -26,6 +26,8 @@ import threading
 import time
 from typing import Any, Protocol, TypeAlias, TypedDict, runtime_checkable
 
+from .core.state import RUN_STATES as RUN_STATUSES, SIGNAL_TYPES
+
 
 SignalPayload: TypeAlias = Mapping[str, Any]
 
@@ -116,48 +118,8 @@ JournalError = SignalJournalError
 StoreProtocolError = JournalStoreProtocolError
 TransactionError = JournalTransactionError
 
-
-RUN_STATUSES = frozenset(
-    {
-        "created",
-        "active",
-        "paused",
-        "blocked",
-        "completed",
-        "cancelled",
-        "aborted",
-    }
-)
 TERMINAL_RUN_STATUSES = frozenset({"completed", "cancelled", "aborted"})
 SIGNAL_SCOPE_TYPES = frozenset({"run", "task", "work_unit"})
-
-SIGNAL_TYPES = frozenset(
-    {
-        "RUN_STARTED",
-        "TASK_CREATED",
-        "TASK_READY",
-        "LANE_DISPATCH_INTENT",
-        "LANE_ACK",
-        "LANE_PULSE",
-        "LANE_HANDOFF",
-        "TASK_BLOCKED",
-        "TASK_COMPLETED",
-        "CONTRACT_CHANGED",
-        "PROMOTION_REQUESTED",
-        "DECISION_REQUIRED",
-        "PERMISSION_REQUIRED",
-        "LEASE_EXPIRED",
-        "RUN_COMPLETED",
-        "WORK_UNIT_CREATED",
-        "WORK_UNIT_READY",
-        "WORK_UNIT_DELEGATED",
-        "WORK_UNIT_PULSE",
-        "WORK_UNIT_HANDOFF",
-        "WORK_UNIT_BLOCKED",
-        "WORK_GRAPH_CHANGED",
-        "LANE_VERIFY_REQUIRED",
-    }
-)
 _SIGNAL_TYPE_RE = re.compile(r"^[A-Z][A-Z0-9_:-]{0,127}$")
 _RUN_ID_RE = re.compile(r"^[^\s/][^\s]{0,255}$")
 _ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T")

@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from fnmatch import fnmatchcase
 from typing import Any
+
+from ...core.policy import contains, contains_all
 
 from .base import (
     ACTION_BRIDGE_PROTOCOL,
@@ -39,21 +40,11 @@ def _values(value: Any) -> tuple[str, ...]:
 
 
 def _within(child: str, parent: str) -> bool:
-    child = child.replace("\\", "/").strip("/")
-    parent = parent.replace("\\", "/").strip("/")
-    if parent.endswith("/**"):
-        parent = parent[:-3].rstrip("/")
-    if child.endswith("/**"):
-        child = child[:-3].rstrip("/")
-    if fnmatchcase(child, parent):
-        return True
-    if fnmatchcase(child, parent + "/**"):
-        return True
-    return child == parent or child.startswith(parent + "/")
+    return contains(parent, child)
 
 
 def _subset(children: Sequence[str], parents: Sequence[str]) -> bool:
-    return all(any(_within(child, parent) for parent in parents) for child in children)
+    return contains_all(parents, children)
 
 
 @dataclass(frozen=True, slots=True)

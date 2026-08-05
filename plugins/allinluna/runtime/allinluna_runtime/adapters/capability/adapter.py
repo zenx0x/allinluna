@@ -20,8 +20,8 @@ from .models import (
 from .registry import CapabilityRegistry
 
 
-REQUIRED_MODEL = "gpt-5.6-luna"
-REQUIRED_REASONING = "max"
+DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_REASONING = "max"
 READ_ONLY_FORBIDDEN_SCOPE = {
     "write",
     "writes",
@@ -41,6 +41,13 @@ class CapabilityAdapterError(RuntimeError):
 
 def _text(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _resource_text(value: Any, *, name: str) -> str:
+    result = _text(value)
+    if result is None:
+        raise ValueError(f"resource {name} must be a non-empty string")
+    return result
 
 
 def _copy(value: Any) -> Any:
@@ -102,18 +109,20 @@ class RegistryCapabilityAdapter:
         discovery_provider: Callable[..., Any] | None = None,
         permission_provider: Callable[..., Any] | None = None,
         invoker: Callable[..., Any] | None = None,
-        model: str = REQUIRED_MODEL,
-        reasoning: str = REQUIRED_REASONING,
+        model: str = DEFAULT_MODEL,
+        reasoning: str = DEFAULT_REASONING,
         allow_fallback: bool = False,
     ) -> None:
-        self.registry = registry if isinstance(registry, CapabilityRegistry) else CapabilityRegistry(registry)
+        self.registry = (
+            registry if isinstance(registry, CapabilityRegistry) else CapabilityRegistry(registry)
+        )
         self.host = host
         self.discovery_provider = discovery_provider
         self.permission_provider = permission_provider
         self.invoker = invoker
-        self.model = model
-        self.reasoning = reasoning
-        # Capability fallback is opt-in.  Model fallback is never supported.
+        self.model = _resource_text(model, name="model")
+        self.reasoning = _resource_text(reasoning, name="reasoning")
+        # Capability fallback is opt-in.  It never rewrites resource choices.
         self.allow_fallback = bool(allow_fallback)
 
     def _host_method(self, *names: str) -> Callable[..., Any] | None:
@@ -302,10 +311,6 @@ class RegistryCapabilityAdapter:
             reason = live_discovery.reason or "capability-not-available"
         elif live_permission.status != "granted":
             reason = live_permission.reason or f"permission-{live_permission.status}"
-        elif context.get("model") not in (None, self.model):
-            reason = "model-policy-mismatch"
-        elif context.get("reasoning") not in (None, self.reasoning):
-            reason = "reasoning-policy-mismatch"
 
         if not applicable:
             status = "not-applicable"
@@ -317,8 +322,6 @@ class RegistryCapabilityAdapter:
             status = "unavailable"
         elif live_permission.status == "unknown":
             status = "permission-unknown"
-        elif reason in {"model-policy-mismatch", "reasoning-policy-mismatch"}:
-            status = "unresolved"
         elif registered is None:
             status = "unknown"
         else:
@@ -437,6 +440,9 @@ class RegistryCapabilityAdapter:
     def _validate_receipt(
         cls,
         payload: Any,
+        *,
+        expected_model: str,
+        expected_reasoning: str,
     ) -> tuple[dict[str, Any] | None, str | None, dict[str, Any]]:
         if not isinstance(payload, Mapping):
             return None, "host-receipt-missing", {}
@@ -459,9 +465,9 @@ class RegistryCapabilityAdapter:
             return None, "host-receipt-actual-tool-missing", {}
         model = cls._actual_value(receipt, actual, "model")
         reasoning = cls._actual_value(receipt, actual, "reasoning", "thinking")
-        if model != REQUIRED_MODEL:
+        if model != expected_model:
             return None, "real-model-receipt-missing-or-mismatched", {}
-        if reasoning != REQUIRED_REASONING:
+        if reasoning != expected_reasoning:
             return None, "real-reasoning-receipt-missing-or-mismatched", {}
         status = str(receipt.get("status", "completed")).casefold()
         if status in {"pending", "dispatch", "unresolved", "unknown"}:
@@ -482,6 +488,8 @@ class RegistryCapabilityAdapter:
         resolution: CapabilityResolution | None,
         blocker: str,
         status: str = "unresolved",
+        requested: Mapping[str, Any] | None = None,
+        resolved: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         discovery = resolution.discovery.to_dict() if resolution else None
         permission = resolution.permission.to_dict() if resolution else None
@@ -505,8 +513,8 @@ class RegistryCapabilityAdapter:
                 "protocol": HOST_RECEIPT_PROTOCOL,
                 "source": None,
                 "actual_tool": None,
-                "requested": None,
-                "resolved": None,
+                "requested": _copy(requested),
+                "resolved": _copy(resolved),
                 "actual": None,
                 "fallback": None,
                 "blocker": blocker,
@@ -537,30 +545,44 @@ class RegistryCapabilityAdapter:
 
         if not isinstance(capability_id, str) or not capability_id.strip():
             return self._unresolved_envelope(resolution=None, blocker="capability-id-missing")
-        requested_model = model or (
-            action.get("model") if isinstance(action, Mapping) else None
-        ) or self.model
-        requested_reasoning = reasoning or (
+        action_model = action.get("model") if isinstance(action, Mapping) else None
+        action_reasoning = (
             action.get("reasoning", action.get("thinking")) if isinstance(action, Mapping) else None
-        ) or self.reasoning
-        if requested_model != REQUIRED_MODEL:
-            return self._unresolved_envelope(
-                resolution=None, blocker="model-policy-mismatch"
+        )
+        try:
+            requested_model = _resource_text(
+                (
+                    model
+                    if model is not None
+                    else action_model
+                    if action_model is not None
+                    else self.model
+                ),
+                name="model",
             )
-        if requested_reasoning != REQUIRED_REASONING:
-            return self._unresolved_envelope(
-                resolution=None, blocker="reasoning-policy-mismatch"
+            requested_reasoning = _resource_text(
+                (
+                    reasoning
+                    if reasoning is not None
+                    else action_reasoning
+                    if action_reasoning is not None
+                    else self.reasoning
+                ),
+                name="reasoning",
             )
+        except ValueError as exc:
+            return self._unresolved_envelope(resolution=None, blocker=str(exc))
 
         request_action = _copy(action)
         if not isinstance(request_action, Mapping):
             request_action = {"value": request_action}
         else:
             request_action = dict(request_action)
-        request_action.setdefault("model", REQUIRED_MODEL)
-        request_action.setdefault("reasoning", REQUIRED_REASONING)
+        request_action["model"] = requested_model
+        request_action["reasoning"] = requested_reasoning
         request_context = dict(context or {})
-        request_context.update({"model": REQUIRED_MODEL, "reasoning": REQUIRED_REASONING})
+        request_context.update({"model": requested_model, "reasoning": requested_reasoning})
+        requested_resource = {"model": requested_model, "reasoning": requested_reasoning}
         request_binding = binding or {
             "kind": "required",
             "capability": {"id": capability_id, "kind": "tool"},
@@ -579,27 +601,39 @@ class RegistryCapabilityAdapter:
             return self._unresolved_envelope(
                 resolution=resolution,
                 blocker=blocker,
-                status=("permission-denied" if resolution.status == "permission-denied" else "unresolved"),
+                status=(
+                    "permission-denied"
+                    if resolution.status == "permission-denied"
+                    else "unresolved"
+                ),
+                requested={"resource": requested_resource, "action": _copy(dict(request_action))},
             )
 
         capability = resolution.resolved_capability or resolution.capability
-        payload = self._invoker_call(capability, request_action)
-        receipt, error, actual_info = self._validate_receipt(payload)
-        if receipt is None or error:
-            return self._unresolved_envelope(
-                resolution=resolution,
-                blocker=error or "host-receipt-unresolved",
-            )
-
         requested = {
             "capability": resolution.capability.to_dict(include_live=False),
+            "resource": requested_resource,
             "action": _copy(dict(request_action)),
         }
         resolved = {
             "capability": capability.to_dict(include_live=False),
+            "resource": dict(requested_resource),
             "discovery": resolution.discovery.to_dict(),
             "permission": resolution.permission.to_dict(),
         }
+        payload = self._invoker_call(capability, request_action)
+        receipt, error, actual_info = self._validate_receipt(
+            payload,
+            expected_model=requested_model,
+            expected_reasoning=requested_reasoning,
+        )
+        if receipt is None or error:
+            return self._unresolved_envelope(
+                resolution=resolution,
+                blocker=error or "host-receipt-unresolved",
+                requested=requested,
+                resolved=resolved,
+            )
         fallback_id = resolution.fallback_capability.id if resolution.fallback_capability else None
         capability_evidence = CapabilityEvidence(
             requested=requested,
@@ -645,8 +679,8 @@ CapabilityAdapter = RegistryCapabilityAdapter
 __all__ = [
     "CapabilityAdapterError",
     "CapabilityAdapterImpl",
+    "DEFAULT_MODEL",
+    "DEFAULT_REASONING",
     "DefaultCapabilityAdapter",
-    "REQUIRED_MODEL",
-    "REQUIRED_REASONING",
     "RegistryCapabilityAdapter",
 ]

@@ -86,8 +86,8 @@ class PackManifest:
 
 
 @dataclass(frozen=True)
-class TaskGraph:
-    """Pack output: task contracts plus the lane-local work graph templates."""
+class CompiledRunGraph:
+    """Pack output aggregate around the one canonical domain TaskGraph model."""
 
     run_id: str
     tasks: tuple[Task, ...]
@@ -98,7 +98,7 @@ class TaskGraph:
     def __post_init__(self) -> None:
         task_ids = {str(task.id) for task in self.tasks}
         if len(task_ids) != len(self.tasks):
-            raise PackError("TaskGraph task ids must be unique")
+            raise PackError("CompiledRunGraph task ids must be unique")
         contract_refs = {str(contract.ref) for contract in self.contracts}
         if any(str(task.contract_ref) not in contract_refs for task in self.tasks):
             raise PackError("every Task must reference a graph contract")
@@ -116,7 +116,7 @@ class TaskGraph:
 
         def visit(node: str) -> None:
             if node in visiting:
-                raise PackError("TaskGraph contains a dependency cycle")
+                raise PackError("CompiledRunGraph contains a dependency cycle")
             if node in visited:
                 return
             visiting.add(node)
@@ -152,7 +152,7 @@ class WorkflowPack(Protocol):
     version: str
     manifest: PackManifest
 
-    def compile_goal(self, run_intent: RunIntent) -> TaskGraph: ...
+    def compile_goal(self, run_intent: RunIntent) -> CompiledRunGraph: ...
     def enrich_context(self, scope: Any, bundle: Any) -> Any: ...
     def verifiers(self, task: Task) -> list[Any]: ...
     def compose_result(self, run: Run) -> Mapping[str, Any]: ...
@@ -182,7 +182,7 @@ def contract_for(
     )
 
 
-def task_for(*, run_id: str, task_id: str, outcome: str, contract: Contract, dependencies: Sequence[TaskDependency] = (), priority: int = 0) -> Task:
+def task_for(*, run_id: str, task_id: str, outcome: str, contract: Contract, dependencies: Sequence[TaskDependency] = (), priority: int = 0, resource_envelope: Mapping[str, Any] | None = None) -> Task:
     return Task(
         id=task_id,
         run_id=run_id,
@@ -191,6 +191,7 @@ def task_for(*, run_id: str, task_id: str, outcome: str, contract: Contract, dep
         state=TaskState.PROPOSED,
         priority=priority,
         dependencies=tuple(dependencies),
+        resource_envelope=dict(resource_envelope or {}),
     )
 
 
@@ -202,6 +203,10 @@ def dependency(task_id: str, *, exports: Sequence[str] = ()) -> TaskDependency:
     )
 
 
+# Read-only import compatibility. New code uses CompiledRunGraph; TaskGraph is
+# the canonical dependency graph in domain.py.
+TaskGraph = CompiledRunGraph
+
 __all__ = [
-    "PackError", "PackManifest", "TaskGraph", "WorkflowPack", "contract_for", "dependency", "task_for",
+    "CompiledRunGraph", "PackError", "PackManifest", "TaskGraph", "WorkflowPack", "contract_for", "dependency", "task_for",
 ]

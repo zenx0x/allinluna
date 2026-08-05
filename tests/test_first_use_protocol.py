@@ -51,6 +51,12 @@ def real_receipt() -> dict:
                 source="codex_app",
                 actual_tool="codex_app__create_thread",
             )
+            resource = event["receipt"]["resource_receipt"]
+            values = {"model": "gpt-5.6-luna", "reasoning": "medium"}
+            resource.update(
+                requested=dict(values), resolved=dict(values), actual=dict(values),
+                evidence_source="codex-host-runtime",
+            )
     receipt["monitor"]["source"] = "codex_app"
     receipt["integration_boundary"]["source"] = "codex_app"
     return receipt
@@ -133,8 +139,29 @@ class FirstUseProtocolTests(unittest.TestCase):
         self.assertEqual(set(schema["properties"]["integration_boundary"]["required"]), {"source", "boundary"})
         self.assertEqual(
             set(schema["$defs"]["thread_receipt"]["required"]),
-            {"source", "actual_tool", "thread_id", "host_id", "worktree", "repo"},
+            {"source", "actual_tool", "thread_id", "host_id", "worktree", "repo", "resource_receipt"},
         )
+
+    def test_real_receipt_requires_matching_resource_triple(self) -> None:
+        for field, value in (
+            ("requested", {"model": "other", "reasoning": "medium"}),
+            ("resolved", {"model": "gpt-5.6-luna", "reasoning": "max"}),
+            ("actual", {"model": "other", "reasoning": "max"}),
+        ):
+            receipt = real_receipt()
+            owner = next(event for event in receipt["events"] if event["event"] == "owner_thread_receipt")
+            owner["receipt"]["resource_receipt"][field] = value
+            report = evaluate_receipt(receipt, mode="real")
+            self.assertEqual(report["status"], "FAIL", field)
+            self.assertEqual(report["failure_class"], "product_failure", field)
+
+    def test_real_receipt_without_resource_evidence_is_blocked(self) -> None:
+        receipt = real_receipt()
+        owner = next(event for event in receipt["events"] if event["event"] == "owner_thread_receipt")
+        owner["receipt"].pop("resource_receipt")
+        report = evaluate_receipt(receipt, mode="real")
+        self.assertEqual(report["status"], "BLOCKED")
+        self.assertEqual(report["failure_class"], "host_tool_unavailable")
 
     def test_real_valid_receipt_can_pass_only_after_source_and_tool_rewrite(self) -> None:
         receipt = real_receipt()

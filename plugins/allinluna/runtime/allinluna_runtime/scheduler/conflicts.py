@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
+from ..core.policy import overlaps
+
 
 def _paths(value: Any) -> tuple[str, ...]:
     if value is None:
@@ -25,14 +27,7 @@ def _paths(value: Any) -> tuple[str, ...]:
 
 
 def path_overlaps(left: str, right: str) -> bool:
-    a = str(left).replace("\\", "/").strip("/")
-    b = str(right).replace("\\", "/").strip("/")
-    for x, y in ((a, b), (b, a)):
-        if x.endswith("/**"):
-            x = x[:-3].rstrip("/")
-        if x == y or y.startswith(x + "/"):
-            return True
-    return False
+    return overlaps(left, right)
 
 
 def ownership_conflict(left: Any, right: Any) -> bool:

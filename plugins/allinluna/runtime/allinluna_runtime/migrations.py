@@ -20,14 +20,14 @@ import sqlite3
 from typing import Any, Final
 
 
-SCHEMA_VERSION: Final[int] = 1
+SCHEMA_VERSION: Final[int] = 5
 LATEST_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
 CURRENT_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
-SCHEMA_VERSION_STRING: Final[str] = "1.0"
+SCHEMA_VERSION_STRING: Final[str] = "5.0"
 DATABASE_SCHEMA_VERSION: Final[int] = SCHEMA_VERSION
 
 
-# This is the normative 18-table schema from docs/architecture/vnext/
+# This is the normative v1 schema from docs/architecture/vnext/
 # DB_SCHEMA_V1.sql.  Keep the statement text stable: its SHA-256 is stored in
 # schema_migrations and is part of migration provenance.
 DB_SCHEMA_V1_SQL: Final[str] = """-- All in Luna vNext runtime database schema v1.
@@ -259,6 +259,168 @@ CREATE INDEX IF NOT EXISTS idx_work_units_task_state ON work_units(task_id, stat
 CREATE INDEX IF NOT EXISTS idx_leases_scope_state ON leases(scope_type, scope_id, state);
 """
 
+DB_SCHEMA_V2_SQL: Final[str] = """-- All in Luna vNext runtime database schema v2.
+-- Runtime identity and recovery facts are additive so v1 databases migrate in place.
+
+ALTER TABLE tasks ADD COLUMN local_id TEXT;
+UPDATE tasks SET local_id = id WHERE local_id IS NULL;
+ALTER TABLE tasks ADD COLUMN resource_json TEXT NOT NULL DEFAULT '{}';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_run_local_id ON tasks(run_id, local_id);
+
+ALTER TABLE work_units ADD COLUMN local_id TEXT;
+UPDATE work_units SET local_id = id WHERE local_id IS NULL;
+ALTER TABLE work_units ADD COLUMN resource_json TEXT NOT NULL DEFAULT '{}';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_work_units_task_local_id ON work_units(task_id, local_id);
+
+ALTER TABLE signals ADD COLUMN idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_run_idempotency
+    ON signals(run_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS task_exports (
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    port_name TEXT NOT NULL,
+    artifact_ref TEXT,
+    value_json TEXT,
+    verified_at TEXT NOT NULL,
+    source_handoff_id TEXT NOT NULL,
+    PRIMARY KEY (task_id, contract_version, port_name)
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_outbox (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    target_type TEXT NOT NULL CHECK (target_type IN ('task','work_unit')),
+    target_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    action_json TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK (state IN ('pending','emitted','acknowledged','reconciled','failed')),
+    emit_count INTEGER NOT NULL DEFAULT 0 CHECK (emit_count >= 0),
+    next_retry_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_inputs (
+    snapshot_id TEXT NOT NULL REFERENCES snapshots(id),
+    input_ref TEXT NOT NULL,
+    input_kind TEXT NOT NULL DEFAULT 'reference',
+    PRIMARY KEY (snapshot_id, input_ref)
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_supersessions (
+    snapshot_id TEXT PRIMARY KEY REFERENCES snapshots(id),
+    replacement_snapshot_id TEXT NOT NULL REFERENCES snapshots(id),
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (snapshot_id <> replacement_snapshot_id)
+);
+
+CREATE TABLE IF NOT EXISTS promotion_requests (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    source_task_id TEXT NOT NULL REFERENCES tasks(id),
+    source_work_unit_id TEXT REFERENCES work_units(id),
+    payload_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('requested','accepted','rejected')),
+    promoted_task_id TEXT REFERENCES tasks(id),
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS corrections (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    target_type TEXT NOT NULL CHECK (target_type IN ('task','work_unit')),
+    target_id TEXT NOT NULL,
+    attempt_id TEXT,
+    payload_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('requested','sent','resolved','failed')),
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_run_state_priority ON tasks(run_id, state, priority);
+CREATE INDEX IF NOT EXISTS idx_task_exports_task_port ON task_exports(task_id, port_name);
+CREATE INDEX IF NOT EXISTS idx_outbox_state_next_retry ON dispatch_outbox(state, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_attempts_task_state ON task_attempts(task_id, state);
+CREATE INDEX IF NOT EXISTS idx_snapshot_inputs_input ON snapshot_inputs(input_ref);
+CREATE INDEX IF NOT EXISTS idx_snapshots_scope_current ON snapshots(scope_type, scope_id, validity);
+
+PRAGMA user_version = 2;
+"""
+
+DB_SCHEMA_V3_SQL: Final[str] = """-- All in Luna vNext runtime database schema v3.
+-- Resource occupancy is a run-scoped Store fact, never a process-local counter.
+
+CREATE TABLE IF NOT EXISTS resource_claims (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    scope TEXT NOT NULL CHECK (scope IN ('top-level','lane')),
+    lane_id TEXT,
+    entity_id TEXT NOT NULL,
+    slots INTEGER NOT NULL CHECK (slots > 0),
+    requested_json TEXT NOT NULL,
+    resolved_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('active','released','reconciled')),
+    acquired_at TEXT NOT NULL,
+    released_at TEXT,
+    release_reason TEXT,
+    CHECK ((scope = 'top-level' AND lane_id IS NULL) OR
+           (scope = 'lane' AND lane_id IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_claims_active_entity
+    ON resource_claims(run_id, scope, entity_id)
+    WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS idx_resource_claims_occupancy
+    ON resource_claims(run_id, scope, lane_id, state);
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_task
+    ON task_dependencies(task_id, depends_on_task_id);
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent
+    ON task_dependencies(depends_on_task_id, task_id);
+CREATE INDEX IF NOT EXISTS idx_work_unit_dependencies_unit
+    ON work_unit_dependencies(work_unit_id, depends_on_work_unit_id);
+CREATE INDEX IF NOT EXISTS idx_work_unit_attempts_unit_no
+    ON work_unit_attempts(work_unit_id, attempt_no DESC);
+CREATE INDEX IF NOT EXISTS idx_outbox_run_state_created
+    ON dispatch_outbox(run_id, state, created_at);
+CREATE INDEX IF NOT EXISTS idx_leases_state_scope
+    ON leases(state, scope_type, scope_id);
+
+PRAGMA user_version = 3;
+"""
+
+DB_SCHEMA_V4_SQL: Final[str] = """-- All in Luna vNext runtime database schema v4.
+-- Host resource evidence is queryable authority, not payload-only metadata.
+
+ALTER TABLE host_receipts ADD COLUMN actual_model TEXT;
+ALTER TABLE host_receipts ADD COLUMN actual_reasoning TEXT;
+ALTER TABLE host_receipts ADD COLUMN resource_receipt_state TEXT NOT NULL DEFAULT 'unresolved';
+ALTER TABLE host_receipts ADD COLUMN resource_evidence_source TEXT;
+ALTER TABLE host_receipts ADD COLUMN resource_observed_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_host_receipts_resource_state
+    ON host_receipts(resource_receipt_state, actual_model, actual_reasoning);
+
+PRAGMA user_version = 4;
+"""
+
+DB_SCHEMA_V5_SQL: Final[str] = """-- All in Luna vNext runtime database schema v5.
+-- Persist the complete requested/resolved/actual resource evidence triple.
+
+ALTER TABLE host_receipts ADD COLUMN requested_model TEXT;
+ALTER TABLE host_receipts ADD COLUMN requested_reasoning TEXT;
+ALTER TABLE host_receipts ADD COLUMN resolved_model TEXT;
+ALTER TABLE host_receipts ADD COLUMN resolved_reasoning TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_host_receipts_resource_route
+    ON host_receipts(requested_model, requested_reasoning, resolved_model, resolved_reasoning);
+
+PRAGMA user_version = 5;
+"""
+
 # Compatibility aliases make the frozen schema easy for sibling lanes to
 # discover without introducing another source of SQL truth.
 SCHEMA_V1_SQL: Final[str] = DB_SCHEMA_V1_SQL
@@ -283,6 +445,13 @@ SCHEMA_TABLES: Final[tuple[str, ...]] = (
     "host_receipts",
     "permission_intents",
     "decisions",
+    "task_exports",
+    "dispatch_outbox",
+    "snapshot_inputs",
+    "snapshot_supersessions",
+    "promotion_requests",
+    "corrections",
+    "resource_claims",
 )
 TABLE_NAMES: Final[tuple[str, ...]] = SCHEMA_TABLES
 
@@ -325,6 +494,8 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "lane_snapshot_id",
         "created_at",
         "updated_at",
+        "local_id",
+        "resource_json",
     ),
     "task_dependencies": ("task_id", "depends_on_task_id", "condition_json"),
     "task_attempts": (
@@ -355,6 +526,8 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "return_contract",
         "created_at",
         "updated_at",
+        "local_id",
+        "resource_json",
     ),
     "work_unit_dependencies": ("work_unit_id", "depends_on_work_unit_id", "condition_json"),
     "work_unit_attempts": (
@@ -388,6 +561,7 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "payload_json",
         "created_at",
         "consumed_by_json",
+        "idempotency_key",
     ),
     "artifacts": (
         "id",
@@ -425,6 +599,15 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "payload_json",
         "actual_tool",
         "received_at",
+        "actual_model",
+        "actual_reasoning",
+        "resource_receipt_state",
+        "resource_evidence_source",
+        "resource_observed_at",
+        "requested_model",
+        "requested_reasoning",
+        "resolved_model",
+        "resolved_reasoning",
     ),
     "permission_intents": (
         "id",
@@ -448,6 +631,31 @@ TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
         "rationale",
         "created_at",
         "resolved_at",
+    ),
+    "task_exports": (
+        "task_id", "contract_version", "port_name", "artifact_ref", "value_json",
+        "verified_at", "source_handoff_id",
+    ),
+    "dispatch_outbox": (
+        "id", "run_id", "target_type", "target_id", "attempt_id", "action_json",
+        "idempotency_key", "state", "emit_count", "next_retry_at", "created_at", "updated_at",
+    ),
+    "snapshot_inputs": ("snapshot_id", "input_ref", "input_kind"),
+    "snapshot_supersessions": (
+        "snapshot_id", "replacement_snapshot_id", "reason", "created_at",
+    ),
+    "promotion_requests": (
+        "id", "run_id", "source_task_id", "source_work_unit_id", "payload_json",
+        "state", "promoted_task_id", "created_at", "resolved_at",
+    ),
+    "corrections": (
+        "id", "run_id", "target_type", "target_id", "attempt_id", "payload_json",
+        "state", "created_at", "resolved_at",
+    ),
+    "resource_claims": (
+        "id", "run_id", "scope", "lane_id", "entity_id", "slots",
+        "requested_json", "resolved_json", "state", "acquired_at",
+        "released_at", "release_reason",
     ),
 }
 
@@ -517,7 +725,11 @@ class Migration:
 MigrationDefinition = Migration
 
 MIGRATIONS: Final[tuple[Migration, ...]] = (
-    Migration(SCHEMA_VERSION, "create the vNext runtime schema", DB_SCHEMA_V1_SQL),
+    Migration(1, "create the vNext runtime schema", DB_SCHEMA_V1_SQL),
+    Migration(2, "add scoped identities, durable dispatch, exports, and context lineage", DB_SCHEMA_V2_SQL),
+    Migration(3, "add durable run-scoped resource claims", DB_SCHEMA_V3_SQL),
+    Migration(4, "persist canonical host resource receipt evidence", DB_SCHEMA_V4_SQL),
+    Migration(5, "persist requested and resolved host resource evidence", DB_SCHEMA_V5_SQL),
 )
 MIGRATION_MAP: Final[dict[int, Migration]] = {migration.version: migration for migration in MIGRATIONS}
 MIGRATION_DEFINITIONS: Final[tuple[Migration, ...]] = MIGRATIONS
@@ -765,8 +977,8 @@ def validate_schema(
 
     Extra application tables are allowed by default so a caller can use the
     runtime database alongside an explicitly owned extension.  ``strict_tables``
-    is available for distribution/recovery checks that require exactly the 18
-    normative tables (plus SQLite's internal tables).
+    is available for distribution/recovery checks that require exactly the
+    current migration contract (plus SQLite's internal tables).
     """
 
     if not isinstance(connection, sqlite3.Connection):
@@ -923,6 +1135,10 @@ __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "DATABASE_SCHEMA_VERSION",
     "DB_SCHEMA_V1_SQL",
+    "DB_SCHEMA_V2_SQL",
+    "DB_SCHEMA_V3_SQL",
+    "DB_SCHEMA_V4_SQL",
+    "DB_SCHEMA_V5_SQL",
     "LATEST_SCHEMA_VERSION",
     "MIGRATION_1_SQL",
     "MIGRATION_DEFINITIONS",

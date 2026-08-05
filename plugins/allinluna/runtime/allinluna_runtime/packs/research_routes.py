@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Any, Mapping
 
 from ..domain import Run, RunIntent, Task
-from .base import PackManifest, TaskGraph, contract_for, task_for
+from .base import CompiledRunGraph, PackManifest, contract_for, task_for
 
 
 class ResearchRoutesBridge:
@@ -49,23 +49,23 @@ class ResearchRoutesBridge:
             done_when=done_when,
             repository=repository or {"mode": "projectless", "roots": (), "protected_paths": ()},
             authorization_intent={"implementation_writes": False, "git_operations": False, "destructive_operations": False, "live_external_mutation": False, "publication": False},
-            resource_envelope={"top_level_slots": "auto", "total_subagent_slots": "auto", "subagent_slots_per_lane": "auto", "model_policy": "explicit", "model": "gpt-5.6-luna", "reasoning_policy": "explicit", "reasoning": "high", "external_action_policy": "deny"},
+            resource_envelope={"top_level_slots": "auto", "total_subagent_slots": "auto", "subagent_slots_per_lane": "auto", "model_policy": "auto", "model": None, "reasoning_policy": "auto", "reasoning": None, "external_action_policy": "deny"},
             pack={"id": self.id, "version": self.version, "config": {"claims": list(claims), "evidence": list(evidence), "unknowns": list(unknowns), "human_decisions": list(packet.get("human_decisions", ())), "experiment_authorization": packet.get("experiment_authorization"), "canonical_state": False}},
             constraints=constraints,
             source_refs=source_refs,
         )
 
-    def compile_goal(self, run_intent: RunIntent) -> TaskGraph:
+    def compile_goal(self, run_intent: RunIntent) -> CompiledRunGraph:
         run_id = f"run-{run_intent.intent_id}"
         contract = contract_for(
             contract_id=f"contract-{run_intent.intent_id}-evidence-boundary",
             outcome="Compile a route-neutral evidence boundary for downstream human choice",
             done_when=run_intent.done_when,
-            ownership=tuple(str(item) for item in run_intent.repository.protected_paths),
+            ownership=(),
             exports=({"name": "evidence-boundary", "kind": "decision", "version": 1, "description": "Claims, Evidence, unknowns, contradictions, and failure regimes; no implementation authorization"},),
         )
         task = task_for(run_id=run_id, task_id="research-evidence-boundary", outcome=contract.outcome, contract=contract)
-        return TaskGraph(run_id=run_id, tasks=(task,), contracts=(contract,), metadata={"pack": self.id, "route_neutral": True, "preserve": ["claims", "evidence", "unknowns", "failure_regimes", "human_decisions", "experiment_authorization"], "forbidden_promotion": ["implementation", "canonical-state"]})
+        return CompiledRunGraph(run_id=run_id, tasks=(task,), contracts=(contract,), metadata={"pack": self.id, "route_neutral": True, "forbidden_scope": list(run_intent.repository.protected_paths), "preserve": ["claims", "evidence", "unknowns", "failure_regimes", "human_decisions", "experiment_authorization"], "forbidden_promotion": ["implementation", "canonical-state"]})
 
     def enrich_context(self, scope: Any, bundle: Any) -> Any:
         additions = {"scope": str(scope), "pack": self.id, "excluded": ["raw_tool_logs", "unrelated_lanes"], "route_neutral": True}

@@ -23,6 +23,14 @@ from enum import StrEnum
 from typing import Any, ClassVar, TypeVar
 from uuid import uuid4
 
+from .core.policy import contains as path_contains, contains_all as paths_contained, overlaps as paths_overlap
+from .core.model import (
+    ArtifactKind, ArtifactVisibility, AuthorityAction, DependencyCondition,
+    LaneAttemptState, LeaseScope, LeaseState, ModelState, PortKind,
+    ReceiptStatus, RepositoryMode, ResourcePolicy, RunStatus, ScopeType,
+    SignalType, SnapshotValidity, TaskState, WorkUnitAttemptState, WorkUnitState,
+)
+
 
 __all__ = [
     "Artifact",
@@ -523,185 +531,7 @@ class AttemptNumber(int):
         return int.__new__(cls, value)
 
 
-class RunStatus(StrEnum):
-    CREATED = "created"
-    ACTIVE = "active"
-    PAUSED = "paused"
-    BLOCKED = "blocked"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    ABORTED = "aborted"
-
-
-class TaskState(StrEnum):
-    PROPOSED = "proposed"
-    READY = "ready"
-    DISPATCHING = "dispatching"
-    ACTIVE = "active"
-    WAITING = "waiting"
-    VERIFYING = "verifying"
-    BLOCKED = "blocked"
-    COMPLETED = "completed"
-    SUPERSEDED = "superseded"
-    CANCELLED = "cancelled"
-
-
-class WorkUnitState(StrEnum):
-    PROPOSED = "proposed"
-    READY = "ready"
-    DELEGATED = "delegated"
-    ACTIVE = "active"
-    BLOCKED = "blocked"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class LaneAttemptState(StrEnum):
-    CREATED = "created"
-    DISPATCHED = "dispatched"
-    ACKNOWLEDGED = "acknowledged"
-    ACTIVE = "active"
-    HANDOFF_READY = "handoff_ready"
-    LOST = "lost"
-    FAILED = "failed"
-    CLOSED = "closed"
-
-
-class WorkUnitAttemptState(StrEnum):
-    CREATED = "created"
-    DELEGATED = "delegated"
-    ACTIVE = "active"
-    BLOCKED = "blocked"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CLOSED = "closed"
-
-
-class SnapshotValidity(StrEnum):
-    CURRENT = "current"
-    STALE = "stale"
-    INVALID = "invalid"
-
-
-class ScopeType(StrEnum):
-    RUN = "run"
-    TASK = "task"
-    WORK_UNIT = "work_unit"
-    SNAPSHOT = "snapshot"
-
-
 SignalScope = ScopeType
-
-
-class LeaseScope(StrEnum):
-    TASK = "task"
-    WORK_UNIT = "work_unit"
-
-
-class LeaseState(StrEnum):
-    ACTIVE = "active"
-    EXPIRED = "expired"
-    RELEASED = "released"
-
-
-class ArtifactKind(StrEnum):
-    SOURCE = "source"
-    DIFF = "diff"
-    COMMIT = "commit"
-    CHECK_LOG = "check-log"
-    TOOL_LOG = "tool-log"
-    DOCUMENT = "document"
-    DATASET = "dataset"
-    SUMMARY = "summary"
-    RECEIPT = "receipt"
-
-
-class ArtifactVisibility(StrEnum):
-    LOCAL = "local"
-    LANE = "lane"
-    COORDINATOR = "coordinator"
-    USER = "user"
-
-
-class SignalType(StrEnum):
-    RUN_STARTED = "RUN_STARTED"
-    TASK_CREATED = "TASK_CREATED"
-    TASK_READY = "TASK_READY"
-    LANE_DISPATCH_INTENT = "LANE_DISPATCH_INTENT"
-    LANE_ACK = "LANE_ACK"
-    LANE_PULSE = "LANE_PULSE"
-    LANE_HANDOFF = "LANE_HANDOFF"
-    TASK_BLOCKED = "TASK_BLOCKED"
-    TASK_COMPLETED = "TASK_COMPLETED"
-    CONTRACT_CHANGED = "CONTRACT_CHANGED"
-    PROMOTION_REQUESTED = "PROMOTION_REQUESTED"
-    DECISION_REQUIRED = "DECISION_REQUIRED"
-    PERMISSION_REQUIRED = "PERMISSION_REQUIRED"
-    LEASE_EXPIRED = "LEASE_EXPIRED"
-    RUN_COMPLETED = "RUN_COMPLETED"
-    WORK_UNIT_CREATED = "WORK_UNIT_CREATED"
-    WORK_UNIT_READY = "WORK_UNIT_READY"
-    WORK_UNIT_DELEGATED = "WORK_UNIT_DELEGATED"
-    WORK_UNIT_PULSE = "WORK_UNIT_PULSE"
-    WORK_UNIT_HANDOFF = "WORK_UNIT_HANDOFF"
-    WORK_UNIT_BLOCKED = "WORK_UNIT_BLOCKED"
-    WORK_GRAPH_CHANGED = "WORK_GRAPH_CHANGED"
-    LANE_VERIFY_REQUIRED = "LANE_VERIFY_REQUIRED"
-
-
-class ReceiptStatus(StrEnum):
-    PENDING = "pending"
-    ACKNOWLEDGED = "acknowledged"
-    ACTIVE = "active"
-    ACCEPTED = "accepted"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    LOST = "lost"
-    CANCELLED = "cancelled"
-    DIRECT_EXECUTION = "direct-execution"
-    EXPIRED = "expired"
-    DUPLICATE = "duplicate"
-
-
-class PortKind(StrEnum):
-    API = "api"
-    SCHEMA = "schema"
-    ARTIFACT = "artifact"
-    CAPABILITY = "capability"
-    CONTEXT = "context"
-    DECISION = "decision"
-    SOURCE = "source"
-
-
-class ModelState(StrEnum):
-    RESOLVED = "resolved"
-    UNRESOLVED = "unresolved"
-
-
-class RepositoryMode(StrEnum):
-    EXISTING = "existing"
-    GREENFIELD = "greenfield"
-    MULTI_REPOSITORY = "multi-repository"
-    PROJECTLESS = "projectless"
-
-
-class DependencyCondition(StrEnum):
-    EXPORTS_AVAILABLE = "exports_available"
-    COMPLETED = "completed"
-
-
-class AuthorityAction(StrEnum):
-    READ = "read"
-    WRITE = "write"
-    EXECUTE_LOCAL = "execute-local"
-    DELEGATE_RECURSIVE = "delegate-recursive"
-    REPORT = "report"
-
-
-class ResourcePolicy(StrEnum):
-    AUTO = "auto"
-    EXPLICIT = "explicit"
 
 
 @dataclass(frozen=True)
@@ -1306,6 +1136,7 @@ class Task(Serializable):
     created_at: datetime | str = field(default_factory=_utc_now)
     updated_at: datetime | str = field(default_factory=_utc_now)
     lane_snapshot_id: SnapshotId | str | None = None
+    resource_envelope: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.id = TaskId(self.id)
@@ -1329,6 +1160,7 @@ class Task(Serializable):
             item if isinstance(item, TaskDependency) else TaskDependency.from_dict(item)
             for item in self.dependencies
         )
+        self.resource_envelope = _mapping(self.resource_envelope, "task.resource_envelope")
         self.created_at = _timestamp(self.created_at, "task.created_at")
         self.updated_at = _timestamp(self.updated_at, "task.updated_at")
         self.ensure_valid()
@@ -1645,12 +1477,6 @@ class TaskGraph:
         )
         if dependency in self._dependencies[child_id]:
             raise ValidationError("duplicate task dependency")
-        parent_ownership = self._ownership[parent_id]
-        child_ownership = self._ownership[child_id]
-        if not _all_paths_within(child_ownership.paths, parent_ownership.paths):
-            raise ValidationError("child ownership exceeds parent ownership")
-        if not set(child_ownership.non_file_scope).issubset(parent_ownership.non_file_scope):
-            raise ValidationError("child non-file ownership exceeds parent ownership")
         self._dependencies[child_id].append(dependency)
         self._tasks[child_id].dependencies = tuple(self._dependencies[child_id])
         try:
@@ -1711,9 +1537,6 @@ class TaskGraph:
             if parent.state not in {TaskState.VERIFYING, TaskState.COMPLETED} and parent_id not in completed_ids:
                 return False
             actual = available_exports.get(parent_id)
-            if actual is None and is_completed(parent_id):
-                contract = self._contracts[str(parent.contract_ref)]
-                actual = {port.name for port in contract.exports}
             if actual is None or not set(dependency.exports).issubset(actual):
                 return False
         return True
@@ -1748,12 +1571,6 @@ class TaskGraph:
                     raise ValidationError(f"dependency references missing parent: {parent_id}")
                 if parent_id == child_id:
                     raise ValidationError("TaskGraph contains a self-dependency")
-                if not _all_paths_within(self._ownership[child_id].paths, self._ownership[parent_id].paths):
-                    raise ValidationError("child ownership exceeds parent ownership")
-                if not set(self._ownership[child_id].non_file_scope).issubset(
-                    self._ownership[parent_id].non_file_scope
-                ):
-                    raise ValidationError("child non-file ownership exceeds parent ownership")
                 edges[child_id].add(parent_id)
         visiting: set[str] = set()
         visited: set[str] = set()
@@ -2008,6 +1825,7 @@ class WorkGraph:
             "ownership": list(self._values(ownership, "ownership")),
             "checks": list(self._values(checks, "checks")),
             "dependencies": list(dependencies or ()),
+            "resource_envelope": dict(extra.get("resource_envelope") or {}),
         }
 
     def _assert_child(self, parent: Mapping[str, Any], child: Mapping[str, Any]) -> None:
@@ -2877,25 +2695,15 @@ class Lease(Serializable):
 
 
 def _path_is_within(child: str, parent: str) -> bool:
-    child_text = str(child).rstrip("/")
-    parent_text = str(parent).rstrip("/")
-    if parent_text.endswith("/**"):
-        parent_text = parent_text[:-3].rstrip("/")
-    if child_text.endswith("/**"):
-        child_text = child_text[:-3].rstrip("/")
-    return child_text == parent_text or child_text.startswith(parent_text + "/")
+    return path_contains(parent, child)
 
 
 def _paths_overlap(left: str, right: str) -> bool:
-    return _path_is_within(left, right) or _path_is_within(right, left)
+    return paths_overlap(left, right)
 
 
 def _all_paths_within(children: Sequence[str], parents: Sequence[str]) -> bool:
-    if not children:
-        return True
-    if not parents:
-        return False
-    return all(any(_path_is_within(child, parent) for parent in parents) for child in children)
+    return paths_contained(parents, children)
 
 
 # Stable string sets and validators are intentionally exported for the store

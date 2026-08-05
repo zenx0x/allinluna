@@ -52,12 +52,19 @@ failure recovery. Do not add GSD phases to Core.
 
 ## Resources and permissions
 
-Semantic work uses the requested Luna-high lane. If the host cannot provide an
-actual model or host receipt, record `actual: unresolved`; never claim a
-fallback or fabricate a receipt. A mechanical documentation-only allowlist may
-be routed to `gpt-5.3-codex-spark` with a separate receipt, and the Luna owner
-must review the final result. This exception never applies to semantic design,
-manifest behavior, compatibility, packs, runtime, or contracts.
+Model and reasoning choices come from the Run resource envelope and may be
+overridden by a narrower Task or WorkUnit resource envelope. They are not hard
+locked: callers may select Luna at medium/high/xhigh/max, Codex Spark, or another
+host-supported model. Preserve requested, resolved, and actual values
+separately. If the host cannot provide an actual model receipt, record
+`actual: unresolved`; never claim a fallback or fabricate a receipt. A narrower
+scope may change compute resources but may not expand permissions or ownership.
+The canonical host receipt carries `resource_receipt.requested`, `resolved`,
+`actual`, `actual_state`, `evidence_source`, and `observed_at`. Mark it
+`resolved` only when the host supplies matching model and reasoning values,
+an explicit evidence source, and a valid observation timestamp. The Adapter
+must compare all three pairs against the persisted dispatch action; a receipt
+must never establish its own verification baseline.
 
 Request permissions just in time at the action boundary. Read-only compilation
 does not request credentials, publication, deployment, push, destructive work,

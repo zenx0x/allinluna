@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, ClassVar, Final, TypeAlias
 
+from ...core.policy import contains, matches
+
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -303,14 +305,7 @@ def normalise_patterns(root: Path, values: Any, *, label: str) -> tuple[str, ...
 
 
 def path_matches(path: str, pattern: str) -> bool:
-    path = _normalise_slashes(path).lstrip("./")
-    pattern = _normalise_slashes(pattern).lstrip("./")
-    if pattern.endswith("/**"):
-        prefix = pattern[:-3].rstrip("/")
-        return path == prefix or path.startswith(prefix + "/")
-    if path == pattern or path.startswith(pattern.rstrip("/") + "/"):
-        return True
-    return fnmatch.fnmatchcase(path, pattern)
+    return contains(pattern, path) or matches(path, pattern)
 
 
 def paths_matching(paths: Iterable[str], patterns: Iterable[str]) -> tuple[str, ...]:

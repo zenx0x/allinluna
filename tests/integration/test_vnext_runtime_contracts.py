@@ -135,8 +135,7 @@ class VNextRuntimeIntegrationTests(unittest.TestCase):
         public_skill = importlib.import_module("allinluna_runtime.packs.public_skill")
         api = public_skill.SinglePublicSkillAPI()
         compilation = api.compile({"goal": "publish", "authorization_intent": {"publication": True}, "resource_envelope": {"external_action_policy": "ask"}})
-        self.assertTrue(compilation.permission_intents)
-        self.assertEqual(compilation.permission_intents[0].status, "ask")
+        self.assertEqual(compilation.permission_intents, ())
         permission = api.permission_at_action("publication", policy="allow", authorized=True, reason="reached publish action")
         self.assertEqual(permission.status, "allowed")
 

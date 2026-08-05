@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Literal
 
 
-HOST_RECEIPT_PROTOCOL = "host-receipt/v1"
+from ...core.protocol import HOST_RECEIPT_PROTOCOL
 CAPABILITY_RECEIPT_PROTOCOL = "capability-receipt/v1"
 
 

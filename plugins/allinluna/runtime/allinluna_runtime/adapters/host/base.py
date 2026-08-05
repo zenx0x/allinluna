@@ -21,12 +21,12 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from ...core.model import ResourceRoute, valid_observed_at
+from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, HOST_RECEIPT_PROTOCOL
 
-HOST_RECEIPT_PROTOCOL = "host-receipt/v1"
-DISPATCH_INTENT_PROTOCOL = "dispatch-intent/v1"
-ACTION_BRIDGE_PROTOCOL = "action-bridge/v1"
-REQUIRED_MODEL = "gpt-5.6-luna"
-REQUIRED_REASONING = "max"
+
+DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_REASONING = "max"
 
 
 def _text(value: Any) -> str | None:
@@ -92,6 +92,11 @@ def first_text(value: Mapping[str, Any], *names: str) -> str | None:
         if result:
             return result
     return None
+
+
+def _resource_values(value: Any) -> dict[str, str] | None:
+    route = ResourceRoute.from_value(value)
+    return route.to_dict() if route else None
 
 
 class HostAdapterError(RuntimeError):
@@ -276,8 +281,9 @@ class HostAction(_MappingRecord):
             expected_receipt=first_text(raw, "expected_receipt", "expectedReceipt") or HOST_RECEIPT_PROTOCOL,
             payload=_copy(raw.get("payload", raw)),
             identity=_copy(raw.get("identity")) if isinstance(raw.get("identity"), Mapping) else None,
-            model=first_text(raw, "model"),
-            reasoning=first_text(raw, "reasoning", "thinking"),
+            model=first_text(raw, "model") or first_text(arguments, "model"),
+            reasoning=first_text(raw, "reasoning", "thinking")
+            or first_text(arguments, "reasoning", "thinking"),
         )
 
 
@@ -303,6 +309,7 @@ class HostReceipt(_MappingRecord):
     duplicate_of: str | None = None
     fallback: str | None = None
     model_receipt: str = "unresolved"
+    resource_receipt: Mapping[str, Any] = field(default_factory=dict)
     payload: Mapping[str, Any] = field(default_factory=dict)
     runtime_evidence: Mapping[str, Any] = field(default_factory=dict)
     action: Mapping[str, Any] | None = None
@@ -335,6 +342,7 @@ class HostReceipt(_MappingRecord):
             "duplicate_of": self.duplicate_of,
             "fallback": self.fallback,
             "model_receipt": self.model_receipt,
+            "resource_receipt": _copy(dict(self.resource_receipt)),
             "worktree": self.worktree,
             "branch": self.branch,
             "base_commit": self.base_commit,
@@ -370,10 +378,103 @@ class HostReceipt(_MappingRecord):
         actual_payload = raw.get("actual")
         if not isinstance(actual_payload, Mapping):
             actual_payload = {}
+        resource_raw = raw.get("resource_receipt", raw.get("resourceReceipt", {}))
+        if not isinstance(resource_raw, Mapping):
+            resource_raw = {}
+        resource_actual = resource_raw.get("actual")
+        if not isinstance(resource_actual, Mapping):
+            resource_actual = {}
         source = first_text(raw, "source") or default_source
         action_id = first_text(raw, "action_id", "actionId") or (action_obj.action_id if action_obj else None)
         idem = first_text(raw, "idempotency_key", "idempotencyKey") or (action_obj.idempotency_key if action_obj else None)
         dispatch = first_text(raw, "dispatch_id", "dispatchId") or (action_obj.dispatch_id if action_obj else None)
+        actual_model = (
+            first_text(raw, "model")
+            or first_text(resource_actual, "model")
+            or first_text(actual_payload, "model")
+            or first_text(runtime, "model")
+        )
+        actual_reasoning = (
+            first_text(raw, "reasoning", "thinking")
+            or first_text(resource_actual, "reasoning", "thinking")
+            or first_text(actual_payload, "reasoning", "thinking")
+            or first_text(runtime, "reasoning", "thinking")
+        )
+        runtime_requested = (
+            runtime.get("requested") if isinstance(runtime.get("requested"), Mapping) else {}
+        )
+        runtime_requested_resource = (
+            runtime_requested.get("resource")
+            if isinstance(runtime_requested.get("resource"), Mapping)
+            else runtime_requested
+        )
+        runtime_resolved = (
+            runtime.get("resolved") if isinstance(runtime.get("resolved"), Mapping) else {}
+        )
+        resolved_resource = (
+            runtime_resolved.get("resource")
+            if isinstance(runtime_resolved.get("resource"), Mapping)
+            else runtime_resolved
+        )
+        action_resource_receipt = (
+            action_obj.payload.get("resource_receipt", {})
+            if action_obj and isinstance(action_obj.payload.get("resource_receipt"), Mapping)
+            else {}
+        )
+        baseline_requested = _resource_values(action_resource_receipt.get("requested"))
+        baseline_requested = baseline_requested or _resource_values(runtime_requested_resource)
+        baseline_requested = baseline_requested or _resource_values(
+            {"model": action_obj.model, "reasoning": action_obj.reasoning}
+            if action_obj else None
+        )
+        baseline_resolved = _resource_values(action_resource_receipt.get("resolved"))
+        baseline_resolved = baseline_resolved or _resource_values(resolved_resource)
+        baseline_resolved = baseline_resolved or _resource_values(
+            {"model": action_obj.model, "reasoning": action_obj.reasoning}
+            if action_obj else None
+        )
+        reported_requested = _resource_values(resource_raw.get("requested"))
+        reported_resolved = _resource_values(resource_raw.get("resolved"))
+        evidence_source = (
+            first_text(resource_raw, "evidence_source", "evidenceSource")
+            or first_text(resource_actual, "evidence_source", "evidenceSource", "source")
+            or first_text(raw, "resource_evidence_source", "resourceEvidenceSource")
+        )
+        observed_at = (
+            first_text(resource_raw, "observed_at", "observedAt")
+            or first_text(resource_actual, "observed_at", "observedAt")
+            or first_text(raw, "resource_observed_at", "resourceObservedAt")
+        )
+        verified_model_receipt = bool(
+            actual
+            and first_text(resource_raw, "actual_state", "actualState") == "resolved"
+            and baseline_requested
+            and baseline_resolved
+            and reported_requested == baseline_requested
+            and reported_resolved == baseline_resolved
+            and actual_model == baseline_resolved["model"]
+            and actual_reasoning == baseline_resolved["reasoning"]
+            and evidence_source
+            and valid_observed_at(observed_at)
+        )
+        reported_model_receipt = first_text(raw, "model_receipt", "modelReceipt")
+        if verified_model_receipt:
+            model_receipt = "real"
+        elif reported_model_receipt in (None, "real"):
+            model_receipt = "unresolved"
+        else:
+            model_receipt = reported_model_receipt
+        canonical_resource_receipt = {
+            "requested": _copy(baseline_requested or {"model": None, "reasoning": None}),
+            "resolved": _copy(baseline_resolved or {"model": None, "reasoning": None}),
+            "actual": (
+                {"model": actual_model, "reasoning": actual_reasoning}
+                if verified_model_receipt else None
+            ),
+            "actual_state": "resolved" if verified_model_receipt else "unresolved",
+            "evidence_source": evidence_source if verified_model_receipt else None,
+            "observed_at": observed_at if verified_model_receipt else None,
+        }
         return cls(
             receipt_id=receipt_id,
             status=status,
@@ -388,11 +489,12 @@ class HostReceipt(_MappingRecord):
             client_thread_id=client_id if not thread_id else client_id,
             actual=actual,
             actual_tool=first_text(raw, "actual_tool", "actualTool") or first_text(actual_payload, "actual_tool", "actualTool", "tool") or first_text(runtime, "actual_tool", "actualTool", "tool"),
-            model=first_text(raw, "model") or first_text(actual_payload, "model") or first_text(runtime, "model"),
-            reasoning=first_text(raw, "reasoning", "thinking") or first_text(actual_payload, "reasoning", "thinking") or first_text(runtime, "reasoning", "thinking"),
+            model=actual_model if verified_model_receipt else None,
+            reasoning=actual_reasoning if verified_model_receipt else None,
             duplicate_of=first_text(raw, "duplicate_of", "duplicateOf"),
             fallback=first_text(raw, "fallback"),
-            model_receipt=first_text(raw, "model_receipt", "modelReceipt") or ("real" if actual and (first_text(raw, "model") or first_text(actual_payload, "model") or first_text(runtime, "model")) == REQUIRED_MODEL and (first_text(raw, "reasoning", "thinking") or first_text(actual_payload, "reasoning", "thinking") or first_text(runtime, "reasoning", "thinking")) == REQUIRED_REASONING else "unresolved"),
+            model_receipt=model_receipt,
+            resource_receipt=canonical_resource_receipt,
             payload=_copy(raw),
             runtime_evidence=_copy(dict(runtime)),
             action=action_obj.to_dict() if action_obj else None,
@@ -497,6 +599,8 @@ __all__ = [
     "DISPATCH_INTENT_PROTOCOL",
     "DispatchIntent",
     "HOST_RECEIPT_PROTOCOL",
+    "DEFAULT_MODEL",
+    "DEFAULT_REASONING",
     "HostAction",
     "HostActionError",
     "HostAdapter",
@@ -507,8 +611,6 @@ __all__ = [
     "HostReceiptAPI",
     "HostReceiptError",
     "HostUnavailableError",
-    "REQUIRED_MODEL",
-    "REQUIRED_REASONING",
     "as_host_action",
     "canonical_json",
     "dispatch_intent",

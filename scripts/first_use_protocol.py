@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,18 @@ CAPABILITY_FIELDS = (
     "actual_capability",
 )
 IDENTITY_FIELDS = ("thread_id", "role", "host_id", "worktree", "repo", "branch", "commit")
+
+
+def _fixture_resource_receipt() -> dict[str, Any]:
+    values = {"model": "fixture-model", "reasoning": "medium"}
+    return {
+        "requested": dict(values),
+        "resolved": dict(values),
+        "actual": dict(values),
+        "actual_state": "resolved",
+        "evidence_source": "fixture",
+        "observed_at": "2026-08-05T00:00:00Z",
+    }
 
 
 def _identity(
@@ -170,6 +183,7 @@ def build_fixture_receipt(scenario: str = "success") -> dict[str, Any]:
                     "actual_tool": "fixture-simulated",
                     "status": "failed",
                     "failure_class": "product_failure",
+                    "resource_receipt": _fixture_resource_receipt(),
                 },
             )
         )
@@ -200,6 +214,7 @@ def build_fixture_receipt(scenario: str = "success") -> dict[str, Any]:
                     "repo": owner["repo"],
                     "status": "completed",
                     "actual_tool": "fixture-simulated",
+                    "resource_receipt": _fixture_resource_receipt(),
                 },
             )
         )
@@ -301,6 +316,39 @@ def _missing_issue(mode: str, message: str, *, path: str) -> dict[str, str]:
     """Missing real host evidence is blocked, not a checker/schema success."""
 
     return _issue("host_tool_unavailable" if mode == "real" else "checker_error", message, path=path)
+
+
+def _validate_resource_receipt(value: Any, *, mode: str, path: str) -> list[dict[str, str]]:
+    if not isinstance(value, dict):
+        return [_missing_issue(mode, "resource_receipt is required", path=path)]
+    errors: list[dict[str, str]] = []
+    values: dict[str, tuple[Any, Any]] = {}
+    for name in ("requested", "resolved", "actual"):
+        item = value.get(name)
+        if not isinstance(item, dict):
+            errors.append(_missing_issue(mode, f"resource_receipt.{name} is required", path=f"{path}.{name}"))
+            continue
+        model, reasoning = item.get("model"), item.get("reasoning")
+        if not isinstance(model, str) or not model.strip():
+            errors.append(_missing_issue(mode, f"resource_receipt.{name}.model is required", path=f"{path}.{name}.model"))
+        if not isinstance(reasoning, str) or not reasoning.strip():
+            errors.append(_missing_issue(mode, f"resource_receipt.{name}.reasoning is required", path=f"{path}.{name}.reasoning"))
+        values[name] = (model, reasoning)
+    if len(values) == 3 and len(set(values.values())) != 1:
+        errors.append(_issue("product_failure", "requested/resolved/actual resource values do not match", path=path))
+    if value.get("actual_state") != "resolved":
+        errors.append(_issue("host_tool_unavailable" if mode == "real" else "checker_error", "resource receipt is unresolved", path=f"{path}.actual_state"))
+    if not value.get("evidence_source"):
+        errors.append(_missing_issue(mode, "resource evidence_source is required", path=f"{path}.evidence_source"))
+    observed_at = value.get("observed_at")
+    try:
+        parsed = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+    except ValueError:
+        errors.append(_missing_issue(mode, "valid resource observed_at is required", path=f"{path}.observed_at"))
+    else:
+        if not isinstance(observed_at, str) or "T" not in observed_at or parsed.tzinfo is None:
+            errors.append(_missing_issue(mode, "valid resource observed_at is required", path=f"{path}.observed_at"))
+    return errors
 
 
 def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
@@ -405,6 +453,8 @@ def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
                     errors.append(_issue("host_tool_unavailable", "real mode requires a Codex App receipt", path=f"events[{index}].receipt.source"))
                 if receipt_data.get("actual_tool") not in {None, "codex_app__create_thread"}:
                     errors.append(_issue("host_tool_unavailable", "real mode requires actual Codex App tool evidence", path=f"events[{index}].receipt.actual_tool"))
+            if isinstance(receipt_data, dict):
+                errors.extend(_validate_resource_receipt(receipt_data.get("resource_receipt"), mode=mode, path=f"events[{index}].receipt.resource_receipt"))
     repeated = next((event for event in events if isinstance(event, dict) and event.get("event") == "repeated_tick"), None)
     if repeated:
         idem = repeated.get("idempotency", {})

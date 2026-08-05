@@ -1,4 +1,0 @@
-interface:
-  display_name: "All in Luna Intake"
-  short_description: "Normalize supplied material and route it without duplicate questions"
-  default_prompt: "Use $allinluna-intake to normalize this conversation, attachment, path, or plan and choose the correct execution route."

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/resource-policy.schema.json",
+  "title": "All in Luna Resource Policy Resolution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["requested", "resolved", "actual", "actual_state", "capability_class", "route_assurance"],
+  "properties": {
+    "requested": {"$ref": "#/$defs/resource_values"},
+    "resolved": {"$ref": "#/$defs/resource_values"},
+    "actual": {"anyOf": [{"$ref": "#/$defs/concrete_route"}, {"type": "null"}]},
+    "actual_state": {"enum": ["resolved", "unresolved"]},
+    "evidence_source": {"type": ["string", "null"]},
+    "observed_at": {"type": ["string", "null"], "format": "date-time"},
+    "capability_class": {"$ref": "#/$defs/capability_class"},
+    "route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]},
+    "capability_cache": {"type": ["object", "null"]}
+  },
+  "$defs": {
+    "capability_class": {
+      "enum": ["control.relay", "planning.semantic", "lane.synthesis", "work.mechanical", "work.implementation", "work.deep-debug", "verify.independent"]
+    },
+    "resource_values": {
+      "type": "object",
+      "properties": {
+        "model": {"type": ["string", "null"], "minLength": 1},
+        "reasoning": {"type": ["string", "null"], "minLength": 1},
+        "capability_class": {"$ref": "#/$defs/capability_class"},
+        "route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]}
+      },
+      "additionalProperties": true
+    },
+    "concrete_route": {
+      "type": "object",
+      "required": ["model", "reasoning"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1},
+        "reasoning": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    }
+  }
+}

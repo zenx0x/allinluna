@@ -1,0 +1,843 @@
+"""Host-neutral action queue and truthful receipt ingestion."""
+
+from __future__ import annotations
+
+from collections import deque
+from copy import deepcopy
+from datetime import datetime, timezone
+import json
+from typing import Any, Mapping, Sequence
+
+from ..adapters.host.base import HostAction, HostReceipt, stable_digest
+from ..resource import ResourceBroker
+
+
+def _raw(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    method = getattr(value, "to_dict", None)
+    if callable(method):
+        return dict(method())
+    return dict(vars(value))
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+class ActionBridge:
+    """Separates persisted dispatch intent, host invocation and host receipt.
+
+    ``enqueue`` is side-effect free.  ``dispatch`` may call an injected Host
+    Adapter; when no adapter is available it returns a pending receipt and
+    leaves the action in the queue for the external coordinator.
+    """
+
+    API_VERSION = 2
+
+    def __init__(self, store: Any, host: Any = None, *, adapter: str = "action-bridge", resource_broker: ResourceBroker | None = None) -> None:
+        self.store = store
+        self.host = host
+        self.adapter = adapter
+        self.resource_broker = resource_broker or ResourceBroker()
+        self._queue: deque[HostAction] = deque()
+        self._queued: dict[str, HostAction] = {}
+        self._receipts: dict[str, HostReceipt | Mapping[str, Any]] = {}
+
+    @property
+    def queued(self) -> tuple[HostAction, ...]:
+        return tuple(self._queue)
+
+    @property
+    def receipts(self) -> tuple[Any, ...]:
+        return tuple(self._receipts.values())
+
+    def refresh_resource_capabilities(self) -> Mapping[str, Any] | None:
+        """Refresh host capability policy through its change-sensitive cache.
+
+        Failure to expose model-route capability data is not a dispatch failure
+        under the default ``observe_if_exposed`` policy, so this remains a
+        best-effort discovery seam rather than an eager conformance gate.
+        """
+
+        if self.host is None:
+            return None
+        try:
+            return self.resource_broker.refresh_host_capabilities(self.host)
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _existing_dispatch(self, key: str) -> dict[str, Any] | None:
+        return self.store._fetchone("SELECT * FROM host_receipts WHERE dispatch_key = ?", (key,))
+
+    def _outbox(self, key: str) -> dict[str, Any] | None:
+        return self.store._fetchone("SELECT * FROM dispatch_outbox WHERE idempotency_key = ?", (key,))
+
+    def _persisted_action(self, key: str) -> HostAction | None:
+        row = self._outbox(key)
+        if row is None:
+            return None
+        try:
+            value = json.loads(str(row.get("action_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return HostAction.from_value(value) if isinstance(value, Mapping) else None
+
+    @staticmethod
+    def _identity_value(identity: Mapping[str, Any] | None, *names: str) -> str | None:
+        if not isinstance(identity, Mapping):
+            return None
+        for name in names:
+            value = identity.get(name)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
+
+    def _receipt_trust_error(
+        self, raw: Mapping[str, Any], action: HostAction, existing: Mapping[str, Any] | None = None
+    ) -> str | None:
+        """Reject external observations that contradict the persisted intent.
+
+        A receipt is evidence about an already-persisted dispatch; it is not a
+        second source of dispatch identity.  In particular, ``idempotency_key``
+        cannot be allowed to replace the action's dispatch key, and workspace
+        facts must agree with the action identity before they are persisted.
+        """
+
+        for name, expected in (
+            ("dispatch_key", action.idempotency_key),
+            ("idempotency_key", action.idempotency_key),
+            ("action_id", action.action_id),
+            ("dispatch_id", action.dispatch_id),
+            ("task_id", action.task_id),
+        ):
+            supplied = raw.get(name)
+            if supplied is not None and expected is not None and str(supplied) != str(expected):
+                return f"receipt {name} does not match the persisted dispatch intent"
+
+        if existing is not None:
+            for name in ("host_id", "thread_id"):
+                supplied = raw.get(name) or raw.get(name.replace("_", ""))
+                persisted = existing.get(name)
+                if supplied and persisted and str(supplied) != str(persisted):
+                    return f"receipt {name} would replace the trusted persisted identity"
+
+        identity = action.identity if isinstance(action.identity, Mapping) else {}
+        repository = identity.get("repository_identity") if isinstance(identity.get("repository_identity"), Mapping) else {}
+        worktree = identity.get("worktree_identity") if isinstance(identity.get("worktree_identity"), Mapping) else {}
+        target = action.arguments.get("target") if isinstance(action.arguments, Mapping) else {}
+        target = target if isinstance(target, Mapping) else {}
+        environment = worktree.get("environment") if isinstance(worktree.get("environment"), Mapping) else target.get("environment")
+        environment = environment if isinstance(environment, Mapping) else {}
+        expected = {
+            "worktree": self._identity_value(worktree, "path", "worktree", "worktreePath")
+            or self._identity_value(environment, "path", "directory", "directoryName")
+            or self._identity_value(repository, "root", "path"),
+            "branch": self._identity_value(worktree, "branch") or self._identity_value(environment, "branch") or self._identity_value(repository, "branch"),
+            "base_commit": self._identity_value(worktree, "base_commit", "baseCommit") or self._identity_value(repository, "head"),
+            "project_id": self._identity_value(target, "projectId", "project_id") or self._identity_value(repository, "projectId", "project_id"),
+        }
+        for name, aliases in (
+            ("worktree", ("worktree", "worktreePath", "workspace", "workspace_path")),
+            ("branch", ("branch",)),
+            ("base_commit", ("base_commit", "baseCommit")),
+            ("project_id", ("projectId", "project_id")),
+        ):
+            supplied = next((raw.get(alias) for alias in aliases if raw.get(alias) is not None), None)
+            if supplied is not None and expected[name] is None:
+                return f"receipt {name} has no trusted persisted identity"
+            if supplied is not None and expected[name] is not None and str(supplied) != str(expected[name]):
+                return f"receipt {name} does not match the persisted workspace identity"
+        return None
+
+    def _receipt_trust_blocker(self, action: HostAction, reason: str) -> dict[str, Any]:
+        if self._is_top_level_action(action):
+            # Keep the durable signal within the vNext signal vocabulary while
+            # exposing the more precise receipt-trust blocker to callers.
+            result = self._record_top_level_blocker(
+                action, code="HOST_PROTOCOL_VIOLATION", reason=reason
+            )
+            result["status"] = "HOST_RECEIPT_TRUST_VIOLATION"
+            result["blocker"] = {
+                **result["blocker"],
+                "code": "HOST_RECEIPT_TRUST_VIOLATION",
+            }
+            return result
+        return {
+            "status": "HOST_RECEIPT_TRUST_VIOLATION",
+            "action": action.to_dict(),
+            "receipt": None,
+            "dispatch_intent_preserved": True,
+            "blocker": {"code": "HOST_RECEIPT_TRUST_VIOLATION", "message": reason, "recoverable": True},
+        }
+
+    @staticmethod
+    def _persisted_receipt(row: Mapping[str, Any]) -> dict[str, Any]:
+        """Rehydrate the host observation, preferring its immutable payload."""
+
+        try:
+            payload = json.loads(str(row.get("payload_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        raw = dict(payload) if isinstance(payload, Mapping) else {}
+        for source, target in (
+            ("id", "receipt_id"),
+            ("dispatch_key", "dispatch_key"),
+            ("action_id", "action_id"),
+            ("host_adapter", "host_adapter"),
+            ("host_id", "host_id"),
+            ("thread_id", "thread_id"),
+            ("status", "status"),
+            ("actual_tool", "actual_tool"),
+            ("received_at", "received_at"),
+        ):
+            if row.get(source) is not None:
+                if source == "thread_id" and not raw.get("thread_id") and not raw.get("threadId") and (
+                    raw.get("client_thread_id") or raw.get("clientThreadId")
+                ):
+                    # Store keeps a searchable host identity in this column,
+                    # including a pending client id. The original payload is
+                    # authoritative about whether it was a real thread id.
+                    continue
+                raw.setdefault(target, row[source])
+        return raw
+
+    def _repair_receipt_projection(self, row: Mapping[str, Any], action: HostAction) -> dict[str, Any]:
+        """Replay a durable receipt into its attempt/task projections.
+
+        This closes the crash window where the host receipt became durable but
+        the process died before the attempt/task projection was advanced.  The
+        durable host row is the sole source of truth; pending/client-only
+        observations never activate a task.
+        """
+
+        raw = self._persisted_receipt(row)
+        receipt = self._normalize(raw, action)
+        attempt = self.store._fetchone(
+            "SELECT * FROM task_attempts WHERE dispatch_key = ?", (action.idempotency_key,)
+        )
+        target_kind = "task"
+        if attempt is None:
+            attempt = self.store._fetchone(
+                "SELECT * FROM work_unit_attempts WHERE dispatch_key = ?", (action.idempotency_key,)
+            )
+            target_kind = "work_unit"
+        violation = self._top_level_protocol_violation(action, receipt)
+        if violation is not None:
+            return {
+                "receipt": receipt.to_dict(),
+                "attempt_id": attempt["id"] if attempt is not None else None,
+                "repaired": False,
+                "protocol_violation": violation,
+            }
+        if attempt is None:
+            return {"receipt": receipt.to_dict(), "attempt_id": None, "repaired": False}
+
+        status = str(receipt.status or "").lower()
+        if status in {"pending", "queued", "submitted", "accepted_pending", "unresolved"}:
+            return {"receipt": receipt.to_dict(), "attempt_id": attempt["id"], "repaired": False}
+        if status in {"failed", "error", "lost"}:
+            next_attempt = "lost" if status == "lost" else "failed"
+            next_target = "failed" if target_kind == "work_unit" else None
+        elif not receipt.thread_id:
+            return {"receipt": receipt.to_dict(), "attempt_id": attempt["id"], "repaired": False}
+        elif status in {"completed", "succeeded", "success", "closed"}:
+            # A local host lifecycle receipt is not a WorkHandoff.  It closes
+            # the worker attempt but leaves the WorkUnit active for typed
+            # handoff ingestion and independent evidence collection.
+            next_attempt, next_target = "closed", "active" if target_kind == "work_unit" else None
+        elif status == "handoff_ready":
+            next_attempt, next_target = (
+                ("closed", "active") if target_kind == "work_unit" else ("handoff_ready", "verifying")
+            )
+        else:
+            next_attempt, next_target = "active", "active"
+
+        repaired = False
+        with self.store.transaction():
+            if (
+                str(attempt.get("state")) != next_attempt
+                or attempt.get("receipt_id") != receipt.receipt_id
+                or (receipt.thread_id and not attempt.get("thread_id"))
+            ):
+                if target_kind == "task":
+                    self.store._execute(
+                        "UPDATE task_attempts SET state = ?, receipt_id = ?, "
+                        "thread_id = COALESCE(thread_id, ?), host_id = COALESCE(host_id, ?), "
+                        "started_at = COALESCE(started_at, ?), ended_at = CASE WHEN ? IN ('closed','failed','lost') THEN COALESCE(ended_at, ?) ELSE ended_at END "
+                        "WHERE id = ?",
+                        (
+                            next_attempt, receipt.receipt_id, receipt.thread_id, receipt.host_id,
+                            raw.get("received_at"), next_attempt, raw.get("received_at"), attempt["id"],
+                        ),
+                    )
+                else:
+                    self.store._execute(
+                        "UPDATE work_unit_attempts SET state = ?, receipt_id = ?, "
+                        "started_at = COALESCE(started_at, ?), ended_at = CASE WHEN ? IN ('closed','failed') THEN COALESCE(ended_at, ?) ELSE ended_at END WHERE id = ?",
+                        (
+                            next_attempt, receipt.receipt_id, raw.get("received_at"), next_attempt,
+                            raw.get("received_at"), attempt["id"],
+                        ),
+                    )
+                repaired = True
+            task = self.store.get_task(str(attempt["task_id"])) if target_kind == "task" else None
+            if next_target and task is not None and str(task.get("state")) == "dispatching":
+                self.store._execute(
+                    "UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND state = 'dispatching'",
+                    (next_target, raw.get("received_at") or row.get("received_at"), attempt["task_id"]),
+                )
+                signal = "LANE_ACK" if next_target == "active" else "LANE_HANDOFF"
+                self.store._append_signal_in_transaction(
+                    task["run_id"], "task", task["id"], signal,
+                    {"receipt_id": receipt.receipt_id, "attempt_id": attempt["id"], "recovered": True},
+                )
+                repaired = True
+            elif next_target and target_kind == "work_unit":
+                self.store._execute(
+                    "UPDATE work_units SET state = ?, updated_at = ? WHERE id = ? AND state IN ('proposed','ready','delegated','active')",
+                    (next_target, raw.get("received_at") or row.get("received_at"), attempt["work_unit_id"]),
+                )
+            self.store._execute(
+                "UPDATE dispatch_outbox SET state = 'acknowledged', updated_at = COALESCE(?, updated_at) "
+                "WHERE idempotency_key = ? AND state IN ('pending','emitted')",
+                (raw.get("received_at") or row.get("received_at"), action.idempotency_key),
+            )
+        return {"receipt": receipt.to_dict(), "attempt_id": attempt["id"], "repaired": repaired}
+
+    def _reconcile_host(self, action: HostAction) -> Any:
+        """Ask the host for an existing result without invoking create again."""
+
+        if self.host is None:
+            return None
+        for name in ("reconcile_dispatch", "lookup_receipt", "get_receipt"):
+            method = getattr(self.host, name, None)
+            if not callable(method):
+                continue
+            try:
+                return method(action)
+            except (TypeError, KeyError, AttributeError):
+                return method(action.idempotency_key)
+        return None
+
+    def reconcile(self, action: Any) -> dict[str, Any]:
+        """Reconcile one persisted intent, never creating a second host task."""
+
+        value = action if isinstance(action, HostAction) else HostAction.from_value(action)
+        existing = self._existing_dispatch(value.idempotency_key)
+        if existing is not None:
+            projection = self._repair_receipt_projection(existing, value)
+            if projection.get("protocol_violation"):
+                receipt = HostReceipt.from_value(
+                    projection["receipt"], action=value, default_source=self.adapter
+                )
+                return self._record_top_level_blocker(
+                    value,
+                    code="HOST_PROTOCOL_VIOLATION",
+                    reason=str(projection["protocol_violation"]),
+                    receipt=receipt,
+                )
+            self._receipts[value.idempotency_key] = HostReceipt.from_value(
+                projection["receipt"], action=value, default_source=self.adapter
+            )
+            return {
+                "status": "receipt-reconciled",
+                "receipt_id": projection["receipt"].get("receipt_id"),
+                "dispatch_key": value.idempotency_key,
+                "thread_id": projection["receipt"].get("thread_id"),
+                "action": value.to_dict(),
+                **projection,
+            }
+
+        outbox = self._outbox(value.idempotency_key)
+        if outbox is None or str(outbox.get("state")) != "emitted":
+            return {"status": "not-emitted", "action": value.to_dict(), "receipt": None}
+        raw = self._reconcile_host(value)
+        if raw is None:
+            self.enqueue(value)
+            return {
+                "status": "pending-host-reconcile",
+                "action": value.to_dict(),
+                "receipt": None,
+                "reason": "emitted intent has no durable receipt; host reconciliation returned no match",
+            }
+        observed = self._normalize(raw, value, trusted=True)
+        if observed.status == "unresolved" and not observed.thread_id and not observed.client_thread_id:
+            self.enqueue(value)
+            return {
+                "status": "pending-host-reconcile",
+                "action": value.to_dict(),
+                "receipt": None,
+                "reason": "host reconciliation returned no identifiable receipt",
+            }
+        # Reconciliation is a direct call to the trusted HostAdapter.  Pass
+        # the normalized observation onward so the adapter's explicit
+        # actual_tool/capability/hash signature is preserved at the ingest
+        # boundary; an external file/CLI ingest still remains untrusted.
+        result = self.ingest_receipt(observed, action=value, trusted=True)
+        return {"status": "host-reconciled", "action": value.to_dict(), **result}
+
+    def enqueue(self, action: Any) -> HostAction:
+        value = action if isinstance(action, HostAction) else HostAction.from_value(action)
+        if value.idempotency_key in self._queued:
+            return self._queued[value.idempotency_key]
+        existing = self._existing_dispatch(value.idempotency_key)
+        if existing is None:
+            self._queue.append(value)
+            self._queued[value.idempotency_key] = value
+        return value
+
+    def next_actions(self, limit: int | None = None) -> list[HostAction]:
+        values = list(self._queue)
+        if limit is not None:
+            values = values[: max(0, int(limit))]
+        return values
+
+    @staticmethod
+    def _is_top_level_action(action: HostAction) -> bool:
+        return action.execution_class == "top_level_task"
+
+    def _exact_top_level_capability(self, action: HostAction) -> tuple[bool, str | None]:
+        """Check only the capability required by the immutable top-level opcode."""
+
+        if self.host is None:
+            return False, "no host adapter is available for the exact top-level tool"
+        required = action.host_capability_required or action.tool
+        if not required:
+            return False, "top-level action declares no required host capability"
+        discover = getattr(self.host, "discover", None)
+        if callable(discover):
+            capabilities = discover()
+            if hasattr(capabilities, "available"):
+                if not bool(capabilities.available):
+                    return False, f"host reports unavailable capability {required}"
+                tools = getattr(capabilities, "tools", ())
+                if tools and required not in tools:
+                    return False, f"host does not declare required capability {required}"
+            elif isinstance(capabilities, Mapping):
+                if capabilities.get("available") is False:
+                    return False, f"host reports unavailable capability {required}"
+                tools = capabilities.get("tools")
+                if isinstance(tools, Mapping) and required not in tools:
+                    return False, f"host does not declare required capability {required}"
+                if isinstance(tools, Sequence) and not isinstance(tools, str) and tools and required not in tools:
+                    return False, f"host does not declare required capability {required}"
+        # A real public host exposes the same argument boundary as
+        # ``codex_app__create_thread``.  Do not require the test/runtime host
+        # to accept the durable action envelope: that envelope belongs to the
+        # Store and the ActionBridge, not to the public tool invocation.
+        if callable(getattr(self.host, "create_thread", None)):
+            return True, None
+        if callable(getattr(self.host, "create_top_level_task", None)):
+            return True, None
+        return False, f"host cannot invoke required capability {required}"
+
+    def _best_effort_cancel(self, receipt: HostReceipt) -> dict[str, Any]:
+        if self.host is None or not receipt.thread_id:
+            return {"attempted": False, "reason": "no erroneous host thread is available to cancel"}
+        method = getattr(self.host, "cancel_task", None)
+        if not callable(method):
+            return {"attempted": False, "reason": "host does not expose cancellation"}
+        target = {"threadId": receipt.thread_id}
+        if receipt.host_id:
+            target["hostId"] = receipt.host_id
+        try:
+            response = method(target)
+        except Exception as exc:
+            return {"attempted": True, "cancelled": False, "error": str(exc)}
+        return {"attempted": True, "cancelled": True, "receipt": _raw(response)}
+
+    def _record_top_level_blocker(
+        self,
+        action: HostAction,
+        *,
+        code: str,
+        reason: str,
+        receipt: HostReceipt | None = None,
+    ) -> dict[str, Any]:
+        """Block an invalid top-level dispatch without losing its durable intent."""
+
+        task = self.store.get_task(action.task_id) if action.task_id else None
+        run_id = str((task or {}).get("run_id") or (action.identity or {}).get("run_id") or "")
+        observed_at = _now()
+        cancellation = self._best_effort_cancel(receipt) if receipt is not None else {
+            "attempted": False,
+            "reason": "exact tool was unavailable before a host task was created",
+        }
+        try:
+            with self.store.transaction():
+                if action.task_id:
+                    self.store._execute(
+                        "UPDATE task_attempts SET state = 'failed', ended_at = COALESCE(ended_at, ?) "
+                        "WHERE dispatch_key = ? AND state IN ('created','dispatched','acknowledged','active','handoff_ready')",
+                        (observed_at, action.idempotency_key),
+                    )
+                    self.store._execute(
+                        "UPDATE tasks SET state = 'blocked', updated_at = ? WHERE id = ? "
+                        "AND state IN ('dispatching','ready','proposed','active','waiting','verifying')",
+                        (observed_at, action.task_id),
+                    )
+                    self.store._execute(
+                        "UPDATE leases SET state = 'released', released_at = ? WHERE scope_type = 'task' "
+                        "AND scope_id = ? AND state = 'active'",
+                        (observed_at, action.task_id),
+                    )
+                    if task is not None and hasattr(self.store, "_release_resource_claims_in_transaction"):
+                        self.store._release_resource_claims_in_transaction(
+                            str(task["run_id"]), action.task_id, scope="top-level", reason=code.lower()
+                        )
+                self.store._execute(
+                    "UPDATE dispatch_outbox SET state = 'failed', updated_at = ? WHERE idempotency_key = ?",
+                    (observed_at, action.idempotency_key),
+                )
+                if run_id:
+                    self.store._append_signal_in_transaction(
+                        run_id,
+                        "task",
+                        str(action.task_id or run_id),
+                        code,
+                        {
+                            "action_id": action.action_id,
+                            "dispatch_id": action.dispatch_id,
+                            "action_contract_hash": action.action_contract_hash,
+                            "required_tool": action.tool,
+                            "required_capability": action.host_capability_required,
+                            "reason": reason,
+                            "receipt": receipt.to_dict() if receipt is not None else None,
+                            "cancellation": cancellation,
+                            "dispatch_intent_preserved": True,
+                        },
+                    )
+        finally:
+            if action.task_id:
+                try:
+                    self.resource_broker.release(action.task_id)
+                except (AttributeError, RuntimeError, ValueError):
+                    pass
+        return {
+            "status": code,
+            "blocker": {
+                "code": code,
+                "message": reason,
+                "owner_scope": "host-action-relay",
+                "recoverable": True,
+            },
+            "action": action.to_dict(),
+            "receipt": receipt.to_dict() if receipt is not None else None,
+            "cancellation": cancellation,
+            "dispatch_intent_preserved": True,
+        }
+
+    def _top_level_protocol_violation(self, action: HostAction, receipt: HostReceipt) -> str | None:
+        if not self._is_top_level_action(action) or not receipt.is_active_identity:
+            return None
+        if receipt.actual_tool != action.tool:
+            return f"receipt actual_tool {receipt.actual_tool!r} does not match exact tool {action.tool!r}"
+        if receipt.actual_capability != action.host_capability_required:
+            return (
+                f"receipt actual_capability {receipt.actual_capability!r} does not match "
+                f"required capability {action.host_capability_required!r}"
+            )
+        if receipt.action_contract_hash != action.action_contract_hash:
+            return "receipt action_contract_hash does not match the persisted action contract"
+        return None
+
+    def _invoke(self, action: HostAction) -> Any:
+        if self.host is None:
+            return None
+        kind = action.kind
+        if kind == "create-top-level-task":
+            public_method = getattr(self.host, "create_thread", None)
+            if callable(public_method):
+                public = {
+                    key: action.arguments[key]
+                    for key in ("target", "prompt", "model", "thinking", "title")
+                    if key in action.arguments
+                }
+                return public_method(**public)
+            method = getattr(self.host, "create_top_level_task", None)
+            return method(action) if callable(method) else None
+        if kind == "resolve-project":
+            method = getattr(self.host, "list_projects", None)
+            if callable(method):
+                return method()
+            invoke = getattr(self.host, "invoke", None)
+            if callable(invoke):
+                return invoke("codex_app__list_projects", {})
+            return None
+        if kind == "resolve-resource-route":
+            return None
+        if kind == "spawn-subagent":
+            method = getattr(self.host, "spawn", None)
+            if callable(method):
+                return method(action.payload.get("work_unit_envelope", action.payload))
+            return None
+        if kind in {"wait", "wait-for-top-level-tasks", "wait-subagents"}:
+            method = getattr(self.host, "wait_tasks", None) or getattr(self.host, "wait", None)
+            if callable(method):
+                targets = action.arguments.get("targets", action.arguments.get("work_unit_ids", ()))
+                return method(targets, action.arguments.get("cursor"))
+        if kind in {"list", "list-top-level-tasks", "poll-top-level-tasks"}:
+            method = getattr(self.host, "list_tasks", None)
+            if callable(method):
+                return method(action.arguments.get("cursor"))
+        if kind in {"read", "read-task", "read-subagent"}:
+            method = getattr(self.host, "read_task", None) or getattr(self.host, "read", None)
+            if callable(method):
+                target = action.arguments.get("target", action.arguments.get("work_unit_id"))
+                return method(target, action.arguments.get("cursor"))
+        if kind in {"send", "send-message", "correction"}:
+            method = getattr(self.host, "send_message", None)
+            if callable(method):
+                return method(action.arguments.get("target", action.arguments), action.arguments.get("envelope", action.payload))
+        if kind in {"cancel", "cancel-task"}:
+            method = getattr(self.host, "cancel_task", None)
+            if callable(method):
+                return method(action.arguments.get("target", action.arguments))
+        return None
+
+    def _normalize(self, value: Any, action: HostAction, *, trusted: bool = False) -> HostReceipt:
+        if isinstance(value, HostReceipt):
+            receipt = value
+        else:
+            receipt = HostReceipt.from_value(value or {"status": "pending", "fallback": "action-bridge-required"}, action=action, default_source=self.adapter)
+        raw = receipt.to_dict()
+        if trusted and self._is_top_level_action(action) and receipt.thread_id:
+            if not raw.get("actual_tool"):
+                raw["actual_tool"] = action.tool
+            if not raw.get("actual_capability"):
+                raw["actual_capability"] = action.host_capability_required
+            if not raw.get("action_contract_hash"):
+                raw["action_contract_hash"] = action.action_contract_hash
+        # A clientThreadId, an action, or a capability catalog is not a real
+        # startup receipt.  Keep the dispatch unresolved until threadId is
+        # visible in the host evidence.
+        if not receipt.thread_id:
+            direct = str(raw.get("status")) == "direct-execution"
+            raw["status"] = "direct-execution" if direct else "pending" if receipt.client_thread_id else "unresolved"
+            raw["actual"] = False
+            raw["model_receipt"] = "unresolved"
+            if not raw.get("fallback"):
+                raw["fallback"] = raw.get("reason") if direct else "actual-thread-receipt-unavailable"
+        raw.setdefault("host_adapter", self.adapter)
+        raw.setdefault("dispatch_key", action.idempotency_key)
+        raw.setdefault("action_id", action.action_id)
+        raw.setdefault("task_id", action.task_id)
+        raw.setdefault("received_at", None)
+        return HostReceipt.from_value(raw, action=action, default_source=self.adapter)
+
+    def ingest_receipt(
+        self, receipt: Any, *, action: HostAction | None = None, trusted: bool = False
+    ) -> dict[str, Any]:
+        raw = _raw(receipt)
+        if action is None:
+            key = raw.get("dispatch_key") or raw.get("idempotency_key")
+            action = self._queued.get(str(key)) if key else None
+            action = action or (self._persisted_action(str(key)) if key else None)
+        if action is None:
+            # Never let an untrusted receipt establish its own requested or
+            # resolved resource baseline. Identity may be reconstructed, but
+            # resource evidence stays unresolved without a persisted action.
+            action = HostAction(
+                action_id=str(raw.get("action_id") or "action-" + stable_digest(raw)),
+                kind=str(raw.get("action_kind") or raw.get("kind") or "ingest-receipt"),
+                idempotency_key=str(raw.get("dispatch_key") or raw.get("idempotency_key") or "receipt:" + stable_digest(raw)),
+                task_id=raw.get("task_id"),
+                dispatch_id=raw.get("dispatch_id"),
+            )
+        existing = self._existing_dispatch(action.idempotency_key)
+        if not trusted:
+            violation = self._receipt_trust_error(raw, action, existing)
+            if violation is not None:
+                return self._receipt_trust_blocker(action, violation)
+            # Provenance is owned by the runtime adapter.  Keep the external
+            # claim in diagnostics, but never persist it as the trusted source.
+            if raw.get("source") or raw.get("host_adapter"):
+                raw = dict(raw)
+                raw["untrusted_provenance"] = {
+                    "source": raw.get("source"),
+                    "host_adapter": raw.get("host_adapter"),
+                }
+                raw["source"] = self.adapter
+                raw["host_adapter"] = self.adapter
+            raw["dispatch_key"] = action.idempotency_key
+            raw["idempotency_key"] = action.idempotency_key
+        normalized = self._normalize(raw, action)
+        fallback_code = str(normalized.fallback or normalized.payload.get("code") or "")
+        if self._is_top_level_action(action) and fallback_code == "HOST_CAPABILITY_BLOCKED":
+            return self._record_top_level_blocker(
+                action,
+                code="HOST_CAPABILITY_BLOCKED",
+                reason="the host reported that the exact top-level capability is unavailable",
+                receipt=normalized,
+            )
+        violation = self._top_level_protocol_violation(action, normalized)
+        if violation is not None:
+            return self._record_top_level_blocker(
+                action,
+                code="HOST_PROTOCOL_VIOLATION",
+                reason=violation,
+                receipt=normalized,
+            )
+        result = self.store.ingest_receipt(
+            normalized.to_dict()
+            | {
+                "host_adapter": self.adapter,
+                "dispatch_key": normalized.idempotency_key,
+                "actual_tool": normalized.actual_tool,
+            }
+        )
+        assurance = self.resource_broker.assess_route(normalized.resource_receipt)
+        if self._is_top_level_action(action) and assurance.blocking:
+            blocked = self._record_top_level_blocker(
+                action,
+                code="ROUTE_ASSURANCE_BLOCKED",
+                reason=assurance.reason or "route assurance could not be satisfied",
+                receipt=normalized,
+            )
+            blocked["ingestion"] = result
+            blocked["resource_receipt"] = dict(normalized.resource_receipt)
+            blocked["route_assurance"] = assurance.to_dict()
+            return blocked
+        # T1 correctly keeps a pending client id from activating a task.  If a
+        # later real thread receipt arrives, repair only the attempt identity
+        # here so it can replace the pending client evidence.
+        if normalized.thread_id and action.task_id:
+            self.store._execute(
+                "UPDATE task_attempts SET thread_id = ?, host_id = COALESCE(?, host_id) WHERE dispatch_key = ?",
+                (normalized.thread_id, normalized.host_id, normalized.idempotency_key),
+            )
+        self._receipts[normalized.idempotency_key or action.idempotency_key] = normalized
+        self._queued.pop(action.idempotency_key, None)
+        try:
+            self._queue.remove(action)
+        except ValueError:
+            pass
+        return {
+            "ingestion": result,
+            "receipt": normalized.to_dict(),
+            "resource_receipt": dict(normalized.resource_receipt),
+            "route_assurance": assurance.to_dict(),
+        }
+
+    def dispatch(self, action: Any) -> Any:
+        value = action if isinstance(action, HostAction) else HostAction.from_value(action)
+        self.refresh_resource_capabilities()
+        if self.resource_broker.is_external_action(value):
+            policy = self.resource_broker.external_action_policy
+            if policy == "deny":
+                return {"status": "permission-denied", "action": value.to_dict(), "receipt": None}
+            if policy == "ask":
+                identity = dict(value.identity or {})
+                run_id = str(identity.get("run_id") or "")
+                if not run_id and value.task_id:
+                    task = self.store.get_task(value.task_id)
+                    run_id = str((task or {}).get("run_id") or "")
+                if not run_id:
+                    return {"status": "permission-required", "action": value.to_dict(), "receipt": None, "reason": "run identity unavailable"}
+                scope_type = "task" if value.task_id else "run"
+                scope_id = str(value.task_id or run_id)
+                permission = self.store.request_permission(run_id, scope_type=scope_type, scope_id=scope_id, action=value.kind)
+                if permission["status"] != "allowed":
+                    return {"status": "permission-required" if permission["status"] == "pending" else "permission-denied", "permission_intent": permission, "action": value.to_dict(), "receipt": None}
+        existing = self._existing_dispatch(value.idempotency_key)
+        if existing is not None:
+            return self.reconcile(value)
+        if self.host is None:
+            # No host binding is a relay state, not a capability discovery
+            # result.  Preserve the pending action and let the Desktop
+            # coordinator invoke its exact opcode.
+            self.enqueue(value)
+            return {
+                "status": "ACTION_RELAY_REQUIRED",
+                "action": value.to_dict(),
+                "receipt": None,
+                "relay_required": True,
+                "reason": "no HostAdapter is bound; invoke the exact host action with its exact arguments",
+            }
+        if value.kind == "resolve-resource-route":
+            self.enqueue(value)
+            return {
+                "status": "RESOURCE_ROUTE_REQUIRED",
+                "action": value.to_dict(),
+                "receipt": None,
+                "reason": "host route resolution did not produce a concrete model",
+            }
+        if self._is_top_level_action(value):
+            available, reason = self._exact_top_level_capability(value)
+            if not available:
+                return self._record_top_level_blocker(
+                    value,
+                    code="HOST_CAPABILITY_BLOCKED",
+                    reason=reason or "the exact top-level host capability is unavailable",
+                )
+        outbox = self._outbox(value.idempotency_key)
+        # An emitted outbox row may have crossed the host boundary before the
+        # process died. Reconcile it first and never call create a second time.
+        if outbox is not None and str(outbox.get("state")) == "emitted":
+            return self.reconcile(value)
+        if hasattr(self.store, "mark_outbox_emitted"):
+            self.store.mark_outbox_emitted(value.idempotency_key)
+        raw = self._invoke(value)
+        if raw is None:
+            if self._is_top_level_action(value):
+                return self._record_top_level_blocker(
+                    value,
+                    code="HOST_CAPABILITY_BLOCKED",
+                    reason="the exact top-level host tool produced no observable receipt",
+                )
+            self.enqueue(value)
+            return {
+                "status": "pending-host-dispatch",
+                "action": value.to_dict(),
+                "receipt": None,
+                "resource_receipt": {
+                    "requested": {"model": value.model, "reasoning": value.reasoning},
+                    "resolved": {"model": value.model, "reasoning": value.reasoning},
+                    "actual": None,
+                    "actual_state": "unresolved",
+                    "evidence_source": None,
+                    "observed_at": None,
+                },
+            }
+        normalized = self._normalize(raw, value, trusted=True)
+        fallback_code = str(normalized.fallback or normalized.payload.get("code") or "")
+        if self._is_top_level_action(value) and fallback_code == "HOST_CAPABILITY_BLOCKED":
+            return self._record_top_level_blocker(
+                value,
+                code="HOST_CAPABILITY_BLOCKED",
+                reason="the host reported that the exact top-level capability is unavailable",
+                receipt=normalized,
+            )
+        violation = self._top_level_protocol_violation(value, normalized)
+        if violation is not None:
+            return self._record_top_level_blocker(
+                value,
+                code="HOST_PROTOCOL_VIOLATION",
+                reason=violation,
+                receipt=normalized,
+            )
+        return self.ingest_receipt(normalized, action=value, trusted=True)
+
+    def create(self, action: Any) -> Any:
+        return self.dispatch(action)
+
+    def wait(self, action: Any) -> Any:
+        return self.dispatch(action)
+
+    def list(self, action: Any) -> Any:
+        return self.dispatch(action)
+
+    def read(self, action: Any) -> Any:
+        return self.dispatch(action)
+
+    def send(self, action: Any) -> Any:
+        return self.dispatch(action)
+
+    def cancel(self, action: Any) -> Any:
+        return self.dispatch(action)
+
+
+ActionBridgeAPI = ActionBridge
+
+__all__ = ["ActionBridge", "ActionBridgeAPI"]

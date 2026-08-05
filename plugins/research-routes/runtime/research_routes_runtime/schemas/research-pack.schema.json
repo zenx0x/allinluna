@@ -1,0 +1,374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/research-routes/research-pack/v1.json",
+  "title": "Research Routes Research Pack",
+  "description": "A route-neutral, append-only research context. Research state is intentionally separate from implementation authorization and canonical promotion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "pack_id",
+    "context",
+    "terrain_map",
+    "routes",
+    "claims",
+    "evidence",
+    "unknowns",
+    "contradictions",
+    "failure_regimes",
+    "mature_method_comparators",
+    "probes",
+    "failures",
+    "rewind_proposals",
+    "lessons",
+    "reopened_problems",
+    "lifecycle",
+    "human_decisions",
+    "route_authorizations",
+    "canonical_downgrades",
+    "canonical_state",
+    "implementation",
+    "experiment_authorization",
+    "promotion_boundaries",
+    "route_neutral"
+  ],
+  "properties": {
+    "kind": {"const": "research-pack"},
+    "schema_version": {"const": "research-pack/v1"},
+    "pack_id": {"$ref": "#/$defs/id"},
+    "context": {"$ref": "#/$defs/context"},
+    "terrain_map": {"$ref": "#/$defs/terrain_map"},
+    "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
+    "claims": {"type": "array", "items": {"$ref": "#/$defs/claim"}},
+    "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "unknowns": {"type": "array", "items": {"$ref": "#/$defs/unknown"}},
+    "contradictions": {"type": "array", "items": {"$ref": "#/$defs/contradiction"}},
+    "failure_regimes": {"type": "array", "items": {"$ref": "#/$defs/failure_regime"}},
+    "mature_method_comparators": {"type": "array", "items": {"$ref": "#/$defs/mature_comparator"}},
+    "probes": {"type": "array", "items": {"$ref": "#/$defs/probe"}},
+    "failures": {"type": "array", "items": {"$ref": "#/$defs/failure_record"}},
+    "rewind_proposals": {"type": "array", "items": {"$ref": "#/$defs/rewind_proposal"}},
+    "lessons": {"type": "array", "items": {"$ref": "#/$defs/lesson"}},
+    "reopened_problems": {"type": "array", "items": {"$ref": "#/$defs/reopened_problem"}},
+    "lifecycle": {"type": "array", "items": {"$ref": "#/$defs/lifecycle"}},
+    "human_decisions": {"type": "array", "items": {"$ref": "#/$defs/human_decision"}},
+    "route_authorizations": {"type": "array", "items": {"$ref": "#/$defs/route_authorization"}},
+    "canonical_downgrades": {"type": "array", "items": {"$ref": "#/$defs/canonical_downgrade"}},
+    "canonical_state": {"$ref": "#/$defs/canonical_state"},
+    "implementation": {"$ref": "#/$defs/implementation"},
+    "experiment_authorization": {"$ref": "#/$defs/authorization_boundary"},
+    "promotion_boundaries": {"$ref": "#/$defs/promotion_boundaries"},
+    "route_neutral": {"const": true},
+    "selected_route": {"type": ["string", "null"]},
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
+    "text": {"type": "string", "minLength": 1},
+    "string_array": {"type": "array", "items": {"$ref": "#/$defs/text"}, "uniqueItems": true},
+    "polarity": {"enum": ["support", "counter", "null", "boundary", "conflict", "failure", "context", "mixed", "unknown"]},
+    "relation": {"enum": ["source-stated", "deterministic-derived", "candidate-inferred", "human-confirmed"]},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "relation"],
+      "properties": {
+        "source": {"$ref": "#/$defs/text"},
+        "relation": {"$ref": "#/$defs/relation"},
+        "locator": {"type": "string"},
+        "actor": {"type": "string"},
+        "recorded_at": {"type": "string"}
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_id", "domain", "starting_point", "shared_backbone"],
+      "properties": {
+        "context_id": {"$ref": "#/$defs/id"},
+        "domain": {"enum": ["software", "research-exploration", "hybrid"]},
+        "starting_point": {},
+        "shared_backbone": {},
+        "problem": {},
+        "question": {"type": "string"}
+      }
+    },
+    "terrain_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_neutral", "route_choice", "separate_from"],
+      "properties": {
+        "route_neutral": {"const": true},
+        "route_choice": {"const": null},
+        "separate_from": {"$ref": "#/$defs/string_array"},
+        "summary": {"type": "string"}
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "status", "assumptions", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "label": {"$ref": "#/$defs/text"},
+        "status": {"enum": ["candidate", "parked", "reopened", "authorized", "rejected", "superseded", "rewound"]},
+        "assumptions": {"$ref": "#/$defs/string_array"},
+        "failure_regime_refs": {"$ref": "#/$defs/string_array"},
+        "mature_comparator_refs": {"$ref": "#/$defs/string_array"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "evidence_refs", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "text": {"$ref": "#/$defs/text"},
+        "route_id": {"type": "string"},
+        "evidence_refs": {"$ref": "#/$defs/string_array"},
+        "status": {"enum": ["open", "supported", "countered", "mixed", "unresolved"]},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "polarity", "statement", "source", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "polarity": {"$ref": "#/$defs/polarity"},
+        "statement": {"$ref": "#/$defs/text"},
+        "source": {"$ref": "#/$defs/text"},
+        "route_id": {"type": "string"},
+        "claim_refs": {"$ref": "#/$defs/string_array"},
+        "boundary_conditions": {"type": "object"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "unknown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "question", "status", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "question": {"$ref": "#/$defs/text"},
+        "status": {"enum": ["open", "resolved", "unresolved", "deferred"]},
+        "route_id": {"type": "string"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "contradiction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "evidence_refs", "description", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "evidence_refs": {"$ref": "#/$defs/string_array"},
+        "claim_refs": {"$ref": "#/$defs/string_array"},
+        "description": {"$ref": "#/$defs/text"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "failure_regime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "conditions", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "description": {"$ref": "#/$defs/text"},
+        "conditions": {"type": "object"},
+        "route_refs": {"$ref": "#/$defs/string_array"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "mature_comparator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "method", "comparison_basis", "scope", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "method": {"$ref": "#/$defs/text"},
+        "comparison_basis": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/text"},
+        "limitations": {"$ref": "#/$defs/string_array"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "reversible", "boundary_conditions", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "route_id": {"type": "string"},
+        "description": {"$ref": "#/$defs/text"},
+        "reversible": {"const": true},
+        "boundary_conditions": {"type": "object"},
+        "success_observations": {"$ref": "#/$defs/string_array"},
+        "failure_observations": {"$ref": "#/$defs/string_array"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "failure_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "polarity", "what_failed", "what_did_not_fail", "boundary_conditions", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "route_id": {"type": "string"},
+        "polarity": {"$ref": "#/$defs/polarity"},
+        "what_failed": {"$ref": "#/$defs/text"},
+        "what_did_not_fail": {"$ref": "#/$defs/string_array"},
+        "evidence_refs": {"$ref": "#/$defs/string_array"},
+        "failure_regime_refs": {"$ref": "#/$defs/string_array"},
+        "boundary_conditions": {"type": "object"},
+        "status": {"enum": ["observed", "triaged", "reopened", "superseded"]},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "rewind_proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "route_id", "from_node_id", "target_node_id", "reason", "preserves_history", "status", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "route_id": {"$ref": "#/$defs/id"},
+        "from_node_id": {"$ref": "#/$defs/id"},
+        "target_node_id": {"$ref": "#/$defs/id"},
+        "reason": {"$ref": "#/$defs/text"},
+        "preserves_history": {"const": true},
+        "evidence_refs": {"$ref": "#/$defs/string_array"},
+        "status": {"enum": ["proposed", "accepted", "rejected", "applied"]},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "lesson": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "derived_from", "applies_when", "does_not_generalize", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "statement": {"$ref": "#/$defs/text"},
+        "derived_from": {"$ref": "#/$defs/string_array"},
+        "applies_when": {"$ref": "#/$defs/string_array"},
+        "does_not_generalize": {"$ref": "#/$defs/string_array"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "reopened_problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "problem_id", "reason", "unknown_refs", "failure_refs", "status", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "problem_id": {"$ref": "#/$defs/id"},
+        "reason": {"$ref": "#/$defs/text"},
+        "unknown_refs": {"$ref": "#/$defs/string_array"},
+        "failure_refs": {"$ref": "#/$defs/string_array"},
+        "status": {"enum": ["open", "reopened", "resolved", "deferred"]},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "event", "node_id", "recorded_at", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "event": {"enum": ["Create", "Fork", "Park", "Reopen", "Revive", "Rewind", "Reject", "Supersede", "Historical Context", "Unresolved"]},
+        "node_id": {"$ref": "#/$defs/id"},
+        "reason": {"type": "string"},
+        "recorded_at": {"$ref": "#/$defs/text"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "human_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "actor", "question", "selected_option", "scope", "status", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "actor": {"$ref": "#/$defs/text"},
+        "question": {"$ref": "#/$defs/text"},
+        "selected_option": {"$ref": "#/$defs/text"},
+        "selected_route_id": {"type": "string"},
+        "scope": {"enum": ["route", "probe", "experiment", "implementation", "canonical-promotion", "rewind", "downgrade"]},
+        "status": {"enum": ["proposed", "confirmed", "rejected"]},
+        "rationale": {"type": "string"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "route_authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "route_id", "scope", "decision_id", "status", "reversible", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "route_id": {"$ref": "#/$defs/id"},
+        "scope": {"enum": ["route", "probe", "experiment", "implementation", "canonical-promotion", "rewind", "downgrade"]},
+        "decision_id": {"$ref": "#/$defs/id"},
+        "status": {"enum": ["pending", "authorized", "rejected", "expired"]},
+        "reversible": {"type": "boolean"},
+        "boundary_conditions": {"type": "object"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "canonical_downgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "canonical_ref", "previous_state", "next_state", "reason", "failure_refs", "preserves_history", "provenance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "canonical_ref": {"$ref": "#/$defs/id"},
+        "previous_state": {"$ref": "#/$defs/text"},
+        "next_state": {"$ref": "#/$defs/text"},
+        "reason": {"$ref": "#/$defs/text"},
+        "failure_refs": {"$ref": "#/$defs/string_array"},
+        "decision_id": {"type": "string"},
+        "preserves_history": {"const": true},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "canonical_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "history"],
+      "properties": {
+        "current": {"type": ["string", "null"]},
+        "history": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "last_transition": {"type": ["string", "null"]}
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorized", "refs"],
+      "properties": {
+        "authorized": {"const": false},
+        "refs": {"$ref": "#/$defs/string_array"}
+      }
+    },
+    "authorization_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorized", "decision_required"],
+      "properties": {
+        "authorized": {"const": false},
+        "decision_required": {"const": true},
+        "decision_id": {"type": "string"}
+      }
+    },
+    "promotion_boundaries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terrain_map_is_not", "requires_human_decision", "preserve_history"],
+      "properties": {
+        "terrain_map_is_not": {"$ref": "#/$defs/string_array"},
+        "requires_human_decision": {"$ref": "#/$defs/string_array"},
+        "preserve_history": {"const": true}
+      }
+    }
+  }
+}

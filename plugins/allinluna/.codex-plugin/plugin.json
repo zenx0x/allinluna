@@ -1,7 +1,7 @@
 {
   "name": "allinluna",
-  "version": "0.1.1+codex.20260804025407",
-  "description": "\u89c4\u5212\u5e76\u6267\u884c\u5b8c\u6574\u3001\u8d44\u6e90\u53ef\u63a7\u7684\u591a\u4efb\u52a1\u5f00\u53d1\u5de5\u4f5c\u6d41\u3002",
+  "version": "2.0.0-rc.1",
+  "description": "A layered execution runtime that compiles goals into Coordinators, Task Lanes, WorkUnits, and typed handoffs.",
   "author": {
     "name": "zenx0x",
     "url": "https://github.com/zenx0x"
@@ -9,31 +9,27 @@
   "homepage": "https://github.com/zenx0x/allinluna",
   "repository": "https://github.com/zenx0x/allinluna",
   "license": "Apache-2.0",
-  "keywords": [
-    "development",
-    "planning",
-    "agent-orchestration",
-    "resource-management",
-    "worktrees",
-    "luna"
-  ],
-  "skills": "./skills/",
+  "keywords": ["execution-runtime", "task-graph", "workflow-packs", "luna"],
+  "skills": "./skills/allinluna",
+  "runtime": {
+    "source": "./runtime/allinluna_runtime",
+    "truth": "vnext-core-api",
+    "public_api": "allinluna_runtime.packs:SinglePublicSkillAPI",
+    "packs": ["delivery", "gsd", "research-routes-bridge"],
+    "compatibility": ["legacy-plan-import", "legacy-run-state-import", "legacy-resource-translation"]
+  },
   "interface": {
     "displayName": "All in Luna",
-    "shortDescription": "\u89c4\u5212\u5e76\u8fd0\u884c\u5b8c\u6574\u7684\u591a\u4efb\u52a1\u667a\u80fd\u4f53\u5f00\u53d1\u5de5\u4f5c\u6d41",
-    "longDescription": "\u7528\u6237\u4e3b\u5bf9\u8bdd\u4f5c\u4e3a Sponsor\uff0c\u7531\u72ec\u7acb\u9876\u5c42 Coordinator\u3001\u53ef\u9009\u5b50\u534f\u8c03\u3001CounterPilot \u548c Owners \u5b8c\u6574\u6267\u884c\u9879\u76ee\uff1b\u652f\u6301\u76f4\u63a5\u5e76\u53d1\u6267\u884c\u5df2\u6709\u8ba1\u5212\u30018 \u5230 64 \u5e76\u53d1\u3001fast\u3001ultra-fast \u4e0e Luna-only \u6a21\u5f0f\u3002",
+    "shortDescription": "Compile a goal, plan, active run, or research route into an executable vNext task graph.",
+    "longDescription": "All in Luna provides one public Skill over the vNext runtime. A Global Coordinator releases independent Task Lanes; each Lane recursively schedules bounded WorkUnits and returns typed artifacts and handoffs. Workflow Packs stay outside Core and legacy inputs are read-only imports.",
     "developerName": "zenx0x",
     "category": "Productivity",
-    "capabilities": [
-      "Interactive",
-      "Read",
-      "Write"
-    ],
+    "capabilities": ["Interactive", "Read", "Write"],
     "websiteURL": "https://github.com/zenx0x/allinluna",
     "defaultPrompt": [
-      "\u4f7f\u7528 All in Luna \u89c4\u5212\u9879\u76ee\uff1a\u5f53\u524d\u5bf9\u8bdd\u53ea\u4f5c Sponsor\uff0c\u6267\u884c\u65f6\u53e6\u5efa\u72ec\u7acb Coordinator\uff1b\u6839\u636e\u98ce\u9669\u51b3\u5b9a CounterPilot\u3001Integration \u548c Acceptance\u3002",
-      "\u4f7f\u7528 All in Luna \u5b8c\u6574\u6267\u884c\uff1a\u7acb\u5373\u521b\u5efa\u72ec\u7acb Coordinator\uff1b\u9ad8\u5e76\u53d1\u65f6\u521b\u5efa\u5b50\u534f\u8c03\u5206\u7247\uff0c\u6301\u7eed\u6267\u884c\u5230\u505c\u6b62\u8fb9\u754c\u3002",
-      "\u4f7f\u7528 All in Luna \u7684 parallel-only \u6a21\u5f0f\u76f4\u63a5\u5e76\u53d1\u6267\u884c\u6211\u5df2\u6709\u7684\u8ba1\u5212\uff0c\u4e0d\u91cd\u65b0\u8bbe\u8ba1\u4ea7\u54c1\u65b9\u5411\u3002"
+      "Highest priority: treat every HostAction.tool as an exact opcode. Invoke it only with HostAction.arguments; never translate, approximate, or substitute it. A top_level_task never falls back to a subagent, current-thread, or direct execution. If no HostAdapter is bound, return ACTION_RELAY_REQUIRED; only capability discovery that confirms the exact tool is absent may return HOST_CAPABILITY_BLOCKED. Ingest the raw receipt, tick again, and preserve explicit actual_tool, actual_capability, and action_contract_hash.",
+      "Use All in Luna to compile this goal, existing plan, active run, or route packet into a RunIntent and TaskGraph, then execute it through the vNext runtime.",
+      "Choose only the allowed deployment envelope from the Run, Task, or WorkUnit resource envelope: Luna-class models with medium/high/xhigh by default and max only for critical work, plus gpt-5.3-codex-spark outside Luna; preserve requested, resolved, and actual host receipt evidence separately."
     ]
   }
 }

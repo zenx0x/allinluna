@@ -12,6 +12,9 @@ import shutil
 from build_distributions import ROOT, build, read_json
 
 
+EXPECTED_VERSIONS = {"allinluna": "2.0.0-rc.1", "research-routes": "0.3.0-rc.1"}
+
+
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="allinluna-install-") as temp:
@@ -42,6 +45,10 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             if not name:
                 errors.append(f"plugin name missing in {artifact}")
                 continue
+            if name not in EXPECTED_VERSIONS:
+                errors.append(f"unexpected plugin identity in {artifact}: {name}")
+            elif plugin.get("version") != EXPECTED_VERSIONS[name]:
+                errors.append(f"{name} plugin version is stale: {plugin.get('version')!r}")
             destination = install_root / name
             shutil.copytree(artifact, destination)
             installed_plugin_root = (destination / source_path[2:]).resolve()
@@ -60,8 +67,33 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             installed_plugin_root = install_root / name / source_path[2:]
             if not (installed_plugin_root / "skills").is_dir():
                 errors.append(f"{name} has no installable skills directory")
-            if not (install_root / name / "shared-files.json").is_file():
-                errors.append(f"{name} has no shared parity manifest")
+            skill = installed_plugin_root / "skills" / "allinluna" / "SKILL.md"
+            if not skill.is_file():
+                errors.append(f"{name} has no installed All in Luna Skill entrypoint")
+            elif name == "allinluna":
+                text = skill.read_text(encoding="utf-8")
+                installed_manifest = read_json(installed_plugin_root / ".codex-plugin/plugin.json")
+                if installed_manifest.get("version") != "2.0.0-rc.1":
+                    errors.append("installed All in Luna plugin version is not 2.0.0-rc.1")
+                if not all(needle in text for needle in ("not hard", "locked", "resource_receipt.requested")):
+                    errors.append("installed All in Luna Skill lacks configurable-resource receipt guidance")
+            if not (install_root / name / "canonical-files.json").is_file():
+                errors.append(f"{name} has no canonical source manifest")
+            artifact_manifest_path = install_root / name / "distribution-manifest.json"
+            if not artifact_manifest_path.is_file():
+                errors.append(f"{name} has no distribution release manifest")
+            else:
+                artifact_manifest = read_json(artifact_manifest_path)
+                if artifact_manifest.get("version") != EXPECTED_VERSIONS.get(name):
+                    errors.append(f"{name} distribution manifest version is stale")
+                if artifact_manifest.get("release_status") != "release-candidate":
+                    errors.append(f"{name} distribution is not marked release-candidate")
+                if artifact_manifest.get("tag_owner") != "T6" or artifact_manifest.get("tag_timing") != "after merged main":
+                    errors.append(f"{name} distribution tag boundary is invalid")
+            if not (installed_plugin_root / "runtime" / "allinluna_runtime").is_dir():
+                errors.append(f"{name} has no canonical runtime")
+            if (installed_plugin_root / "shared").exists() or (installed_plugin_root / "runtime" / "shared").exists():
+                errors.append(f"{name} contains a forbidden duplicate shared runtime")
     return errors
 
 

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/task-envelope.schema.json",
+  "title": "All in Luna vNext TaskEnvelope",
+  "description": "Coordinator to Lane dispatch envelope. The envelope is persisted before host invocation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "protocol",
+    "message_id",
+    "run_ref",
+    "task_id",
+    "lane_attempt_ref",
+    "idempotency_key",
+    "contract_ref",
+    "context_ref",
+    "ownership",
+    "resource_envelope",
+    "response_contract",
+    "created_at"
+  ],
+  "properties": {
+    "kind": {"const": "task-envelope"},
+    "schema_version": {"const": "1.0"},
+    "protocol": {"const": "task-envelope/v1"},
+    "message_id": {"$ref": "#/$defs/identifier"},
+    "run_ref": {"$ref": "#/$defs/run_ref"},
+    "task_id": {"$ref": "#/$defs/identifier"},
+    "lane_attempt_ref": {"$ref": "#/$defs/lane_attempt_ref"},
+    "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,256}$"},
+    "contract_ref": {"$ref": "#/$defs/contract_ref"},
+    "context_ref": {"$ref": "#/$defs/context_ref"},
+    "ownership": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/path"}
+    },
+    "resource_envelope": {"$ref": "#/$defs/resource_envelope"},
+    "response_contract": {"const": "lane-handoff/v1"},
+    "attempt": {"type": "integer", "minimum": 1},
+    "constraints": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*//).+$"
+    },
+    "run_ref": {
+      "type": "string",
+      "pattern": "^run://[^\\s]+$"
+    },
+    "lane_attempt_ref": {
+      "type": "string",
+      "pattern": "^lane-attempt://[^\\s]+$"
+    },
+    "contract_ref": {
+      "type": "string",
+      "pattern": "^contract://task/[^\\s@]+@[1-9][0-9]*$"
+    },
+    "context_ref": {
+      "type": "string",
+      "pattern": "^context://[^\\s]+$"
+    },
+    "resource_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subagent_slots",
+        "model_policy",
+        "reasoning_policy",
+        "external_action_policy"
+      ],
+      "properties": {
+        "subagent_slots": {"type": "integer", "minimum": 0},
+        "top_level_slots": {"type": "integer", "minimum": 1},
+        "total_subagent_slots": {"type": "integer", "minimum": 0},
+        "model_policy": {"enum": ["auto", "explicit"]},
+        "model": {"type": ["string", "null"], "minLength": 1},
+        "reasoning_policy": {"enum": ["auto", "explicit"]},
+        "reasoning": {"type": ["string", "null"], "minLength": 1},
+        "capability_class": {"enum": ["control.relay", "planning.semantic", "lane.synthesis", "work.mechanical", "work.implementation", "work.deep-debug", "verify.independent", null]},
+        "route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]},
+        "time_budget": {"type": ["integer", "null"], "minimum": 0},
+        "token_or_credit_budget": {"type": ["integer", "null"], "minimum": 0},
+        "external_action_policy": {"enum": ["ask", "deny", "allow"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"model_policy": {"const": "explicit"}}},
+          "then": {"required": ["model"]}
+        },
+        {
+          "if": {"properties": {"reasoning_policy": {"const": "explicit"}}},
+          "then": {"required": ["reasoning"]}
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

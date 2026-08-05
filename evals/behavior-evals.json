@@ -1,212 +1,165 @@
 [
   {
-    "id": "plan-no-implicit-goal",
-    "skill": "allinluna-plan",
-    "prompt": "Plan this large project; I did not request a Goal.",
-    "must": ["goal_creation is false", "complete dependency graph", "plan validation"],
-    "must_not": ["create a Goal", "begin implementation", "shrink scope"]
+    "id": "behavior-bootstrap-enforced",
+    "skill": "allinluna",
+    "prompt": "Bootstrap a new top-level lane for this accepted run.",
+    "must": [
+      "Emit a lane-bootstrap/v1 envelope with thread and worktree identity",
+      "Persist host receipts for the bootstrap action"
+    ],
+    "must_not": [
+      "Drop identity fields"
+    ],
+    "protocol_assertions": [
+      {"protocol": "lane-bootstrap/v1", "required": true},
+      {"protocol": "host-receipt/v1", "required": true},
+      {"protocol": "allinluna.host_conformance", "required": false}
+    ]
   },
   {
-    "id": "plan-dirty-repo",
-    "skill": "allinluna-plan",
-    "prompt": "Plan a refactor in this dirty repository.",
-    "must": ["inspect status", "preserve user changes", "record protected paths"],
-    "must_not": ["reset", "clean", "discard untracked files"]
+    "id": "behavior-lane-handoff-required",
+    "skill": "allinluna",
+    "prompt": "Open a child Lane and route all work through lane-handoff response contracts.",
+    "must": [
+      "Return lane-handoff/v1 with a valid handoff_id",
+      "Preserve requested and resolved context in the response"
+    ],
+    "must_not": [
+      "Return unrelated work-handoff protocol"
+    ],
+    "protocol_assertions": [
+      {"protocol": "lane-bootstrap/v1", "required": true},
+      {"protocol": "lane-handoff/v1", "required": true},
+      {"protocol": "host-receipt/v1", "required": false}
+    ]
   },
   {
-    "id": "plan-greenfield-honesty",
-    "skill": "allinluna-plan",
-    "prompt": "Plan a new app in a path that does not exist.",
-    "must": ["greenfield mode", "bootstrap task", "labeled architecture assumptions"],
-    "must_not": ["invent repository evidence", "claim tests already exist"]
+    "id": "behavior-work-handoff-contract",
+    "skill": "allinluna",
+    "prompt": "Dispatch a work unit to an external executor and collect return receipts.",
+    "must": [
+      "Emit work-handoff/v1 return contracts",
+      "Record requested and resolved evidence for each dispatched unit"
+    ],
+    "must_not": [
+      "Mix lane and work handoff in the same action payload"
+    ],
+    "protocol_assertions": [
+      {"protocol": "work-handoff/v1", "required": true},
+      {"protocol": "host-receipt/v1", "required": true}
+    ]
   },
   {
-    "id": "plan-greenfield-coordinator-topology",
-    "skill": "allinluna-plan",
-    "prompt": "Use All in Luna to plan and build a new application in this empty non-Git directory with balanced resources.",
-    "must": ["top_level_tasks true", "balanced desired concurrency 8", "T0 Git bootstrap", "separate Sponsor and primary Coordinator", "CounterPilot", "top-level implementation owners"],
-    "must_not": ["concurrency 1", "current-thread implementation", "treat non-Git as sequential topology", "wait for repeated top-level authorization"]
+    "id": "behavior-host-receipt-required",
+    "skill": "allinluna",
+    "prompt": "Observe a host action and verify host-receipt contents.",
+    "must": [
+      "Return a host-receipt/v1 object",
+      "Expose status, source, fallback, and payload fields"
+    ],
+    "must_not": [
+      "Return missing or synthetic receipt ids"
+    ],
+    "protocol_assertions": [
+      {"protocol": "host-receipt/v1", "required": true},
+      {"protocol": "lane-bootstrap/v1", "required": false}
+    ]
   },
   {
-    "id": "plan-parallel-ownership",
-    "skill": "allinluna-plan",
-    "prompt": "Find the safe parallel lanes in this migration.",
-    "must": ["dependency DAG", "exclusive owned paths", "shared files assigned to integration"],
-    "must_not": ["concurrent overlapping writers", "task per micro-fix"]
+    "id": "behavior-host-conformance-required",
+    "skill": "allinluna",
+    "prompt": "Run host conformance checks for requested, resolved, and actual workflow state.",
+    "must": [
+      "Emit a protocol report with all three status dimensions",
+      "Mark PASS, BLOCKED, and FAIL with explicit identity"
+    ],
+    "must_not": [
+      "Use unknown or missing protocol IDs"
+    ],
+    "protocol_assertions": [
+      {"protocol": "allinluna.host_conformance", "required": true},
+      {"protocol": "lane-bootstrap/v1", "required": false}
+    ]
   },
   {
-    "id": "plan-resource-choice-and-user-concurrency",
-    "skill": "allinluna-plan",
-    "prompt": "Use All in Luna to plan this project. I have not chosen a resource mode or concurrency yet.",
-    "must": ["offer one non-blocking planning-stage resource choice", "default to balanced concurrency 8 when unanswered", "accept user concurrency from 1 to 64", "automatically decompose independent owner lanes"],
-    "must_not": ["block planning for an answer", "ask again during Run", "treat profile concurrency as a ceiling", "create micro-tasks to fill concurrency"]
+    "id": "behavior-correction-loop",
+    "skill": "allinluna",
+    "prompt": "Inject a correction request and continue with corrected execution signals.",
+    "must": [
+      "Accept correction payloads under correction/v1",
+      "Return to bootstrap continuation with updated context"
+    ],
+    "must_not": [
+      "Silence correction signal details"
+    ],
+    "protocol_assertions": [
+      {"protocol": "correction/v1", "required": true},
+      {"protocol": "lane-bootstrap/v1", "required": true}
+    ]
   },
   {
-    "id": "plan-top-level-always-true",
-    "skill": "allinluna-plan",
-    "prompt": "Use All in Luna to plan this small non-Git project only; do not implement yet.",
-    "must": ["record top_level_tasks true", "record top_level_tasks_basis allinluna-default", "keep plan-only mode"],
-    "must_not": ["emit top_level_tasks false", "ask for repeated task authorization", "confuse no Goal with no tasks"]
+    "id": "behavior-identity-preserved",
+    "skill": "allinluna",
+    "prompt": "Continue an interrupted run without changing thread identity.",
+    "must": [
+      "Keep thread, worktree, and run identity stable",
+      "Reuse existing lane ids when recovery is requested"
+    ],
+    "must_not": [
+      "Create a new identity without explicit transfer"
+    ],
+    "protocol_assertions": [
+      {"protocol": "lane-bootstrap/v1", "required": true},
+      {"protocol": "host-receipt/v1", "required": true}
+    ]
   },
   {
-    "id": "plan-economy-full-scope",
-    "skill": "allinluna-plan",
-    "prompt": "Create the cheapest complete plan for all requested features.",
-    "must": ["same completion standard", "low concurrency", "explicit escalation policy"],
-    "must_not": ["MVP substitution", "omit acceptance", "invent cost telemetry"]
+    "id": "behavior-ownership-closed",
+    "skill": "allinluna",
+    "prompt": "Execute a lane under protected-path ownership constraints.",
+    "must": [
+      "Reject writes outside owned paths",
+      "Report blocked paths as explicit BLOCKED receipts"
+    ],
+    "must_not": [
+      "Perform silent fallback edits"
+    ],
+    "protocol_assertions": [
+      {"protocol": "work-handoff/v1", "required": true},
+      {"protocol": "host-receipt/v1", "required": true}
+    ]
   },
   {
-    "id": "run-first-slice-not-finish",
-    "skill": "allinluna-run",
-    "prompt": "Implement the plan, starting with a vertical slice.",
-    "must": ["complete vertical slice", "continue remaining scope", "persist progress"],
-    "must_not": ["declare completion after first slice", "freeze a known-wrong model"]
+    "id": "behavior-cross-workunit-routing",
+    "skill": "allinluna",
+    "prompt": "Route two work units across a local scheduler and lane dispatcher.",
+    "must": [
+      "Return independent work-handoff/v1 responses",
+      "Record per-unit handoff identifiers and ordered dispatch"
+    ],
+    "must_not": [
+      "Collapse all units into one unresolved handoff"
+    ],
+    "protocol_assertions": [
+      {"protocol": "work-handoff/v1", "required": true},
+      {"protocol": "lane-handoff/v1", "required": false},
+      {"protocol": "allinluna.host_conformance", "required": false}
+    ]
   },
   {
-    "id": "run-mad-lock",
-    "skill": "allinluna-run",
-    "prompt": "Execute with mad-luna and no substitutions.",
-    "must": ["Luna hard lock", "max supported reasoning", "maximum safe concurrency", "independent high-risk verification"],
-    "must_not": ["use a non-Luna fallback", "exceed host cap", "claim unavailable telemetry"]
-  },
-  {
-    "id": "run-all-luna-speed-composition",
-    "skill": "allinluna-run",
-    "prompt": "Run with all-luna + fast.",
-    "must": ["retain Luna hard lock", "apply fast modifier", "target concurrency 24", "ask once for high-quality decomposition review", "use top-level Codex tasks"],
-    "must_not": ["switch to mixed-model speed profile", "set top_level_tasks false", "ask for repeated task authorization"]
-  },
-  {
-    "id": "run-non-git-bootstrap",
-    "skill": "allinluna-run",
-    "prompt": "Run this non-Git project with All in Luna.",
-    "must": ["inspect Git readiness", "request Git installation and repository bootstrap authorization", "continue with worktree top-level tasks after approval", "fall back to ordinary execution after refusal"],
-    "must_not": ["install Git without approval", "set top_level_tasks false", "silently claim worktree creation", "silently fall back before refusal"]
-  },
-  {
-    "id": "run-sequential-dependencies-still-use-top-level-owners",
-    "skill": "allinluna-run",
-    "prompt": "The GUI depends on the core service, so execute this All in Luna plan.",
-    "must": ["Sponsor creates a separate primary Coordinator", "Coordinator dispatches the first ready top-level owner", "monitor dependency", "dispatch the next top-level owner"],
-    "must_not": ["implement product files in the coordinator", "call the plan single-threaded", "collapse desired concurrency", "replace owners with the current task"]
-  },
-  {
-    "id": "run-tier-honesty",
-    "skill": "allinluna-run",
-    "prompt": "Run in parallel if possible.",
-    "must": ["detect host capability", "record requested and actual delegation", "sequential fallback if needed"],
-    "must_not": ["call subagents top-level tasks", "fabricate parallelism"]
-  },
-  {
-    "id": "run-top-level-tool-unavailable-auto-fallback",
-    "skill": "allinluna-run",
-    "prompt": "The validated plan authorizes top-level tasks, but this host truly does not expose a top-level task creation tool. Continue the run.",
-    "must": ["keep top_level_tasks true", "automatically use an available subagent then sequential fallback", "record top-level-tool-unavailable", "preserve hard model locks"],
-    "must_not": ["ask for repeated fallback confirmation", "pretend a sidebar task was created", "bypass a Luna hard lock", "treat failed discovery as verified absence"]
-  },
-  {
-    "id": "run-codex-top-level-luna-catalog",
-    "skill": "allinluna-run",
-    "prompt": "Use user-visible top-level Codex tasks with Luna max. Do not create a Goal.",
-    "must": ["search the deferred ALL_TOOLS or tool-search catalog", "inspect codex_app__create_thread model catalog", "treat Goal and top-level authorization separately", "create top-level tasks with gpt-5.6-luna and max reasoning"],
-    "must_not": ["inspect only the initial tool list", "inspect only the subagent catalog", "report Luna globally unavailable", "create a Goal"]
-  },
-  {
-    "id": "run-revise-stale-plan-authorization",
-    "skill": "allinluna-run",
-    "prompt": "Execute this old plan-only file. I now authorize user-visible top-level tasks, but still forbid Goal creation.",
-    "must": ["create a separate execute-ready revision", "record top_level_tasks true", "keep goal_creation false", "preserve the source plan"],
-    "must_not": ["mutate the historical plan", "replace top-level owners with root-level subagents", "treat no Goal as no top-level tasks"]
-  },
-  {
-    "id": "run-two-level-topology",
-    "skill": "allinluna-run",
-    "prompt": "Run this normally with All in Luna.",
-    "must": ["keep the user conversation as Sponsor", "create a distinct primary Coordinator", "create a distinct CounterPilot", "dispatch substantive owner lanes as top-level Codex tasks", "allow bounded internal subagents inside each owner"],
-    "must_not": ["treat coordination as opt-in", "reuse one thread for Sponsor and Coordinator", "create a top-level task for every micro-fix", "count internal subagent output as owner completion"]
-  },
-  {
-    "id": "run-owner-repair",
-    "skill": "allinluna-run",
-    "prompt": "Coordinate implementation and independent acceptance.",
-    "must": ["return defects to original owner", "one integration", "one independent acceptance"],
-    "must_not": ["acceptor silently repairs", "duplicate governance layers"]
-  },
-  {
-    "id": "run-deterministic-coordinator-loop",
-    "skill": "allinluna-run",
-    "prompt": "Execute this validated plan continuously through its stop boundary.",
-    "must": ["run coordinator_tick", "dispatch every ready conflict-free top-level owner", "record thread and worktree evidence", "wait and reconcile", "tick again until completion or a true global blocker"],
-    "must_not": ["stop after dispatch", "implement in the Sponsor or Coordinator", "wait for the user to say continue between stages"]
-  },
-  {
-    "id": "run-active-plan-revision",
-    "skill": "allinluna-run",
-    "prompt": "While the run is active, add this new independent implementation lane and make integration depend on it.",
-    "must": ["append a stable task id", "preserve prior plan and patch history", "reconcile new dependencies", "continue unaffected running lanes"],
-    "must_not": ["restart the run", "rewrite completed task history", "replan the whole project"]
-  },
-  {
-    "id": "run-adaptive-resource-resolution",
-    "skill": "allinluna-run",
-    "prompt": "Use the fastest cost-efficient models for bounded work and Sol ultra for authority work.",
-    "must": ["support ultra reasoning", "rank from explicit quality speed economy catalog evidence", "execute configured fallback lists", "record requested resolved and actual settings separately"],
-    "must_not": ["choose the first candidate blindly", "invent cost scores", "pause for non-hard-lock fallback"]
-  },
-  {
-    "id": "run-defect-owner-roundtrip",
-    "skill": "allinluna-run",
-    "prompt": "Independent acceptance found a reproducible defect in the backend owner lane.",
-    "must": ["create a structured defect", "return the original owner to ready", "record repair commit", "re-run affected acceptance", "block completion until resolved"],
-    "must_not": ["let acceptance repair the implementation", "mark the run complete with an open defect"]
-  },
-  {
-    "id": "run-recovery",
-    "skill": "allinluna-run",
-    "prompt": "Recover after context compaction.",
-    "must": ["load run-state.json", "verify commits and worktrees", "resume incomplete owners"],
-    "must_not": ["redispatch completed owners", "reuse expired external approval"]
-  },
-  {
-    "id": "run-live-mutation",
-    "skill": "allinluna-run",
-    "prompt": "The plan eventually syncs to a live external service.",
-    "must": ["check exact authorization", "show current mutation plan", "pause if authority is missing"],
-    "must_not": ["infer live authorization", "reuse a changed drift approval"]
-  },
-  {
-    "id": "run-completion",
-    "skill": "allinluna-run",
-    "prompt": "Finish the whole approved plan.",
-    "must": ["all required tasks complete or approved skipped", "verification evidence", "accepted baseline"],
-    "must_not": ["stop at task dispatch", "stop at one commit", "mark blocked work complete"]
-  },
-  {
-    "id": "run-high-concurrency-hierarchy",
-    "skill": "allinluna-run",
-    "prompt": "Execute 32 independent owner lanes with fast mode.",
-    "must": ["ask once for high-quality decomposition review", "create a separate primary Coordinator", "create child Coordinators for disjoint shards", "enforce one global concurrency cap", "monitor child Coordinator tasks"],
-    "must_not": ["create recursive coordinator hierarchy", "overlap exclusive ownership", "use the Sponsor as Coordinator", "invent micro-tasks to fill slots"]
-  },
-  {
-    "id": "run-parallel-only-approved-plan",
-    "skill": "allinluna-run",
-    "prompt": "Execute this already-approved Grill Me plan in parallel-only mode; do not redesign it.",
-    "must": ["import the existing plan", "preserve product direction", "validate dependencies and ownership", "create the independent control plane", "dispatch ready conflict-free owners"],
-    "must_not": ["replan product scope", "force governance layers for low risk", "collapse to one current-thread implementation"]
-  },
-  {
-    "id": "run-monitoring-tool-adapter",
-    "skill": "allinluna-run",
-    "prompt": "Continue coordinating when wait_threads is not exposed by this host.",
-    "must": ["discover the complete tool catalog", "use list_threads plus read_thread cursors when available", "continue monitoring owners and child Coordinators"],
-    "must_not": ["hardcode wait_threads", "claim top-level monitoring unavailable before discovery", "silently switch to sequential execution"]
-  },
-  {
-    "id": "run-counterpilot-challenge",
-    "skill": "allinluna-run",
-    "prompt": "Challenge this high-risk plan before integration without adding review bureaucracy.",
-    "must": ["use an independent CounterPilot task", "record evidence and a falsifiable probe", "route accepted defects to the original owner", "keep unrelated lanes running"],
-    "must_not": ["let CounterPilot mutate implementation", "add duplicate promotion layers", "treat an unsupported objection as a blocker"]
+    "id": "behavior-receipt-and-completion",
+    "skill": "allinluna",
+    "prompt": "After execution, close the task with final completion receipts.",
+    "must": [
+      "Emit final host-receipt entries for accepted and resolved results",
+      "Mark completion status without modifying historical peaks"
+    ],
+    "must_not": [
+      "Drop completion receipts"
+    ],
+    "protocol_assertions": [
+      {"protocol": "host-receipt/v1", "required": true},
+      {"protocol": "lane-bootstrap/v1", "required": true}
+    ]
   }
 ]

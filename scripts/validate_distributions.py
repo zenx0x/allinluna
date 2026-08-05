@@ -11,12 +11,17 @@ from pathlib import Path
 from build_distributions import ROOT, build, expand_sources, plugin_root_for, read_json, sha256, source_provenance
 
 
-SOURCE_ONLY_README_PATHS = (
-    "scripts/build_distributions.py",
-    "scripts/validate_distributions.py",
-    "scripts/validate_installations.py",
-    "scripts/validate_route_packet.py",
-)
+SOURCE_ONLY_README_PATHS = ("shared/", "runtime/shared", "allinluna-plan", "allinluna-run")
+EXPECTED_RELEASE = {
+    "status": "release-candidate",
+    "stable_release": False,
+    "tag_owner": "T6",
+    "tag_timing": "after merged main",
+}
+EXPECTED_DISTRIBUTIONS = {
+    "all-in-luna": {"plugin_name": "allinluna", "version": "2.0.0-rc.1", "rc_tag": "allinluna/2.0.0-rc.1"},
+    "research-routes": {"plugin_name": "research-routes", "version": "0.3.0-rc.1", "rc_tag": "research-routes/0.3.0-rc.1"},
+}
 
 
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
@@ -25,7 +30,18 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     specs = manifest.get("distributions", [])
     if {spec.get("id") for spec in specs} != {"all-in-luna", "research-routes"}:
         errors.append("manifest must define exactly all-in-luna and research-routes")
-    if not manifest.get("overlay_allowlist"):
+    release = manifest.get("release", {})
+    for field, expected in EXPECTED_RELEASE.items():
+        if release.get(field) != expected:
+            errors.append(f"release.{field} must be {expected!r}")
+    for spec in specs:
+        expected = EXPECTED_DISTRIBUTIONS.get(spec.get("id"))
+        if expected is None:
+            continue
+        for field, value in expected.items():
+            if spec.get(field) != value:
+                errors.append(f"{spec['id']} manifest {field} must be {value!r}")
+    if not manifest.get("overlay_allowlist") or not manifest.get("canonical_paths"):
         errors.append("overlay allowlist is missing")
     try:
         expected_provenance = source_provenance(root)
@@ -33,15 +49,18 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
         errors.append(f"cannot resolve source provenance: {exc}")
         expected_provenance = {}
     with tempfile.TemporaryDirectory(prefix="allinluna-distributions-") as temp:
-        built = build(root, Path(temp) if dist is None else Path(temp) / "built")
-        if dist is not None:
-            built = build(root, Path(temp) / "built")
+        built = build(root, Path(temp)) if dist is None else [dist / spec["id"] for spec in specs]
         inventories: list[dict] = []
         for artifact, spec in zip(built, specs, strict=True):
             plugin_root = plugin_root_for(artifact, spec)
-            required = [plugin_root / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "shared-files.json", artifact / "LICENSE"]
+            required = [plugin_root / ".codex-plugin/plugin.json", artifact / ".agents/plugins/marketplace.json", artifact / "distribution-manifest.json", artifact / ".source-provenance.json", artifact / "canonical-files.json", artifact / "LICENSE", plugin_root / "runtime/allinluna_runtime/__init__.py", plugin_root / "skills/allinluna/SKILL.md"]
             if spec["id"] == "research-routes":
-                required.extend([artifact / "README.md", artifact / "README.en.md"])
+                required.extend([
+                    artifact / "README.md",
+                    artifact / "README.en.md",
+                    plugin_root / "runtime/research_routes_runtime/__init__.py",
+                    plugin_root / "runtime/research_routes_runtime/schemas/research-pack.schema.json",
+                ])
             for path in required:
                 if not path.is_file():
                     errors.append(f"{spec['id']} missing {path.relative_to(artifact)}")
@@ -50,9 +69,16 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             plugin = read_json(plugin_root / ".codex-plugin/plugin.json")
             if plugin.get("name") != spec["plugin_name"]:
                 errors.append(f"{spec['id']} plugin name mismatch")
+            if plugin.get("version") != spec.get("version"):
+                errors.append(f"{spec['id']} plugin version does not match the RC manifest")
             prompts = plugin.get("interface", {}).get("defaultPrompt")
             if not isinstance(prompts, list) or len(prompts) != 3:
                 errors.append(f"{spec['id']} must expose exactly 3 defaultPrompt entries")
+            expected_skills = "./skills/allinluna" if spec["id"] == "all-in-luna" else "./skills/"
+            if plugin.get("skills") != expected_skills:
+                errors.append(f"{spec['id']} skill entrypoint is not canonical: {plugin.get('skills')!r}")
+            if spec["id"] == "research-routes" and plugin.get("runtime", {}).get("source") != "./runtime/research_routes_runtime":
+                errors.append("research-routes Pack runtime entrypoint is not canonical")
             marketplace = read_json(artifact / ".agents/plugins/marketplace.json")
             entries = marketplace.get("plugins", [])
             if marketplace.get("name") != spec["plugin_name"] or len(entries) != 1:
@@ -65,6 +91,20 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             provenance = read_json(artifact / ".source-provenance.json")
             if provenance != expected_provenance:
                 errors.append(f"{spec['id']} source provenance does not match current HEAD")
+            artifact_manifest = read_json(artifact / "distribution-manifest.json")
+            for field, expected in {
+                "distribution_id": spec["id"],
+                "plugin_name": spec["plugin_name"],
+                "version": spec["version"],
+                "release_status": release.get("status"),
+                "rc_tag": spec["rc_tag"],
+                "tag_owner": release.get("tag_owner"),
+                "tag_timing": release.get("tag_timing"),
+            }.items():
+                if artifact_manifest.get(field) != expected:
+                    errors.append(f"{spec['id']} artifact {field} is stale or mismatched")
+            if artifact_manifest.get("provenance") != expected_provenance:
+                errors.append(f"{spec['id']} artifact provenance does not match current HEAD")
             if (artifact / "LICENSE").read_bytes() != (root / "LICENSE").read_bytes():
                 errors.append(f"{spec['id']} LICENSE differs from source LICENSE")
             if spec["id"] == "research-routes":
@@ -73,9 +113,11 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
                     for source_only_path in SOURCE_ONLY_README_PATHS:
                         if source_only_path in readme:
                             errors.append(f"{spec['id']} {readme_name} contains source-only path {source_only_path}")
-            inventories.append(read_json(artifact / "shared-files.json"))
+            inventories.append(read_json(artifact / "canonical-files.json"))
+            if (plugin_root / "shared").exists() or (plugin_root / "runtime" / "shared").exists():
+                errors.append(f"{spec['id']} contains a duplicate shared runtime")
         if len(inventories) == 2 and inventories[0] != inventories[1]:
-            errors.append("shared file inventory differs between distributions")
+            errors.append("canonical source inventory differs between distributions")
         if len(built) == 2:
             luna_root = plugin_root_for(built[0], specs[0])
             routes_root = plugin_root_for(built[1], specs[1])

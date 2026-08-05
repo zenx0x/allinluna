@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/handoff.schema.json",
+  "title": "All in Luna vNext Work and Lane Handoff",
+  "description": "Discriminated handoff contract for WorkUnit to Lane and Lane to Coordinator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "protocol",
+    "handoff_kind",
+    "message_id",
+    "handoff_id",
+    "run_ref",
+    "status",
+    "summary",
+    "artifacts",
+    "checks",
+    "blockers",
+    "discovered_work",
+    "promotion_requests",
+    "created_at"
+  ],
+  "properties": {
+    "kind": {"const": "handoff"},
+    "schema_version": {"const": "1.0"},
+    "protocol": {"enum": ["work-handoff/v1", "lane-handoff/v1"]},
+    "handoff_kind": {"enum": ["work-unit", "lane"]},
+    "message_id": {"$ref": "#/$defs/identifier"},
+    "handoff_id": {"$ref": "#/$defs/identifier"},
+    "run_ref": {"$ref": "#/$defs/run_ref"},
+    "status": {"enum": ["completed", "blocked", "failed", "cancelled"]},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/artifact_ref"}
+    },
+    "checks": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/check_result"}
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/blocker"}
+    },
+    "discovered_work": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/discovered_work"}
+    },
+    "promotion_requests": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/promotion_request"}
+    },
+    "contract_delta": {
+      "anyOf": [{"$ref": "#/$defs/contract_delta"}, {"type": "null"}]
+    },
+    "work_unit_id": {"$ref": "#/$defs/identifier"},
+    "task_id": {"$ref": "#/$defs/identifier"},
+    "changed_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/path"}
+    },
+    "contract_revision": {"type": "integer", "minimum": 1},
+    "exports": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/export"}
+    },
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"handoff_kind": {"const": "work-unit"}}},
+      "then": {
+        "required": ["work_unit_id", "changed_paths"],
+        "properties": {
+          "protocol": {"const": "work-handoff/v1"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"handoff_kind": {"const": "lane"}}},
+      "then": {
+        "required": ["task_id", "contract_revision", "exports"],
+        "properties": {
+          "protocol": {"const": "lane-handoff/v1"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*//).+$"
+    },
+    "run_ref": {
+      "type": "string",
+      "pattern": "^run://[^\\s]+$"
+    },
+    "artifact_ref": {
+      "type": "string",
+      "pattern": "^(artifact|git|file|connector|sha256):[^\\s]+$"
+    },
+    "check_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "status": {"enum": ["pass", "fail", "skipped", "unknown"]},
+        "command": {"type": "string", "minLength": 1},
+        "artifact_ref": {"$ref": "#/$defs/artifact_ref"},
+        "detail": {"type": "string", "minLength": 1}
+      }
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{1,63}$"},
+        "message": {"type": "string", "minLength": 1},
+        "owner_scope": {"type": "string", "minLength": 1},
+        "recoverable": {"type": "boolean"},
+        "evidence_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifact_ref"}
+        }
+      }
+    },
+    "discovered_work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "objective"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "objective": {"type": "string", "minLength": 1},
+        "local": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "promotion_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "from_task",
+        "from_work_unit",
+        "proposed_outcome",
+        "reason",
+        "requested_ownership",
+        "dependencies",
+        "context_seed_refs",
+        "cost_delta",
+        "user_decision_required"
+      ],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/identifier"},
+        "from_task": {"$ref": "#/$defs/identifier"},
+        "from_work_unit": {"$ref": "#/$defs/identifier"},
+        "proposed_outcome": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "requested_ownership": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/path"}
+        },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "context_seed_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "cost_delta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["top_level_slots", "subagent_slots", "time_budget"],
+          "properties": {
+            "top_level_slots": {"type": "integer", "minimum": 0},
+            "subagent_slots": {"type": "integer", "minimum": 0},
+            "time_budget": {"type": "integer", "minimum": 0}
+          }
+        },
+        "user_decision_required": {"type": "boolean"}
+      }
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "artifact_ref", "version"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"},
+        "artifact_ref": {"$ref": "#/$defs/artifact_ref"},
+        "version": {"type": "integer", "minimum": 1},
+        "kind": {"enum": ["api", "schema", "artifact", "evidence", "decision"]},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "change_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["api", "schema", "artifact", "capability", "context", "path", "condition"]},
+        "version": {"type": "integer", "minimum": 1},
+        "ref": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "delta_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["add", "remove", "change"],
+      "properties": {
+        "add": {"type": "array", "items": {"$ref": "#/$defs/change_item"}},
+        "remove": {"type": "array", "items": {"$ref": "#/$defs/change_item"}},
+        "change": {"type": "array", "items": {"$ref": "#/$defs/change_item"}}
+      }
+    },
+    "contract_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delta_id",
+        "base_contract_ref",
+        "base_revision",
+        "proposed_revision",
+        "reason",
+        "imports",
+        "exports",
+        "ownership",
+        "done_when",
+        "requires_coordinator_decision",
+        "idempotency_key"
+      ],
+      "properties": {
+        "delta_id": {"$ref": "#/$defs/identifier"},
+        "base_contract_ref": {"type": "string", "pattern": "^contract://[^\\s]+$"},
+        "base_revision": {"type": "integer", "minimum": 1},
+        "proposed_revision": {"type": "integer", "minimum": 2},
+        "reason": {"type": "string", "minLength": 1},
+        "imports": {"$ref": "#/$defs/delta_set"},
+        "exports": {"$ref": "#/$defs/delta_set"},
+        "ownership": {"$ref": "#/$defs/delta_set"},
+        "done_when": {"$ref": "#/$defs/delta_set"},
+        "artifact_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifact_ref"}
+        },
+        "evidence_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifact_ref"}
+        },
+        "requires_coordinator_decision": {"type": "boolean"},
+        "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,256}$"}
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

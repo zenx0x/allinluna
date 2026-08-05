@@ -12,10 +12,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Distribution provenance records HEAD, tree, and parent. GitHub's
+          # one-commit shallow checkout cannot resolve HEAD^.
+          fetch-depth: 2
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - name: Run unit and lifecycle tests
-        run: python -m unittest discover -s tests -v
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Run full pytest suite
+        run: python -m pytest tests -q
+      - name: Run vNext suite validator
+        run: python scripts/validate_vnext_tests.py --run --performance --json
       - name: Validate plugin repository
         run: python scripts/validate_repository.py
+      - name: Validate Core Slim ownership
+        run: python scripts/validate_core_slim.py
+      - name: Validate distribution parity and provenance
+        run: python scripts/validate_distributions.py
+      - name: Validate installed plugin Skills
+        run: python scripts/validate_installations.py

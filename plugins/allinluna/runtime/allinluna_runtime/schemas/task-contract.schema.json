@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/task-contract.schema.json",
+  "title": "All in Luna vNext TaskContract",
+  "description": "Versioned outcome, dependency, ownership and context contract for one semantic Task.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "protocol",
+    "contract_id",
+    "contract_version",
+    "run_ref",
+    "task_id",
+    "outcome",
+    "imports",
+    "exports",
+    "dependencies",
+    "done_when",
+    "verification_specs",
+    "ownership",
+    "permissions",
+    "context_policy",
+    "created_at"
+  ],
+  "properties": {
+    "kind": {"const": "task-contract"},
+    "schema_version": {"const": "1.0"},
+    "protocol": {"const": "task-contract/v1"},
+    "contract_id": {"$ref": "#/$defs/identifier"},
+    "contract_version": {"type": "integer", "minimum": 1},
+    "run_ref": {"$ref": "#/$defs/run_ref"},
+    "task_id": {"$ref": "#/$defs/identifier"},
+    "outcome": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "imports": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/import_port"}
+    },
+    "exports": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/export_port"}
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/dependency"}
+    },
+    "done_when": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4000}
+    },
+    "verification_specs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/verification_spec"}
+    },
+    "ownership": {"$ref": "#/$defs/ownership"},
+    "permissions": {"$ref": "#/$defs/permissions"},
+    "context_policy": {"$ref": "#/$defs/context_policy"},
+    "supersedes_ref": {"anyOf": [{"$ref": "#/$defs/contract_ref"}, {"type": "null"}]},
+    "change_reason": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_ref": {
+      "type": "string",
+      "pattern": "^run://[^\\s]+$"
+    },
+    "task_ref": {
+      "type": "string",
+      "pattern": "^task://[^\\s]+$"
+    },
+    "contract_ref": {
+      "type": "string",
+      "pattern": "^contract://task/[^\\s@]+@[1-9][0-9]*$"
+    },
+    "artifact_ref": {
+      "type": "string",
+      "pattern": "^(artifact|git|file|connector|sha256):[^\\s]+$"
+    },
+    "verification_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "satisfies"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["command", "artifact", "workspace", "human", "pack"]},
+        "satisfies": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "command": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}]},
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 900},
+        "artifact_ref": {"$ref": "#/$defs/artifact_ref"},
+        "assertion": {"type": "string", "minLength": 1},
+        "details": {"type": "object", "additionalProperties": true}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "command"}}}, "then": {"required": ["command"]}},
+        {"if": {"properties": {"kind": {"const": "artifact"}}}, "then": {"required": ["artifact_ref"]}},
+        {"if": {"properties": {"kind": {"const": "pack"}}}, "then": {"required": ["assertion"]}}
+      ]
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*//).+$"
+    },
+    "import_port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "required", "source_ref"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"},
+        "kind": {"enum": ["api", "schema", "artifact", "capability", "context", "decision", "source"]},
+        "required": {"type": "boolean"},
+        "source_ref": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "export_port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "version", "description"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$"},
+        "kind": {"enum": ["api", "schema", "artifact", "capability", "context", "decision", "source"]},
+        "version": {"type": "integer", "minimum": 1},
+        "description": {"type": "string", "minLength": 1},
+        "artifact_ref": {"$ref": "#/$defs/artifact_ref"}
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_ref", "condition"],
+      "properties": {
+        "task_ref": {"$ref": "#/$defs/task_ref"},
+        "condition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {"enum": ["exports_available", "completed"]},
+            "exports": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"type": {"const": "exports_available"}}},
+              "then": {"required": ["exports"]}
+            }
+          ]
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "non_file_scope", "exclusive"],
+      "properties": {
+        "paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/path"}
+        },
+        "non_file_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "exclusive": {"type": "boolean"}
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read_paths", "write_paths", "external_actions"],
+      "properties": {
+        "read_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/path"}
+        },
+        "write_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/path"}
+        },
+        "external_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["credential", "push", "deploy", "publish", "live-mutation", "paid-resource"]}
+        }
+      }
+    },
+    "context_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_refs", "include_refs", "exclude_categories", "max_tokens", "inheritance"],
+      "properties": {
+        "base_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "include_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "exclude_categories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["raw_tool_logs", "child_transcripts", "unrelated_lanes", "hidden_reasoning", "superseded_candidates"]}
+        },
+        "max_tokens": {"type": ["integer", "null"], "minimum": 1},
+        "inheritance": {"const": "base-plus-delta"}
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

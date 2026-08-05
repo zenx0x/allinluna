@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenx0x/allinluna/schemas/v1/host-receipt.schema.json",
+  "title": "All in Luna Host Receipt",
+  "type": "object",
+  "required": ["protocol", "receipt_id", "status", "resource_receipt"],
+  "properties": {
+    "protocol": {"const": "host-receipt/v1"},
+    "receipt_id": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "minLength": 1},
+    "thread_id": {"type": ["string", "null"], "minLength": 1},
+    "client_thread_id": {"type": ["string", "null"], "minLength": 1},
+    "resource_receipt": {"$ref": "#/$defs/resource_receipt"}
+  },
+  "$defs": {
+    "resource_values": {
+      "type": "object",
+      "required": ["model", "reasoning"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1},
+        "reasoning": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "resource_request": {
+      "type": "object",
+      "properties": {
+        "model": {"type": ["string", "null"], "minLength": 1},
+        "reasoning": {"type": ["string", "null"], "minLength": 1}
+        ,"capability_class": {"type": ["string", "null"], "enum": ["control.relay", "planning.semantic", "lane.synthesis", "work.mechanical", "work.implementation", "work.deep-debug", "verify.independent", null]}
+        ,"route_assurance": {"enum": ["request_only", "observe_if_exposed", "receipt_required", "hard_lock"]}
+      },
+      "additionalProperties": true
+    },
+    "resource_receipt": {
+      "type": "object",
+      "required": ["requested", "resolved", "actual", "actual_state", "evidence_source", "observed_at"],
+      "properties": {
+        "requested": {"$ref": "#/$defs/resource_request"},
+        "resolved": {"$ref": "#/$defs/resource_request"},
+        "actual": {
+          "anyOf": [{"$ref": "#/$defs/resource_values"}, {"type": "null"}]
+        },
+        "actual_state": {"enum": ["resolved", "unresolved"]},
+        "evidence_source": {"type": ["string", "null"], "minLength": 1},
+        "observed_at": {"anyOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]},
+        "diagnostics": {"type": ["object", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"actual_state": {"const": "resolved"}}},
+          "then": {
+            "properties": {
+              "requested": {"$ref": "#/$defs/resource_values"},
+              "resolved": {"$ref": "#/$defs/resource_values"},
+              "actual": {"$ref": "#/$defs/resource_values"},
+              "evidence_source": {"type": "string", "minLength": 1},
+              "observed_at": {"type": "string", "format": "date-time"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"actual_state": {"const": "unresolved"}}},
+          "then": {
+            "properties": {
+              "actual": {"type": "null"},
+              "evidence_source": {"type": "null"},
+              "observed_at": {"type": "null"}
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

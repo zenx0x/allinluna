@@ -1,6 +1,0 @@
-{
-  "user": {"profile": "balanced", "concurrency": 8},
-  "repository": {"capability_bindings": []},
-  "research-project": {"capability_bindings": []},
-  "run": {"concurrency": 8}
-}

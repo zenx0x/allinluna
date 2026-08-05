@@ -10,7 +10,7 @@ Research Routes 保持路线中立：Claims、Evidence、unknowns、矛盾、fai
 问题/证据包 -> 路线地图 -> Claims/Evidence -> 可逆 probe -> 明确交接
 ```
 
-分发包从唯一 canonical `allinluna_runtime` 构建。receipt 区分 `requested`、`resolved`、`actual`；fixture 检查报告 `FIXTURE_PASS`，真实证据才可报告 `REAL_PASS`，缺少证据为 `BLOCKED`/`UNVERIFIED`，机械集成为 `mechanical-only`。
+分发包从唯一 canonical `allinluna_runtime` 构建。分发验收报告区分 `requested`、`resolved`、`actual` 资源值。`identity`、`create`、`read`、`wait`、`cancel` 与 `idempotency` 都完整时为 `PASS`；缺失或阻塞的证据为 `BLOCKED`。
 
 ## 安装与文件位置
 

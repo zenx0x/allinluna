@@ -1,7 +1,7 @@
 [
   "complete development",
-  "top-level task owners",
+  "top-level task lanes",
   "worktree isolation",
   "capability envelopes",
-  "recovery and mechanical integration"
+  "recovery and host recovery integration"
 ]

@@ -15,7 +15,7 @@
   },
   {
     "id": "plan-resource-comparison",
-    "prompt": "Compare premium, balanced, and low-cost model allocations for this migration and produce the same full-scope plan for each.",
+    "prompt": "Compare premium, balanced, and low-cost model allocations for this migration and produce the same complete-scope plan for each.",
     "should_trigger": true,
     "expected_skill": "allinluna-plan",
     "reason": "Resource-profile planning without implementation."
@@ -50,7 +50,7 @@
   },
   {
     "id": "run-resume",
-    "prompt": "Resume the interrupted All in Luna run from its saved state and do not redispatch finished owners.",
+    "prompt": "Resume the interrupted All in Luna run from its saved state and do not redispatch completed tasks.",
     "should_trigger": true,
     "expected_skill": "allinluna-run",
     "reason": "Persistent run recovery."
@@ -67,7 +67,7 @@
     "prompt": "Implement all requirements in economy mode. Prefer Luna and ask me before escalating, but do not reduce scope.",
     "should_trigger": true,
     "expected_skill": "allinluna-run",
-    "reason": "Resource-constrained full execution."
+    "reason": "Resource-constrained complete execution."
   },
   {
     "id": "negative-simple-answer",

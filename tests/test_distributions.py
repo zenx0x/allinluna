@@ -126,7 +126,7 @@ class DistributionTests(unittest.TestCase):
             self.assertIn("plugins/research-routes/runtime/allinluna_runtime", research_readme)
             self.assertTrue((research / "plugins/research-routes/.codex-plugin/plugin.json").is_file())
 
-    def test_first_use_readmes_keep_real_receipt_boundary_across_both_distributions(self) -> None:
+    def test_host_conformance_markers_in_distribution_readmes(self) -> None:
         source_readmes = {
             "allinluna": ((ROOT / "README.md").read_text(encoding="utf-8"), (ROOT / "README.en.md").read_text(encoding="utf-8")),
             "research-routes": (
@@ -142,12 +142,14 @@ class DistributionTests(unittest.TestCase):
         for distribution, readmes in source_readmes.items():
             for readme in readmes:
                 for marker in required_markers:
-                    self.assertIn(marker, readme, f"{distribution} README lost first-use marker {marker}")
+                    self.assertIn(marker, readme, f"{distribution} README lost host-conformance marker {marker}")
+            for marker in ("identity", "create", "read", "wait", "cancel", "idempotency"):
+                self.assertTrue(any(marker in readme for readme in readmes), f"{distribution} README lacks host-conformance marker {marker}")
         for readme in source_readmes["research-routes"]:
-            for marker in ("REAL_PASS", "FIXTURE_PASS", "BLOCKED", "mechanical-only"):
-                self.assertIn(marker, readme, "research-routes README lost receipt marker")
-        self.assertIn("actual host receipt", source_readmes["allinluna"][0])
-        self.assertIn("explicitly authorized", source_readmes["research-routes"][1].lower())
+            for marker in ("PASS", "BLOCKED"):
+                self.assertIn(marker, readme, "research-routes README lost host-conformance marker")
+        self.assertIn("identity", source_readmes["allinluna"][0].lower())
+        self.assertIn("identity", source_readmes["research-routes"][1].lower())
 
     def test_short_entries_route_deep_policy_on_demand(self) -> None:
         entry = (ROOT / "plugins/allinluna/skills/allinluna/SKILL.md").read_text(encoding="utf-8")
@@ -156,7 +158,7 @@ class DistributionTests(unittest.TestCase):
         self.assertNotIn("launch gate", entry.lower())
         self.assertEqual({path.name for path in (ROOT / "plugins/allinluna/skills").iterdir() if path.is_dir()}, {"allinluna"})
 
-    def test_both_distributions_publish_one_card_modes_and_user_promises(self) -> None:
+    def test_both_distributions_publish_host_conformance_promises(self) -> None:
         readmes = (
             ROOT / "README.md",
             ROOT / "README.en.md",
@@ -165,12 +167,12 @@ class DistributionTests(unittest.TestCase):
         )
         for path in readmes:
             content = path.read_text(encoding="utf-8")
-            for marker in ("requested", "resolved", "actual"):
+            for marker in ("requested", "resolved", "actual", "identity", "create", "read", "wait", "cancel", "idempotency"):
                 self.assertIn(marker, content, f"{path} lost user-flow marker {marker}")
         for path in readmes[2:]:
             content = path.read_text(encoding="utf-8")
-            for marker in ("REAL_PASS", "FIXTURE_PASS", "BLOCKED", "mechanical-only"):
-                self.assertIn(marker, content, f"{path} lost receipt marker {marker}")
+            for marker in ("PASS", "BLOCKED"):
+                self.assertIn(marker, content, f"{path} lost conformance marker {marker}")
 
     def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

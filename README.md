@@ -55,6 +55,7 @@ allinluna set-policy RUN_ID POLICY.json
 ```
 
 runtime CLI 还提供 `set-policy`。legacy plan/run import 通过下方 read-only API 完成；恢复依据 SQLite state/journal、真实 host receipt、lease、Git/workspace identity 和 snapshot validity 重算 ready actions；不可恢复的问题返回 blocker，并保留 immutable artifacts。
+Host-side conformance 会同时校验 `requested`、`resolved`、`actual` 与 host `identity`，并检查 `create`、`read`、`wait`、`cancel`、`idempotency` 的完整性；缺失迹象会返回 `BLOCKED`。
 
 ## Legacy import
 

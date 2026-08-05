@@ -55,6 +55,8 @@ allinluna set-policy RUN_ID POLICY.json
 ```
 
 The runtime CLI also provides `set-policy`. Legacy plan/run import is exposed through the read-only API below. Recovery uses SQLite state/journal, real host receipts, leases, Git/workspace identity, and snapshot validity to recompute ready actions; unrecoverable conditions return a blocker while immutable artifacts are retained.
+Host-conformance diagnostics verify `requested`, `resolved`, and `actual` resource layers alongside host `identity`.
+Neutral action checks require coherent `create`, `read`, `wait`, `cancel`, and `idempotency` traces for tool and policy changes; missing traces return `BLOCKED`.
 
 ## Legacy import
 

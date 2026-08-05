@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Distribution provenance records HEAD, tree, and parent. GitHub's
+          # one-commit shallow checkout cannot resolve HEAD^.
+          fetch-depth: 2
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"

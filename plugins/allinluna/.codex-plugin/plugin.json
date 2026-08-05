@@ -1,6 +1,6 @@
 {
   "name": "allinluna",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A layered execution runtime that compiles goals into Coordinators, Task Lanes, WorkUnits, and typed handoffs.",
   "author": {
     "name": "zenx0x",

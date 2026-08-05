@@ -16,6 +16,20 @@ def test_compile_and_plan_are_read_only(tmp_path, capsys):
     assert main(["--db", str(db), "compile", "--goal", "ship safely"]) == 0
     assert _output(capsys)["input_kind"] == "idea"
     assert not db.exists()
+
+
+def test_app_server_receipt_compilation_is_read_only(tmp_path, capsys):
+    db = tmp_path / "must-not-exist.db"
+    requested = '{"model":"gpt-5.6-luna","reasoning":"medium"}'
+    started = '{"source":"codex_app","actual_tool":"codex_app__create_thread","event_origin":"codex_desktop","result":{"thread":{"id":"thread-cli"},"model":"gpt-5.6-luna","reasoningEffort":"medium"}}'
+    events = '[{"method":"turn/started","params":{"threadId":"thread-cli","turnId":"turn-cli","timestamp":"2026-08-05T12:00:00Z"}},{"method":"turn/completed","params":{"threadId":"thread-cli","turnId":"turn-cli","timestamp":"2026-08-05T12:00:01Z"}}]'
+    action = '{"action_id":"action-cli","kind":"create-task","idempotency_key":"dispatch-cli","model":"gpt-5.6-luna","reasoning":"medium"}'
+    assert main(["--db", str(db), "receipt-from-app-server", "--requested", requested, "--thread-start", started, "--events", events, "--action", action]) == 0
+    receipt = _output(capsys)
+    assert receipt["source"] == "codex_app"
+    assert receipt["actual_tool"] == "codex_app__create_thread"
+    assert receipt["resource_receipt"]["actual_state"] == "resolved"
+    assert not db.exists()
     assert main(["--db", str(db), "plan", "--goal", "ship safely"]) == 0
     plan = _output(capsys)
     assert plan["kind"] == "plan" and plan["writes"] is False and plan["tasks"]

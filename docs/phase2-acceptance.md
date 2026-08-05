@@ -35,9 +35,16 @@ python scripts/validate_core_slim.py
 
 ## External host acceptance
 
-The four routes are Luna medium, Luna xhigh, Luna max, and Codex Spark. The
-Adapter, Store, CLI importer, schema, and acceptance checker reject missing or
-mismatched requested/resolved/actual evidence. Final real first-use acceptance
-must be rerun when Codex Desktop emits `requested`, `resolved`, `actual`,
-`actual_state`, `evidence_source`, and `observed_at`; repository code does not
-manufacture these fields.
+The authoritative resource source is the App Server event stream exported by
+the Codex Desktop host. The outer receipt remains
+`source=codex_app` / `actual_tool=codex_app__create_thread`; its nested route
+evidence contains `thread/start`, zero or more `model/rerouted` events, and
+matching `turn/started` / `turn/completed` notifications. A response from a
+separately launched `codex.exe app-server` belongs to another host session and
+is rejected as Desktop acceptance evidence.
+
+Desktop can create Luna medium, Luna xhigh, Luna max, and Codex Spark tasks.
+No route is classified as unsupported. The remaining external blocker is only
+receipt visibility: the currently exposed Desktop create/read wrapper does not
+return the raw model, reasoning, reroute, and turn lifecycle evidence needed to
+assemble the four canonical receipts.

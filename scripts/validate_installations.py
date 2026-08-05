@@ -66,8 +66,8 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             elif name == "allinluna":
                 text = skill.read_text(encoding="utf-8")
                 installed_manifest = read_json(installed_plugin_root / ".codex-plugin/plugin.json")
-                if installed_manifest.get("version") != "1.1.0":
-                    errors.append("installed All in Luna plugin version is not 1.1.0")
+                if installed_manifest.get("version") != "1.1.1":
+                    errors.append("installed All in Luna plugin version is not 1.1.1")
                 if not all(needle in text for needle in ("not hard", "locked", "resource_receipt.requested")):
                     errors.append("installed All in Luna Skill lacks configurable-resource receipt guidance")
             if not (install_root / name / "canonical-files.json").is_file():

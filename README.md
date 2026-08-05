@@ -33,9 +33,9 @@ Pack 只能经公开 Core API 访问 Store/Context/Artifact/Host；manifest、en
 
 ## 资源与权限
 
-模型与推理等级由 Run 资源配置决定，并可由更窄的 Task/WorkUnit 配置覆盖；不再硬锁 Luna-high。可按宿主能力选择 Luna 的 medium/high/xhigh/max、Codex Spark 或其他模型。requested、resolved、actual 始终分开记录；actual host receipt 不可得时为 `unresolved`，不伪造成功或 fallback。
+模型与推理等级由 Run 资源配置决定，并可由更窄的 Task/WorkUnit 配置覆盖；不再硬锁 Luna-high。可按宿主能力选择 Luna 的 medium/high/xhigh/max、Codex Spark 或其他模型。requested、resolved、actual 始终分开记录；actual 由 Desktop host 导出的 App Server `thread/start`、`model/rerouted` 与 turn 生命周期事件证明，不从任务正文推断，也不接受独立 CLI App Server 的另一套会话。外层 receipt 仍标识 Desktop `codex_app__create_thread`；证据不可得时保持 `unresolved`。
 
-真实 host receipt 必须回传 `resource_receipt.requested/resolved/actual`、`actual_state`、`evidence_source` 与 `observed_at`。三组 model/reasoning 必须一致且匹配持久化 dispatch action；缺字段、时间戳无效、找不到 action 基线或任一值不匹配时均保持 `unresolved`。`runtime.db` schema v5 将三组资源值分别持久化，支持 crash recovery、replay 与 status 查询。
+真实 actual host receipt 必须回传 `resource_receipt.requested/resolved/actual`、`actual_state`、`evidence_source`、`observed_at` 与 App Server 路由证据。requested 必须匹配持久化 dispatch action，actual 必须匹配最终 resolved；只有完整 `model/rerouted` 链才能证明 requested 与 resolved 的差异。缺字段、时间戳无效、找不到 action 基线或事件链不一致时均保持 `unresolved`。`runtime.db` schema v5 将三组资源值分别持久化，支持 crash recovery、replay 与 status 查询。
 
 权限在动作边界 JIT 请求：credentials、push、deploy、publish、destructive work、live external mutation 默认不发生，只有到达动作并获得明确授权后才可继续。
 

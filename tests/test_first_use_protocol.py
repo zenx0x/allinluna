@@ -55,7 +55,16 @@ def real_receipt() -> dict:
             values = {"model": "gpt-5.6-luna", "reasoning": "medium"}
             resource.update(
                 requested=dict(values), resolved=dict(values), actual=dict(values),
-                evidence_source="codex-host-runtime",
+                evidence_source="codex_desktop:thread/start+turn/completed",
+                route_evidence={
+                    "source": "codex_app_server",
+                    "event_origin": "codex_desktop",
+                    "thread_start_request": dict(values),
+                    "thread_start": {"thread_id": event["receipt"]["thread_id"], **values},
+                    "reroutes": [],
+                    "turn_started": {"thread_id": event["receipt"]["thread_id"], "turn_id": f"turn-{event['seq']}", "observed_at": "2026-08-05T00:00:00Z"},
+                    "turn_completed": {"thread_id": event["receipt"]["thread_id"], "turn_id": f"turn-{event['seq']}", "observed_at": "2026-08-05T00:00:00Z"},
+                },
             )
     receipt["monitor"]["source"] = "codex_app"
     receipt["integration_boundary"]["source"] = "codex_app"
@@ -163,11 +172,22 @@ class FirstUseProtocolTests(unittest.TestCase):
         self.assertEqual(report["status"], "BLOCKED")
         self.assertEqual(report["failure_class"], "host_tool_unavailable")
 
-    def test_real_valid_receipt_can_pass_only_after_source_and_tool_rewrite(self) -> None:
+    def test_real_valid_receipt_can_pass_only_with_desktop_envelope_and_events(self) -> None:
         receipt = real_receipt()
         report = evaluate_receipt(receipt, mode="real")
         self.assertEqual(report["status"], "REAL_PASS")
         self.assertTrue(report["real_pass"])
+
+    def test_real_receipt_accepts_verified_model_reroute(self) -> None:
+        receipt = real_receipt()
+        owner = next(event for event in receipt["events"] if event["event"] == "owner_thread_receipt")
+        resource = owner["receipt"]["resource_receipt"]
+        resource["resolved"]["model"] = resource["actual"]["model"] = "gpt-5.6-luna-rerouted"
+        resource["route_evidence"]["reroutes"] = [
+            {"thread_id": owner["receipt"]["thread_id"], "from_model": "gpt-5.6-luna", "to_model": "gpt-5.6-luna-rerouted"}
+        ]
+        report = evaluate_receipt(receipt, mode="real")
+        self.assertEqual(report["status"], "REAL_PASS")
 
     def test_cli_emits_machine_readable_report_and_real_receipt_boundary(self) -> None:
         result = subprocess.run(

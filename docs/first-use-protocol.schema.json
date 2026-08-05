@@ -108,7 +108,21 @@
         "actual": { "$ref": "#/$defs/resource_values" },
         "actual_state": { "const": "resolved" },
         "evidence_source": { "type": "string", "minLength": 1 },
-        "observed_at": { "type": "string", "format": "date-time" }
+        "observed_at": { "type": "string", "format": "date-time" },
+        "route_evidence": { "$ref": "#/$defs/route_evidence" }
+      }
+    },
+    "route_evidence": {
+      "type": "object",
+      "required": ["source", "event_origin", "thread_start_request", "thread_start", "reroutes", "turn_started", "turn_completed"],
+      "properties": {
+        "source": { "const": "codex_app_server" },
+        "event_origin": { "const": "codex_desktop" },
+        "thread_start_request": { "$ref": "#/$defs/resource_values" },
+        "thread_start": { "type": "object", "required": ["thread_id", "model", "reasoning"] },
+        "reroutes": { "type": "array", "items": { "type": "object", "required": ["thread_id", "from_model", "to_model"] } },
+        "turn_started": { "type": "object", "required": ["thread_id", "turn_id", "observed_at"] },
+        "turn_completed": { "type": "object", "required": ["thread_id", "turn_id", "observed_at"] }
       }
     },
     "failure": {

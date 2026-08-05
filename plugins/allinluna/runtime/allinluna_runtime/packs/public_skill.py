@@ -72,7 +72,7 @@ class SinglePublicSkillAPI:
     """Public API for one Skill and all supported input forms."""
 
     id = "allinluna"
-    version = "1.1.0"
+    version = "1.1.1"
 
     def __init__(self, *, registry: PackRegistry | None = None, permission_router: JITPermissionRouter | None = None) -> None:
         self.registry = registry or builtin_registry()

@@ -15,6 +15,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+RUNTIME = Path(__file__).resolve().parents[1] / "plugins" / "allinluna" / "runtime"
+if str(RUNTIME) not in sys.path:
+    sys.path.insert(0, str(RUNTIME))
+
+from allinluna_runtime.core.model import valid_app_server_route_evidence
+
 
 PROTOCOL = "allinluna.first_use"
 SCHEMA_VERSION = "1.0"
@@ -334,7 +340,13 @@ def _validate_resource_receipt(value: Any, *, mode: str, path: str) -> list[dict
         if not isinstance(reasoning, str) or not reasoning.strip():
             errors.append(_missing_issue(mode, f"resource_receipt.{name}.reasoning is required", path=f"{path}.{name}.reasoning"))
         values[name] = (model, reasoning)
-    if len(values) == 3 and len(set(values.values())) != 1:
+    route_verified = valid_app_server_route_evidence(
+        value.get("requested"), value.get("resolved"), value.get("actual"),
+        value.get("route_evidence"), observed_at=value.get("observed_at"),
+    )
+    if mode == "real" and not route_verified:
+        errors.append(_issue("product_failure", "resource values lack a valid App Server thread/start, reroute, and turn lifecycle chain", path=path))
+    elif mode != "real" and len(values) == 3 and len(set(values.values())) != 1:
         errors.append(_issue("product_failure", "requested/resolved/actual resource values do not match", path=path))
     if value.get("actual_state") != "resolved":
         errors.append(_issue("host_tool_unavailable" if mode == "real" else "checker_error", "resource receipt is unresolved", path=f"{path}.actual_state"))
@@ -450,9 +462,9 @@ def validate_receipt(receipt: Any, *, mode: str) -> list[dict[str, str]]:
                     if not receipt_data.get(field):
                         errors.append(_issue("host_tool_unavailable", f"real Owner receipt is missing {field}", path=f"events[{index}].receipt.{field}"))
                 if receipt_data.get("source") not in {None, "codex_app"}:
-                    errors.append(_issue("host_tool_unavailable", "real mode requires a Codex App receipt", path=f"events[{index}].receipt.source"))
+                    errors.append(_issue("host_tool_unavailable", "real mode requires a Codex Desktop host envelope", path=f"events[{index}].receipt.source"))
                 if receipt_data.get("actual_tool") not in {None, "codex_app__create_thread"}:
-                    errors.append(_issue("host_tool_unavailable", "real mode requires actual Codex App tool evidence", path=f"events[{index}].receipt.actual_tool"))
+                    errors.append(_issue("host_tool_unavailable", "real mode requires the Desktop create_thread host tool", path=f"events[{index}].receipt.actual_tool"))
             if isinstance(receipt_data, dict):
                 errors.extend(_validate_resource_receipt(receipt_data.get("resource_receipt"), mode=mode, path=f"events[{index}].receipt.resource_receipt"))
     repeated = next((event for event in events if isinstance(event, dict) and event.get("event") == "repeated_tick"), None)

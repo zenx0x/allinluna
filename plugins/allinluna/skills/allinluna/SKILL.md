@@ -59,12 +59,20 @@ host-supported model. Preserve requested, resolved, and actual values
 separately. If the host cannot provide an actual model receipt, record
 `actual: unresolved`; never claim a fallback or fabricate a receipt. A narrower
 scope may change compute resources but may not expand permissions or ownership.
-The canonical host receipt carries `resource_receipt.requested`, `resolved`,
+The canonical host receipt is a Codex Desktop envelope assembled from the
+Desktop host's exported App Server `thread/start`, optional `model/rerouted`,
+and matching `turn/started` / `turn/completed` events. A separately launched
+CLI App Server is a different host session and is not acceptance evidence. The
+outer envelope identifies `codex_app__create_thread`; the nested events provide
+resource evidence. It carries
+`resource_receipt.requested`, `resolved`,
 `actual`, `actual_state`, `evidence_source`, and `observed_at`. Mark it
 `resolved` only when the host supplies matching model and reasoning values,
 an explicit evidence source, and a valid observation timestamp. The Adapter
-must compare all three pairs against the persisted dispatch action; a receipt
-must never establish its own verification baseline.
+must compare the request against the persisted dispatch action and actual
+against the final resolved route. A requested/resolved difference is valid
+only with a coherent reroute chain; a receipt must never establish its own
+verification baseline.
 
 Request permissions just in time at the action boundary. Read-only compilation
 does not request credentials, publication, deployment, push, destructive work,
@@ -79,12 +87,17 @@ allinluna start --goal "..."
 allinluna status RUN_ID
 allinluna next-actions RUN_ID
 allinluna ingest-receipt RUN_ID RECEIPT.json
+allinluna receipt-from-app-server --requested REQUEST.json --thread-start START.json --events EVENTS.json --action ACTION.json
 allinluna pause RUN_ID
 allinluna resume RUN_ID
 allinluna retry RUN_ID --task TASK_ID
 allinluna cancel RUN_ID --task TASK_ID
 allinluna reconcile RUN_ID
 ```
+
+The `thread-start` input must carry Desktop provenance (`source=codex_app`,
+`actual_tool=codex_app__create_thread`, `event_origin=codex_desktop`); do not
+normalize a bare response from an independently launched CLI App Server.
 
 The runtime CLI exposes `start`, `status`, `next-actions`, `ingest-receipt`,
 `pause`, `resume`, `retry`, `cancel`, `set-policy`, and `reconcile`. Use the

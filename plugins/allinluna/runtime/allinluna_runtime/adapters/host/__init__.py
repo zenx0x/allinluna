@@ -55,10 +55,23 @@ from .native_subagent import (
     NativeSubagentHost,
     NativeSubagentHostAdapter,
 )
+from .codex_app_server import (
+    APP_SERVER_SOURCE,
+    DESKTOP_EVENT_ORIGIN,
+    DESKTOP_SOURCE,
+    DESKTOP_TOOL,
+    AppServerProtocolError,
+    MODEL_REROUTED_METHOD,
+    THREAD_START_METHOD,
+    TURN_COMPLETED_METHOD,
+    TURN_STARTED_METHOD,
+    assemble_app_server_receipt,
+)
 
 
 __all__ = [
-    "ACTION_BRIDGE_PROTOCOL", "CANCEL_THREAD_TOOL", "CODEX_APP_SOURCE", "CREATE_THREAD_TOOL",
+    "ACTION_BRIDGE_PROTOCOL", "APP_SERVER_SOURCE", "AppServerProtocolError", "CANCEL_THREAD_TOOL", "CODEX_APP_SOURCE", "CREATE_THREAD_TOOL",
+    "DESKTOP_EVENT_ORIGIN", "DESKTOP_SOURCE", "DESKTOP_TOOL",
     "DISPATCH_INTENT_PROTOCOL", "DispatchIntent", "HOST_RECEIPT_PROTOCOL", "HostAction",
     "HostActionError", "HostAdapter", "HostAdapterAPI", "HostAdapterError", "HostCapabilities",
     "HostReceipt", "HostReceiptAPI", "HostReceiptError", "HostUnavailableError", "LIST_PROJECTS_TOOL",
@@ -68,5 +81,6 @@ __all__ = [
     "control_target", "create_thread_action", "default_repository_identity", "default_worktree_identity",
     "dispatch_id", "dispatch_identity", "dispatch_intent", "monitoring_action", "normalize_thread_receipt",
     "owner_target", "project_id", "project_resolution_action", "project_root", "send_message_action",
-    "stable_digest", "stable_dispatch_key", "tool_capability_evidence",
+    "stable_digest", "stable_dispatch_key", "tool_capability_evidence", "assemble_app_server_receipt",
+    "MODEL_REROUTED_METHOD", "THREAD_START_METHOD", "TURN_COMPLETED_METHOD", "TURN_STARTED_METHOD",
 ]

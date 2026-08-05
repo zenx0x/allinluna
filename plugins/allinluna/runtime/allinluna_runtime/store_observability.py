@@ -23,6 +23,36 @@ def _loads(value: str | None, default: Any) -> Any:
 class StoreObservability:
     """Read-only query slice mixed into the canonical Store."""
 
+    @staticmethod
+    def _resource_receipt_from_row(row: dict[str, Any]) -> dict[str, Any]:
+        state = str(row.get("resource_receipt_state") or "unresolved")
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else _loads(row.get("payload_json"), {})
+        payload_receipt = payload.get("resource_receipt", {}) if isinstance(payload, dict) else {}
+        payload_receipt = payload_receipt if isinstance(payload_receipt, dict) else {}
+        payload_requested = payload_receipt.get("requested", {})
+        payload_resolved = payload_receipt.get("resolved", {})
+        payload_requested = payload_requested if isinstance(payload_requested, dict) else {}
+        payload_resolved = payload_resolved if isinstance(payload_resolved, dict) else {}
+        requested = {
+            "model": row.get("requested_model") or payload_requested.get("model"),
+            "reasoning": row.get("requested_reasoning") or payload_requested.get("reasoning") or payload_requested.get("thinking"),
+        }
+        resolved = {
+            "model": row.get("resolved_model") or payload_resolved.get("model"),
+            "reasoning": row.get("resolved_reasoning") or payload_resolved.get("reasoning") or payload_resolved.get("thinking"),
+        }
+        model, reasoning = row.get("actual_model"), row.get("actual_reasoning")
+        result = {
+            "requested": requested, "resolved": resolved,
+            "actual": {"model": model, "reasoning": reasoning} if state == "resolved" and model and reasoning else None,
+            "actual_state": state,
+            "evidence_source": row.get("resource_evidence_source"),
+            "observed_at": row.get("resource_observed_at"),
+        }
+        if payload_receipt.get("route_evidence") is not None:
+            result["route_evidence"] = payload_receipt["route_evidence"]
+        return result
+
     def inspect_outbox(self, identity: str) -> dict[str, Any] | None:
         row = self._fetchone(
             "SELECT * FROM dispatch_outbox WHERE id = ? OR idempotency_key = ?", (identity, identity)

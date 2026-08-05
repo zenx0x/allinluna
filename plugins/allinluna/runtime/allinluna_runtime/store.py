@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
-from .core.model import valid_observed_at
+from .core.model import valid_app_server_route_evidence, valid_observed_at
 from .core.protocol import STATUS_PROTOCOL
 from .store_observability import StoreObservability
 from .store_scheduling import StoreScheduling
@@ -946,12 +946,13 @@ class Store(StoreObservability, StoreScheduling):
             str(row["lane_id"]): int(row["slots"])
             for row in rows if row["scope"] == "lane"
         }
-        return {
+        result = {
             "run_id": run_id,
             "top_level_slots": sum(int(row["slots"]) for row in rows if row["scope"] == "top-level"),
             "total_subagent_slots": sum(lane_slots.values()),
             "lane_slots": lane_slots,
         }
+        return result
 
     def _release_resource_claims_in_transaction(
         self,
@@ -1231,38 +1232,6 @@ class Store(StoreObservability, StoreScheduling):
         rows = self._fetchall("SELECT * FROM task_attempts WHERE task_id = ? ORDER BY attempt_no", (task_id,))
         return [self._attempt_result(row) for row in rows]
 
-    @staticmethod
-    def _resource_receipt_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
-        state = str(row.get("resource_receipt_state") or "unresolved")
-        payload = _loads(row.get("payload_json"), {})
-        payload_receipt = payload.get("resource_receipt", {}) if isinstance(payload, Mapping) else {}
-        payload_receipt = payload_receipt if isinstance(payload_receipt, Mapping) else {}
-        payload_requested = payload_receipt.get("requested", {})
-        payload_requested = payload_requested if isinstance(payload_requested, Mapping) else {}
-        payload_resolved = payload_receipt.get("resolved", {})
-        payload_resolved = payload_resolved if isinstance(payload_resolved, Mapping) else {}
-        requested = {
-            "model": row.get("requested_model") or payload_requested.get("model"),
-            "reasoning": row.get("requested_reasoning") or payload_requested.get("reasoning") or payload_requested.get("thinking"),
-        }
-        resolved = {
-            "model": row.get("resolved_model") or payload_resolved.get("model"),
-            "reasoning": row.get("resolved_reasoning") or payload_resolved.get("reasoning") or payload_resolved.get("thinking"),
-        }
-        model = row.get("actual_model")
-        reasoning = row.get("actual_reasoning")
-        return {
-            "requested": requested,
-            "resolved": resolved,
-            "actual": (
-                {"model": model, "reasoning": reasoning}
-                if state == "resolved" and model and reasoning else None
-            ),
-            "actual_state": state,
-            "evidence_source": row.get("resource_evidence_source"),
-            "observed_at": row.get("resource_observed_at"),
-        }
-
     def get_host_receipt(self, receipt_id: str) -> dict[str, Any] | None:
         row = self._fetchone("SELECT * FROM host_receipts WHERE id = ?", (receipt_id,))
         if row is None:
@@ -1299,6 +1268,15 @@ class Store(StoreObservability, StoreScheduling):
         resource_state = str(resource_receipt.get("actual_state") or "unresolved")
         evidence_source = resource_receipt.get("evidence_source")
         resource_observed_at = resource_receipt.get("observed_at")
+        route_evidence = resource_receipt.get("route_evidence")
+        app_server_route_verified = valid_app_server_route_evidence(
+            requested_resource, resolved_resource, actual_resource, route_evidence, observed_at=resource_observed_at
+        )
+        desktop_app_server_verified = bool(
+            app_server_route_verified
+            and value.get("source") == "codex_app"
+            and value.get("actual_tool") == "codex_app__create_thread"
+        )
         if not (
             resource_state == "resolved"
             and isinstance(requested_model, str) and requested_model.strip()
@@ -1307,8 +1285,9 @@ class Store(StoreObservability, StoreScheduling):
             and isinstance(resolved_reasoning, str) and resolved_reasoning.strip()
             and isinstance(actual_model, str) and actual_model.strip()
             and isinstance(actual_reasoning, str) and actual_reasoning.strip()
-            and requested_model == resolved_model == actual_model
-            and requested_reasoning == resolved_reasoning == actual_reasoning
+            and (((requested_model == resolved_model == actual_model
+                   and requested_reasoning == resolved_reasoning == actual_reasoning)
+                  and route_evidence is None) or desktop_app_server_verified)
             and isinstance(evidence_source, str) and evidence_source.strip()
             and valid_observed_at(resource_observed_at)
         ):

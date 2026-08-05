@@ -21,7 +21,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from ...core.model import ResourceRoute, valid_observed_at
+from ...core.model import ResourceRoute, app_server_resolved_route, valid_app_server_route_evidence, valid_observed_at
 from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, HOST_RECEIPT_PROTOCOL
 
 
@@ -435,6 +435,7 @@ class HostReceipt(_MappingRecord):
         )
         reported_requested = _resource_values(resource_raw.get("requested"))
         reported_resolved = _resource_values(resource_raw.get("resolved"))
+        route_evidence = resource_raw.get("route_evidence", resource_raw.get("routeEvidence"))
         evidence_source = (
             first_text(resource_raw, "evidence_source", "evidenceSource")
             or first_text(resource_actual, "evidence_source", "evidenceSource", "source")
@@ -445,17 +446,36 @@ class HostReceipt(_MappingRecord):
             or first_text(resource_actual, "observed_at", "observedAt")
             or first_text(raw, "resource_observed_at", "resourceObservedAt")
         )
+        evidenced_route = app_server_resolved_route(route_evidence)
+        evidenced_resolved = evidenced_route.to_dict() if evidenced_route else None
+        app_server_route_verified = valid_app_server_route_evidence(
+            reported_requested,
+            reported_resolved,
+            {"model": actual_model, "reasoning": actual_reasoning},
+            route_evidence,
+            observed_at=observed_at,
+        )
+        reported_actual_tool = (
+            first_text(raw, "actual_tool", "actualTool")
+            or first_text(actual_payload, "actual_tool", "actualTool", "tool")
+            or first_text(runtime, "actual_tool", "actualTool", "tool")
+        )
+        effective_resolved = evidenced_resolved or baseline_resolved
         verified_model_receipt = bool(
             actual
             and first_text(resource_raw, "actual_state", "actualState") == "resolved"
             and baseline_requested
-            and baseline_resolved
             and reported_requested == baseline_requested
-            and reported_resolved == baseline_resolved
-            and actual_model == baseline_resolved["model"]
-            and actual_reasoning == baseline_resolved["reasoning"]
+            and effective_resolved
+            and reported_resolved == effective_resolved
+            and actual_model == effective_resolved["model"]
+            and actual_reasoning == effective_resolved["reasoning"]
             and evidence_source
             and valid_observed_at(observed_at)
+            and (
+                not app_server_route_verified
+                or (source == "codex_app" and reported_actual_tool == "codex_app__create_thread")
+            )
         )
         reported_model_receipt = first_text(raw, "model_receipt", "modelReceipt")
         if verified_model_receipt:
@@ -466,7 +486,7 @@ class HostReceipt(_MappingRecord):
             model_receipt = reported_model_receipt
         canonical_resource_receipt = {
             "requested": _copy(baseline_requested or {"model": None, "reasoning": None}),
-            "resolved": _copy(baseline_resolved or {"model": None, "reasoning": None}),
+            "resolved": _copy(effective_resolved or {"model": None, "reasoning": None}),
             "actual": (
                 {"model": actual_model, "reasoning": actual_reasoning}
                 if verified_model_receipt else None
@@ -475,6 +495,8 @@ class HostReceipt(_MappingRecord):
             "evidence_source": evidence_source if verified_model_receipt else None,
             "observed_at": observed_at if verified_model_receipt else None,
         }
+        if evidenced_route:
+            canonical_resource_receipt["route_evidence"] = _copy(route_evidence)
         return cls(
             receipt_id=receipt_id,
             status=status,
@@ -488,7 +510,7 @@ class HostReceipt(_MappingRecord):
             thread_id=thread_id,
             client_thread_id=client_id if not thread_id else client_id,
             actual=actual,
-            actual_tool=first_text(raw, "actual_tool", "actualTool") or first_text(actual_payload, "actual_tool", "actualTool", "tool") or first_text(runtime, "actual_tool", "actualTool", "tool"),
+            actual_tool=reported_actual_tool,
             model=actual_model if verified_model_receipt else None,
             reasoning=actual_reasoning if verified_model_receipt else None,
             duplicate_of=first_text(raw, "duplicate_of", "duplicateOf"),

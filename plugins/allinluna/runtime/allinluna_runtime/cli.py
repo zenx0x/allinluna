@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .engine.coordinator import CoordinatorEngine
+from .adapters.host.codex_app_server import assemble_app_server_receipt
 from .packs.public_skill import SinglePublicSkillAPI
 from .resource import ResourceBroker
 from .store import Store
@@ -55,6 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--model", default=None)
         command.add_argument("--reasoning", default=None)
 
+    app_server = sub.add_parser("receipt-from-app-server", help="normalize App Server events exported by Codex Desktop; standalone CLI sessions are rejected")
+    app_server.add_argument("--requested", required=True, help="requested resource JSON or path")
+    app_server.add_argument("--thread-start", required=True, help="thread/start response JSON or path")
+    app_server.add_argument("--events", required=True, help="JSON-RPC notification array or path")
+    app_server.add_argument("--action", required=True, help="persisted HostAction JSON or path; receipts cannot self-attest requested resources")
+    app_server.add_argument("--host-id", default="codex-app-server")
+
     for name in ("status", "next-actions", "pause", "resume", "reconcile"):
         command = sub.add_parser(name)
         command.add_argument("run_id")
@@ -97,6 +105,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.command == "receipt-from-app-server":
+        events = _load_json(args.events)
+        if not isinstance(events, list):
+            parser.error("--events must be a JSON array")
+        result = assemble_app_server_receipt(
+            requested=_load_json(args.requested),
+            thread_start=_load_json(args.thread_start),
+            events=events,
+            action=_load_json(args.action),
+            host_id=args.host_id,
+        )
+        print(_json(result.to_dict()))
+        return 0
     if args.command in {"compile", "plan"}:
         resource_policy = {"model": args.model, "reasoning": args.reasoning, "external_action_policy": "deny"}
         compilation = SinglePublicSkillAPI().compile(

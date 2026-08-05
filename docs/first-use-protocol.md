@@ -37,9 +37,13 @@ show multiple Owners. Every receipt carries machine-readable identity fields:
 - `thread_id`, `host_id`, `worktree`, `repo`, `branch`, and `commit` identify
   the real execution context;
 - every tool/capability records `requested`, `resolved`, and `actual` values;
-- every Owner host receipt records matching `resource_receipt.requested`,
-  `resolved`, and `actual` model/reasoning values, plus `actual_state=resolved`,
-  a host evidence source, and an observation timestamp;
+- every Owner host receipt records `resource_receipt.requested`, `resolved`,
+  and `actual` model/reasoning values. `actual` must equal the final resolved
+  route; requested may differ only when a coherent `model/rerouted` chain
+  proves the change;
+- `thread/start` establishes the resolved route, while matching
+  `turn/started` and `turn/completed` events establish actual execution and
+  the observation timestamp;
 - a repeated tick records `no-op`, `reuse`, or `wait`, so polling cannot create
   a duplicate Owner;
 - monitor evidence records a cursor and receipts; the integration boundary is
@@ -47,15 +51,21 @@ show multiple Owners. Every receipt carries machine-readable identity fields:
 
 ### Persistent receipt contract
 
-The persisted real protocol receipt is an evidence envelope, not the raw
-transport response from `create_thread`. It must persist, in the same receipt
-chain, `source=codex_app`, `actual_tool=codex_app__create_thread`, all requested /
+The persisted real protocol receipt is a Desktop evidence envelope, not the
+raw response of a separately launched App Server. It must persist, in the same
+receipt chain, `source=codex_app`,
+`actual_tool=codex_app__create_thread`, and nested route evidence with
+`event_origin=codex_desktop`, the raw `thread/start` request/response, any
+`model/rerouted` notifications, and matching
+`turn/started` / `turn/completed` evidence. It also carries all requested /
 resolved / actual tool and capability values, every Sponsor/Coordinator/Owner
-identity, `monitor.source=codex_app` with both `cursor` and `receipts`, and
-`integration_boundary.source=codex_app` with `boundary=mechanical-only`.
+identity, `monitor.source=codex_app` with both `cursor` and `receipts`,
+and `integration_boundary.source=codex_app` with
+`boundary=mechanical-only`.
 Each Owner receipt must also carry the complete resource receipt triple. A
-missing field blocks acceptance; a requested/resolved/actual mismatch is a
-product failure and can never be normalized into a pass.
+missing field blocks acceptance. An unproved route mismatch, a broken reroute
+chain, or a completed turn belonging to another thread/turn is a product
+failure and can never be normalized into a pass.
 
 An object containing only `threadId`, `hostId`, and an output directory is an
 incomplete host transport receipt. The checker does not infer missing protocol
@@ -72,7 +82,7 @@ The checker is [`scripts/first_use_protocol.py`](../scripts/first_use_protocol.p
 | Sponsor and Coordinator | The App creates and returns distinct real thread identities. | Deterministic synthetic identities exercise the bounded ordering. |
 | Owner dispatch | The independent Coordinator uses the host's top-level-task tool and receives each receipt. | The checker creates synthetic Owner evidence only for ordering/idempotency. |
 | Repeated tick | The Coordinator re-reads host state and proves `no-op`/`reuse`/`wait`; it does not create a task itself. | The checker emits the same bounded actions without host calls. |
-| Thread receipt | `source=codex_app`, `actual_tool=codex_app__create_thread`, real thread and host/worktree/repo identity, plus matching requested/resolved/actual model and reasoning evidence. | `source=fixture`, `actual_tool=fixture-simulated`, and explicitly synthetic resource evidence; this can never become `REAL_PASS`. |
+| Thread receipt | `source=codex_app`, `actual_tool=codex_app__create_thread`, real thread and host/worktree/repo identity, plus Desktop-exported App Server request/start/reroute/turn evidence. | `source=fixture`, `actual_tool=fixture-simulated`, and explicitly synthetic resource evidence; this can never become `REAL_PASS`. |
 | Monitor | A host cursor and externally observed receipts are required. | A deterministic fixture cursor and receipt list are sufficient for CI. |
 | Integration boundary | Host evidence shows mechanical reconciliation only; product semantics remain Owner-owned. | The same boundary is checked synthetically. |
 
@@ -98,6 +108,17 @@ receipt can be checked without changing the repository:
 ```powershell
 python scripts/first_use_protocol.py --mode real --receipt C:\path\from\codex-host\first-use-receipt.json
 ```
+
+Raw App Server exports can first be normalized without writing `runtime.db`:
+
+```powershell
+allinluna receipt-from-app-server --requested requested.json --thread-start thread-start.json --events events.json --action action.json
+```
+
+`thread-start.json` must be the Desktop-exported envelope carrying
+`source=codex_app`, `actual_tool=codex_app__create_thread`, and
+`event_origin=codex_desktop`. A bare response from a standalone CLI App Server
+is rejected even when its JSON-RPC result has the same shape.
 
 The checker returns zero only for `FIXTURE_PASS` or `REAL_PASS`; it returns
 non-zero for `BLOCKED`, `UNVERIFIED`, `CHECKER_ERROR`, or product `FAIL`. Use

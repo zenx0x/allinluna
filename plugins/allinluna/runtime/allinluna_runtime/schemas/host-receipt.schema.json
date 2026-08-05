@@ -41,7 +41,14 @@
         },
         "actual_state": {"enum": ["resolved", "unresolved"]},
         "evidence_source": {"type": ["string", "null"], "minLength": 1},
-        "observed_at": {"anyOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]}
+        "observed_at": {"anyOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]},
+        "route_evidence": {
+          "type": ["object", "null"],
+          "properties": {
+            "source": {"const": "codex_app_server"},
+            "event_origin": {"const": "codex_desktop"}
+          }
+        }
       },
       "allOf": [
         {

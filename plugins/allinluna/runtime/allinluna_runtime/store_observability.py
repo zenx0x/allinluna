@@ -49,8 +49,8 @@ class StoreObservability:
             "evidence_source": row.get("resource_evidence_source"),
             "observed_at": row.get("resource_observed_at"),
         }
-        if payload_receipt.get("route_evidence") is not None:
-            result["route_evidence"] = payload_receipt["route_evidence"]
+        if payload_receipt.get("diagnostics") is not None:
+            result["diagnostics"] = payload_receipt["diagnostics"]
         return result
 
     def inspect_outbox(self, identity: str) -> dict[str, Any] | None:

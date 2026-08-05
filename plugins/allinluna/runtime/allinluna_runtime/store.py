@@ -19,7 +19,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
-from .core.model import valid_app_server_route_evidence, valid_observed_at
 from .core.protocol import STATUS_PROTOCOL
 from .store_observability import StoreObservability
 from .store_scheduling import StoreScheduling
@@ -62,6 +61,16 @@ except ImportError:  # pragma: no cover - only possible during partial lane asse
 
 
 UTC = timezone.utc
+
+
+def _valid_observed_at(value: Any) -> bool:
+    if not isinstance(value, str) or "T" not in value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 class StoreError(RuntimeError):
@@ -1268,15 +1277,6 @@ class Store(StoreObservability, StoreScheduling):
         resource_state = str(resource_receipt.get("actual_state") or "unresolved")
         evidence_source = resource_receipt.get("evidence_source")
         resource_observed_at = resource_receipt.get("observed_at")
-        route_evidence = resource_receipt.get("route_evidence")
-        app_server_route_verified = valid_app_server_route_evidence(
-            requested_resource, resolved_resource, actual_resource, route_evidence, observed_at=resource_observed_at
-        )
-        desktop_app_server_verified = bool(
-            app_server_route_verified
-            and value.get("source") == "codex_app"
-            and value.get("actual_tool") == "codex_app__create_thread"
-        )
         if not (
             resource_state == "resolved"
             and isinstance(requested_model, str) and requested_model.strip()
@@ -1285,11 +1285,10 @@ class Store(StoreObservability, StoreScheduling):
             and isinstance(resolved_reasoning, str) and resolved_reasoning.strip()
             and isinstance(actual_model, str) and actual_model.strip()
             and isinstance(actual_reasoning, str) and actual_reasoning.strip()
-            and (((requested_model == resolved_model == actual_model
-                   and requested_reasoning == resolved_reasoning == actual_reasoning)
-                  and route_evidence is None) or desktop_app_server_verified)
+            and actual_model == resolved_model
+            and actual_reasoning == resolved_reasoning
             and isinstance(evidence_source, str) and evidence_source.strip()
-            and valid_observed_at(resource_observed_at)
+            and _valid_observed_at(resource_observed_at)
         ):
             actual_model = None
             actual_reasoning = None

@@ -34,7 +34,7 @@ def desktop_start(result: dict) -> dict:
 
 
 @pytest.mark.parametrize("reasoning", ["medium", "xhigh", "max"])
-def test_thread_start_and_turn_lifecycle_form_actual_receipt(reasoning):
+def test_optional_app_server_diagnostics_can_resolve_actual_receipt(reasoning):
     requested = {"model": "gpt-5.6-luna", "reasoning": reasoning}
     receipt = assemble_app_server_receipt(
         requested=requested,
@@ -49,6 +49,7 @@ def test_thread_start_and_turn_lifecycle_form_actual_receipt(reasoning):
     assert receipt.resource_receipt["actual"] == requested
     assert receipt.resource_receipt["actual_state"] == "resolved"
     assert receipt.resource_receipt["observed_at"] == "2026-08-05T12:00:05Z"
+    assert receipt.resource_receipt["diagnostics"]["resource_route"]["source"] == "codex_app_server"
 
 
 def test_reroute_chain_can_differ_from_requested_but_actual_matches_resolved(tmp_path):
@@ -70,7 +71,7 @@ def test_reroute_chain_can_differ_from_requested_but_actual_matches_resolved(tmp
         persisted = store.ingest_receipt(receipt.to_dict())
         loaded = store.get_host_receipt(receipt.receipt_id)
     assert persisted["resource_receipt"]["actual_state"] == "resolved"
-    assert loaded["resource_receipt"]["route_evidence"]["reroutes"] == [
+    assert loaded["resource_receipt"]["diagnostics"]["resource_route"]["reroutes"] == [
         {"thread_id": "thread-reroute", "from_model": "gpt-5.6-luna", "to_model": "gpt-5.6-luna-rerouted"}
     ]
 

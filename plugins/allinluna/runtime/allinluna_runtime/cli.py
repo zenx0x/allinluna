@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--model", default=None)
         command.add_argument("--reasoning", default=None)
 
-    app_server = sub.add_parser("receipt-from-app-server", help="normalize App Server events exported by Codex Desktop; standalone CLI sessions are rejected")
+    app_server = sub.add_parser("receipt-from-app-server", help="normalize optional host adapter resource-route diagnostics")
     app_server.add_argument("--requested", required=True, help="requested resource JSON or path")
     app_server.add_argument("--thread-start", required=True, help="thread/start response JSON or path")
     app_server.add_argument("--events", required=True, help="JSON-RPC notification array or path")

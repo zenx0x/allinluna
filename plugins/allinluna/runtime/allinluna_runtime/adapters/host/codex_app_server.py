@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Mapping, Sequence
 
-from ...core.model import ResourceRoute, valid_app_server_route_evidence
 from ...core.protocol import HOST_RECEIPT_PROTOCOL
 from .base import HostAction, HostReceipt, mapping_from, stable_digest
 
@@ -22,6 +23,114 @@ TURN_COMPLETED_METHOD = "turn/completed"
 
 class AppServerProtocolError(ValueError):
     """Exported App Server evidence is missing, inconsistent, or unsupported."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceRoute:
+    """Adapter-local model/reasoning route used only for diagnostics."""
+
+    model: str
+    reasoning: str
+
+    @classmethod
+    def from_value(cls, value: Any) -> "ResourceRoute | None":
+        if not isinstance(value, Mapping):
+            return None
+        model = value.get("model")
+        reasoning = value.get("reasoning", value.get("thinking"))
+        if not isinstance(model, str) or not model.strip() or not isinstance(reasoning, str) or not reasoning.strip():
+            return None
+        return cls(model.strip(), reasoning.strip())
+
+    def to_dict(self) -> dict[str, str]:
+        return {"model": self.model, "reasoning": self.reasoning}
+
+
+def _valid_observed_at(value: Any) -> bool:
+    if not isinstance(value, str) or "T" not in value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def app_server_resolved_route(evidence: Any) -> ResourceRoute | None:
+    """Return the final route only when this adapter's diagnostics cohere."""
+
+    if (
+        not isinstance(evidence, Mapping)
+        or evidence.get("source") != APP_SERVER_SOURCE
+        or evidence.get("event_origin") != DESKTOP_EVENT_ORIGIN
+    ):
+        return None
+    start = evidence.get("thread_start")
+    if not isinstance(start, Mapping):
+        return None
+    start_route = ResourceRoute.from_value(start)
+    thread_id = start.get("thread_id")
+    if not start_route or not isinstance(thread_id, str) or not thread_id:
+        return None
+    current_model = start_route.model
+    reroutes = evidence.get("reroutes", ())
+    if not isinstance(reroutes, (list, tuple)):
+        return None
+    for reroute in reroutes:
+        if not isinstance(reroute, Mapping):
+            return None
+        if (
+            reroute.get("thread_id") != thread_id
+            or reroute.get("from_model") != current_model
+            or not isinstance(reroute.get("to_model"), str)
+        ):
+            return None
+        current_model = str(reroute["to_model"])
+    return ResourceRoute(current_model, start_route.reasoning)
+
+
+def valid_app_server_route_evidence(
+    requested: Any,
+    resolved: Any,
+    actual: Any,
+    evidence: Any,
+    *,
+    observed_at: Any = None,
+) -> bool:
+    """Validate optional App Server diagnostics without affecting execution."""
+
+    requested_route = ResourceRoute.from_value(requested)
+    resolved_route = ResourceRoute.from_value(resolved)
+    actual_route = ResourceRoute.from_value(actual)
+    if not requested_route or not resolved_route or actual_route != resolved_route:
+        return False
+    if not isinstance(evidence, Mapping) or ResourceRoute.from_value(evidence.get("thread_start_request")) != requested_route:
+        return False
+    evidenced_route = app_server_resolved_route(evidence)
+    if evidenced_route != resolved_route:
+        return False
+    start = evidence.get("thread_start")
+    started = evidence.get("turn_started")
+    completed = evidence.get("turn_completed")
+    if not all(isinstance(item, Mapping) for item in (start, started, completed)):
+        return False
+    thread_id = start.get("thread_id")
+    turn_id = started.get("turn_id")
+    if (
+        started.get("thread_id") != thread_id
+        or completed.get("thread_id") != thread_id
+        or not isinstance(turn_id, str)
+        or not turn_id
+        or completed.get("turn_id") != turn_id
+    ):
+        return False
+    started_at = started.get("observed_at")
+    completed_at = completed.get("observed_at")
+    if not _valid_observed_at(started_at) or not _valid_observed_at(completed_at):
+        return False
+    start_time = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+    complete_time = datetime.fromisoformat(str(completed_at).replace("Z", "+00:00"))
+    return complete_time >= start_time and (observed_at is None or observed_at == completed_at)
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -141,7 +250,7 @@ def assemble_app_server_receipt(
             completed = {"thread_id": thread_id, "turn_id": turn_id, "observed_at": observed}
 
     resolved = {"model": current_model, "reasoning": start_route.reasoning}
-    route_evidence: dict[str, Any] = {
+    route_diagnostics: dict[str, Any] = {
         "source": APP_SERVER_SOURCE,
         "event_origin": DESKTOP_EVENT_ORIGIN,
         "thread_start_request": requested_route.to_dict(),
@@ -151,7 +260,7 @@ def assemble_app_server_receipt(
         "turn_completed": completed,
     }
     actual_resolved = valid_app_server_route_evidence(
-        requested_route.to_dict(), resolved, resolved, route_evidence,
+        requested_route.to_dict(), resolved, resolved, route_diagnostics,
         observed_at=completed.get("observed_at") if completed else None,
     )
     resource_receipt = {
@@ -161,12 +270,12 @@ def assemble_app_server_receipt(
         "actual_state": "resolved" if actual_resolved else "unresolved",
         "evidence_source": "codex_desktop:thread/start+turn/completed" if actual_resolved else None,
         "observed_at": completed["observed_at"] if actual_resolved and completed else None,
-        "route_evidence": route_evidence,
+        "diagnostics": {"resource_route": route_diagnostics},
     }
     action_obj = HostAction.from_value(action) if action is not None else None
     raw = {
         "protocol": HOST_RECEIPT_PROTOCOL,
-        "receipt_id": "app-server-receipt-" + stable_digest({"thread": thread_id, "evidence": route_evidence}),
+        "receipt_id": "app-server-receipt-" + stable_digest({"thread": thread_id, "diagnostics": route_diagnostics}),
         "thread_id": thread_id,
         "host_id": host_id,
         "source": DESKTOP_SOURCE,
@@ -180,7 +289,7 @@ def assemble_app_server_receipt(
 
 __all__ = [
     "APP_SERVER_SOURCE", "DESKTOP_EVENT_ORIGIN", "DESKTOP_SOURCE", "DESKTOP_TOOL",
-    "AppServerProtocolError", "MODEL_REROUTED_METHOD",
+    "AppServerProtocolError", "MODEL_REROUTED_METHOD", "ResourceRoute",
     "THREAD_START_METHOD", "TURN_COMPLETED_METHOD", "TURN_STARTED_METHOD",
-    "assemble_app_server_receipt",
+    "app_server_resolved_route", "assemble_app_server_receipt", "valid_app_server_route_evidence",
 ]

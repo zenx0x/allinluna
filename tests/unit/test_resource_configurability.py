@@ -428,3 +428,54 @@ def test_store_persists_queryable_actual_resource_receipt(vnext_module, tmp_path
     assert persisted["resource_receipt"]["requested"] == {"model": "gpt-5.6-luna", "reasoning": "medium"}
     assert persisted["resource_receipt"]["resolved"] == {"model": "gpt-5.6-luna", "reasoning": "medium"}
     assert persisted["resource_receipt"]["evidence_source"] == "codex-host-runtime"
+
+
+def test_unresolved_actual_does_not_block_host_result_or_root_completion(vnext_module, tmp_path):
+    host = vnext_module("adapters.host.base")
+    bridge_type = vnext_module("engine.action_bridge").ActionBridge
+    coordinator_type = vnext_module("engine.coordinator").CoordinatorEngine
+    store_type = vnext_module("store").Store
+    action = host.HostAction(
+        action_id="action-no-telemetry",
+        kind="create-task",
+        idempotency_key="intent-no-telemetry",
+        task_id="task-no-telemetry",
+        model="requested-model",
+        reasoning="medium",
+    )
+    with store_type(tmp_path / "no-telemetry.db") as store:
+        store.create_run("run-no-telemetry", "complete without resource diagnostics")
+        store.create_task(
+            {
+                "id": "task-no-telemetry",
+                "run_id": "run-no-telemetry",
+                "outcome": "deliver result",
+                "state": "ready",
+            }
+        )
+        ingested = bridge_type(store).ingest_receipt(
+            {
+                "receipt_id": "receipt-no-telemetry",
+                "thread_id": "thread-no-telemetry",
+                "status": "completed",
+            },
+            action=action,
+        )
+        assert ingested["resource_receipt"] == {
+            "requested": {"model": "requested-model", "reasoning": "medium"},
+            "resolved": {"model": "requested-model", "reasoning": "medium"},
+            "actual": None,
+            "actual_state": "unresolved",
+            "evidence_source": None,
+            "observed_at": None,
+        }
+        store.update_task_status("task-no-telemetry", "dispatching")
+        store.update_task_status("task-no-telemetry", "active")
+        store.update_task_status("task-no-telemetry", "verifying")
+        store.update_task_status("task-no-telemetry", "completed")
+        coordinator_type(store).reconcile("run-no-telemetry")
+        receipt = store.get_host_receipt("receipt-no-telemetry")
+        run = store.get_run("run-no-telemetry")
+    assert receipt["resource_receipt"]["actual"] is None
+    assert receipt["resource_receipt"]["actual_state"] == "unresolved"
+    assert run["status"] == "completed"

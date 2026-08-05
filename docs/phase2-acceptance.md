@@ -2,9 +2,9 @@
 
 Phase 2 repository closure uses the public `allinluna` compiler/CLI, strict
 Store-backed receipts, a single HandoffProcessor, and canonical Core state,
-reference, and protocol modules. Host-observed model evidence remains external:
-an acceptance route is unresolved until Codex Desktop supplies the canonical
-`resource_receipt` fields.
+reference, and protocol modules. Host resource-route telemetry is optional
+diagnostics. Its absence leaves the actual resource state unresolved, but does
+not prevent normal execution, handoff, or root-result completion.
 
 ## Scale report
 
@@ -33,18 +33,16 @@ python scripts/benchmark_context.py
 python scripts/validate_core_slim.py
 ```
 
-## External host acceptance
+## Host resource diagnostics
 
-The authoritative resource source is the App Server event stream exported by
-the Codex Desktop host. The outer receipt remains
-`source=codex_app` / `actual_tool=codex_app__create_thread`; its nested route
-evidence contains `thread/start`, zero or more `model/rerouted` events, and
-matching `turn/started` / `turn/completed` notifications. A response from a
-separately launched `codex.exe app-server` belongs to another host session and
-is rejected as Desktop acceptance evidence.
+The canonical runtime keeps requested, resolved, and actual resource values
+separate. The host adapter records actual only when it receives explicit model
+and reasoning evidence with a valid source and timestamp; otherwise it persists
+`actual: null` and `actual_state: unresolved`. Optional route diagnostics are
+adapter-scoped and may validate host-specific event streams, but are never a
+Core dependency or an acceptance prerequisite.
 
-Desktop can create Luna medium, Luna xhigh, Luna max, and Codex Spark tasks.
-No route is classified as unsupported. The remaining external blocker is only
-receipt visibility: the currently exposed Desktop create/read wrapper does not
-return the raw model, reasoning, reroute, and turn lifecycle evidence needed to
-assemble the four canonical receipts.
+An unresolved actual resource state is not a blocker. A task completes through
+its contract and verified handoff/result path, and the Coordinator may complete
+the root run once its required Tasks are complete. The persisted resource state
+remains inspectable without fabricating actual model or reasoning values.

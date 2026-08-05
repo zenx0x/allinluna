@@ -19,9 +19,9 @@ import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ...core.model import ResourceRoute, app_server_resolved_route, valid_app_server_route_evidence, valid_observed_at
 from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, HOST_RECEIPT_PROTOCOL
 
 
@@ -95,8 +95,21 @@ def first_text(value: Mapping[str, Any], *names: str) -> str | None:
 
 
 def _resource_values(value: Any) -> dict[str, str] | None:
-    route = ResourceRoute.from_value(value)
-    return route.to_dict() if route else None
+    if not isinstance(value, Mapping):
+        return None
+    model = _text(value.get("model"))
+    reasoning = _text(value.get("reasoning", value.get("thinking")))
+    return {"model": model, "reasoning": reasoning} if model and reasoning else None
+
+
+def _valid_observed_at(value: Any) -> bool:
+    if not isinstance(value, str) or "T" not in value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 class HostAdapterError(RuntimeError):
@@ -381,25 +394,13 @@ class HostReceipt(_MappingRecord):
         resource_raw = raw.get("resource_receipt", raw.get("resourceReceipt", {}))
         if not isinstance(resource_raw, Mapping):
             resource_raw = {}
-        resource_actual = resource_raw.get("actual")
-        if not isinstance(resource_actual, Mapping):
-            resource_actual = {}
+        resource_actual = _resource_values(resource_raw.get("actual"))
         source = first_text(raw, "source") or default_source
         action_id = first_text(raw, "action_id", "actionId") or (action_obj.action_id if action_obj else None)
         idem = first_text(raw, "idempotency_key", "idempotencyKey") or (action_obj.idempotency_key if action_obj else None)
         dispatch = first_text(raw, "dispatch_id", "dispatchId") or (action_obj.dispatch_id if action_obj else None)
-        actual_model = (
-            first_text(raw, "model")
-            or first_text(resource_actual, "model")
-            or first_text(actual_payload, "model")
-            or first_text(runtime, "model")
-        )
-        actual_reasoning = (
-            first_text(raw, "reasoning", "thinking")
-            or first_text(resource_actual, "reasoning", "thinking")
-            or first_text(actual_payload, "reasoning", "thinking")
-            or first_text(runtime, "reasoning", "thinking")
-        )
+        actual_model = resource_actual["model"] if resource_actual else None
+        actual_reasoning = resource_actual["reasoning"] if resource_actual else None
         runtime_requested = (
             runtime.get("requested") if isinstance(runtime.get("requested"), Mapping) else {}
         )
@@ -435,47 +436,33 @@ class HostReceipt(_MappingRecord):
         )
         reported_requested = _resource_values(resource_raw.get("requested"))
         reported_resolved = _resource_values(resource_raw.get("resolved"))
-        route_evidence = resource_raw.get("route_evidence", resource_raw.get("routeEvidence"))
+        diagnostics = resource_raw.get("diagnostics")
         evidence_source = (
             first_text(resource_raw, "evidence_source", "evidenceSource")
-            or first_text(resource_actual, "evidence_source", "evidenceSource", "source")
+            or first_text(resource_actual or {}, "evidence_source", "evidenceSource", "source")
             or first_text(raw, "resource_evidence_source", "resourceEvidenceSource")
         )
         observed_at = (
             first_text(resource_raw, "observed_at", "observedAt")
-            or first_text(resource_actual, "observed_at", "observedAt")
+            or first_text(resource_actual or {}, "observed_at", "observedAt")
             or first_text(raw, "resource_observed_at", "resourceObservedAt")
-        )
-        evidenced_route = app_server_resolved_route(route_evidence)
-        evidenced_resolved = evidenced_route.to_dict() if evidenced_route else None
-        app_server_route_verified = valid_app_server_route_evidence(
-            reported_requested,
-            reported_resolved,
-            {"model": actual_model, "reasoning": actual_reasoning},
-            route_evidence,
-            observed_at=observed_at,
         )
         reported_actual_tool = (
             first_text(raw, "actual_tool", "actualTool")
             or first_text(actual_payload, "actual_tool", "actualTool", "tool")
             or first_text(runtime, "actual_tool", "actualTool", "tool")
         )
-        effective_resolved = evidenced_resolved or baseline_resolved
+        effective_resolved = reported_resolved or baseline_resolved
         verified_model_receipt = bool(
             actual
             and first_text(resource_raw, "actual_state", "actualState") == "resolved"
             and baseline_requested
             and reported_requested == baseline_requested
-            and effective_resolved
-            and reported_resolved == effective_resolved
+            and reported_resolved
             and actual_model == effective_resolved["model"]
             and actual_reasoning == effective_resolved["reasoning"]
             and evidence_source
-            and valid_observed_at(observed_at)
-            and (
-                not app_server_route_verified
-                or (source == "codex_app" and reported_actual_tool == "codex_app__create_thread")
-            )
+            and _valid_observed_at(observed_at)
         )
         reported_model_receipt = first_text(raw, "model_receipt", "modelReceipt")
         if verified_model_receipt:
@@ -495,8 +482,8 @@ class HostReceipt(_MappingRecord):
             "evidence_source": evidence_source if verified_model_receipt else None,
             "observed_at": observed_at if verified_model_receipt else None,
         }
-        if evidenced_route:
-            canonical_resource_receipt["route_evidence"] = _copy(route_evidence)
+        if isinstance(diagnostics, Mapping):
+            canonical_resource_receipt["diagnostics"] = _copy(diagnostics)
         return cls(
             receipt_id=receipt_id,
             status=status,

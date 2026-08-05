@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
-from typing import Any, Mapping
+from importlib import import_module
 
 
 class RunStatus(StrEnum):
@@ -106,110 +104,18 @@ class ResourcePolicy(StrEnum):
     AUTO = "auto"; EXPLICIT = "explicit"
 
 
-@dataclass(frozen=True, slots=True)
-class ResourceRoute:
-    model: str
-    reasoning: str
+def __getattr__(name: str):
+    """Keep the first-use protocol's legacy diagnostic import working.
 
-    @classmethod
-    def from_value(cls, value: Any) -> "ResourceRoute | None":
-        if not isinstance(value, Mapping):
-            return None
-        model = value.get("model")
-        reasoning = value.get("reasoning", value.get("thinking"))
-        if not isinstance(model, str) or not model.strip() or not isinstance(reasoning, str) or not reasoning.strip():
-            return None
-        return cls(model.strip(), reasoning.strip())
+    Core does not parse host route telemetry.  The compatibility lookup is lazy
+    so normal Core imports remain independent of host adapters while the
+    separately owned first-use protocol can migrate on its own schedule.
+    """
 
-    def to_dict(self) -> dict[str, str]:
-        return {"model": self.model, "reasoning": self.reasoning}
-
-
-def valid_observed_at(value: Any) -> bool:
-    if not isinstance(value, str) or "T" not in value:
-        return False
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return parsed.tzinfo is not None
-
-
-def app_server_resolved_route(evidence: Any) -> ResourceRoute | None:
-    """Return the final route only when thread/start and every reroute are coherent."""
-
-    if (
-        not isinstance(evidence, Mapping)
-        or evidence.get("source") != "codex_app_server"
-        or evidence.get("event_origin") != "codex_desktop"
-    ):
-        return None
-    start = evidence.get("thread_start")
-    if not isinstance(start, Mapping):
-        return None
-    start_route = ResourceRoute.from_value(start)
-    thread_id = start.get("thread_id")
-    if not start_route or not isinstance(thread_id, str) or not thread_id:
-        return None
-    current_model = start_route.model
-    reroutes = evidence.get("reroutes", ())
-    if not isinstance(reroutes, (list, tuple)):
-        return None
-    for reroute in reroutes:
-        if not isinstance(reroute, Mapping):
-            return None
-        if (
-            reroute.get("thread_id") != thread_id
-            or reroute.get("from_model") != current_model
-            or not isinstance(reroute.get("to_model"), str)
-        ):
-            return None
-        current_model = str(reroute["to_model"])
-    return ResourceRoute(current_model, start_route.reasoning)
-
-
-def valid_app_server_route_evidence(
-    requested: Any,
-    resolved: Any,
-    actual: Any,
-    evidence: Any,
-    *,
-    observed_at: Any = None,
-) -> bool:
-    """Verify a thread/start -> reroute* -> turn lifecycle evidence chain."""
-
-    requested_route = ResourceRoute.from_value(requested)
-    resolved_route = ResourceRoute.from_value(resolved)
-    actual_route = ResourceRoute.from_value(actual)
-    if not requested_route or not resolved_route or actual_route != resolved_route:
-        return False
-    if not isinstance(evidence, Mapping) or ResourceRoute.from_value(evidence.get("thread_start_request")) != requested_route:
-        return False
-    evidenced_route = app_server_resolved_route(evidence)
-    if evidenced_route != resolved_route or not isinstance(evidence, Mapping):
-        return False
-    start = evidence.get("thread_start")
-    started = evidence.get("turn_started")
-    completed = evidence.get("turn_completed")
-    if not all(isinstance(item, Mapping) for item in (start, started, completed)):
-        return False
-    thread_id = start.get("thread_id")
-    turn_id = started.get("turn_id")
-    if (
-        started.get("thread_id") != thread_id
-        or completed.get("thread_id") != thread_id
-        or not isinstance(turn_id, str)
-        or not turn_id
-        or completed.get("turn_id") != turn_id
-    ):
-        return False
-    started_at = started.get("observed_at")
-    completed_at = completed.get("observed_at")
-    if not valid_observed_at(started_at) or not valid_observed_at(completed_at):
-        return False
-    start_time = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-    complete_time = datetime.fromisoformat(str(completed_at).replace("Z", "+00:00"))
-    return complete_time >= start_time and (observed_at is None or observed_at == completed_at)
+    if name == "valid_app_server_route_evidence":
+        diagnostics = import_module("allinluna_runtime.adapters.host.codex_app_server")
+        return diagnostics.valid_app_server_route_evidence
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
@@ -217,5 +123,4 @@ __all__ = [
     "LaneAttemptState", "LeaseScope", "LeaseState", "ModelState", "PortKind",
     "ReceiptStatus", "RepositoryMode", "ResourcePolicy", "RunStatus", "ScopeType",
     "SignalType", "SnapshotValidity", "TaskState", "WorkUnitAttemptState", "WorkUnitState",
-    "ResourceRoute", "app_server_resolved_route", "valid_app_server_route_evidence", "valid_observed_at",
 ]

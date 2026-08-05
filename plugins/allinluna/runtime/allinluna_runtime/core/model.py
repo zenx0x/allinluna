@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from importlib import import_module
 
 
 class RunStatus(StrEnum):
@@ -102,20 +101,6 @@ class AuthorityAction(StrEnum):
 
 class ResourcePolicy(StrEnum):
     AUTO = "auto"; EXPLICIT = "explicit"
-
-
-def __getattr__(name: str):
-    """Keep the first-use protocol's legacy diagnostic import working.
-
-    Core does not parse host route telemetry.  The compatibility lookup is lazy
-    so normal Core imports remain independent of host adapters while the
-    separately owned first-use protocol can migrate on its own schedule.
-    """
-
-    if name == "valid_app_server_route_evidence":
-        diagnostics = import_module("allinluna_runtime.adapters.host.codex_app_server")
-        return diagnostics.valid_app_server_route_evidence
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

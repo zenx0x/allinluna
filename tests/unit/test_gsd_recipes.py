@@ -62,6 +62,18 @@ def test_gsd_keeps_outcome_domain_edges_global_and_recipe_edges_local():
     ]
 
 
+def test_gsd_decompose_recipe_describes_lane_local_workunit_expansion():
+    recipe = PHASE_RECIPES["decompose"]
+    recipe_text = " ".join(f"{name} {objective}" for name, objective in recipe).lower()
+
+    assert "top-level" not in recipe_text
+    assert "global" not in recipe_text
+    assert "lane-local" in recipe_text
+    assert "workunit graph" in recipe_text
+    assert "dynamic expansion" in recipe_text
+    assert "promotion-boundary" in recipe_text
+
+
 def test_gsd_domain_contracts_export_lane_result_not_phase_contracts():
     graph = _compile("build the API and dashboard").task_graph
     assert len(graph.tasks) == 2

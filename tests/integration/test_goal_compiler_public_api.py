@@ -75,3 +75,26 @@ def test_start_persists_gsd_recipe_inside_each_domain_lane(tmp_path: Path):
         assert roots == [f"{task['local_id']}-{phase}" for phase in PHASES]
     assert result["compilation"]["task_graph"]["metadata"]["lane_recipe"]["execution_scope"] == "lane-local"
     assert result["compilation"]["permission_intents"] == []
+
+
+def test_start_uses_observed_repository_surfaces_for_broad_goal(tmp_path: Path):
+    repository_root = tmp_path / "repo"
+    (repository_root / "backend").mkdir(parents=True)
+    (repository_root / "frontend").mkdir()
+    result = SinglePublicSkillAPI().start(
+        {
+            "intent_id": "phase21-repository-context",
+            "goal": "Refactor the entire repository",
+            "repository": {
+                "mode": "existing",
+                "roots": [{"path": str(repository_root), "git": False, "dirty_state": "clean"}],
+            },
+        },
+        db_path=tmp_path / "repository-context.db",
+    )
+
+    graph = result["compilation"]["task_graph"]
+    assert [task["id"] for task in graph["tasks"]] == ["domain-backend", "domain-frontend"]
+    assert graph["metadata"]["repository_context"]["status"] == "observed"
+    assert graph["metadata"]["decomposition"]["domains"][0]["ownership"] == ["backend/**"]
+    assert graph["metadata"]["decomposition"]["domains"][1]["ownership"] == ["frontend/**"]

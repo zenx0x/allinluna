@@ -63,3 +63,94 @@ def test_decomposer_accepts_explicit_domains_without_resource_questionnaire():
     assert decomposition.domains[1].dependencies == ("api",)
     assert decomposition.domains[1].dependency_exports == {"api": ("ApiResult",)}
     assert GoalCompiler().version == "2.1"
+
+
+def _existing_repository(root: Path) -> dict:
+    return {
+        "mode": "existing",
+        "roots": [{"path": str(root), "git": False, "dirty_state": "clean"}],
+    }
+
+
+def test_repository_evidence_splits_broad_goal_into_observed_surface_domains(tmp_path: Path):
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "frontend").mkdir()
+    (tmp_path / "backend" / "private-source.txt").write_text("must not be read", encoding="utf-8")
+
+    compilation = SinglePublicSkillAPI().compile(
+        {
+            "intent_id": "repo-context-broad",
+            "goal": "Refactor the entire repository",
+            "repository": _existing_repository(tmp_path),
+        }
+    )
+    graph = compilation.task_graph
+    context = graph.metadata["repository_context"]
+    decomposition = graph.metadata["decomposition"]
+
+    assert [str(task.id) for task in graph.tasks] == ["domain-backend", "domain-frontend"]
+    assert all(not task.dependencies for task in graph.tasks)
+    assert set(graph.work_graphs) == {"domain-backend", "domain-frontend"}
+    assert context["status"] == "observed"
+    assert context["scan_policy"]["max_depth"] == 2
+    assert context["scan_policy"]["content_reads"] == 0
+    assert context["scan_policy"]["git_commands"] == 0
+    assert [surface["path"] for surface in context["surfaces"]] == ["backend", "frontend"]
+    assert decomposition["pipeline"] == ["goal", "repository-context-inspection", "outcome-domain-decomposition"]
+    assert [domain["ownership"] for domain in decomposition["domains"]] == [["backend/**"], ["frontend/**"]]
+    assert all(domain["metadata"]["repository_evidence"]["observed"] for domain in decomposition["domains"])
+
+
+def test_repository_evidence_attaches_to_atomic_domain_without_splitting_it(tmp_path: Path):
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "frontend").mkdir()
+
+    graph = SinglePublicSkillAPI().compile(
+        {
+            "intent_id": "repo-context-atomic",
+            "goal": "Fix the API authentication bug",
+            "repository": _existing_repository(tmp_path),
+        }
+    ).task_graph
+
+    assert [str(task.id) for task in graph.tasks] == ["deliver"]
+    assert graph.metadata["decomposition"]["strategy"] == "atomic"
+    assert graph.metadata["decomposition"]["domains"][0]["ownership"] == ["backend/**"]
+    assert graph.metadata["decomposition"]["domains"][0]["metadata"]["repository_surfaces"] == ["backend"]
+
+
+def test_projectless_goal_has_no_fabricated_repository_surfaces():
+    graph = SinglePublicSkillAPI().compile("Refactor the entire repository").task_graph
+
+    assert [str(task.id) for task in graph.tasks] == ["deliver"]
+    assert graph.metadata["repository_context"]["status"] == "projectless"
+    assert graph.metadata["repository_context"]["surfaces"] == []
+    assert graph.metadata["decomposition"]["domains"][0]["ownership"] == []
+
+
+def test_missing_repository_root_has_no_fabricated_repository_surfaces(tmp_path: Path):
+    missing_root = tmp_path / "does-not-exist"
+    graph = SinglePublicSkillAPI().compile(
+        {
+            "intent_id": "repo-context-missing",
+            "goal": "Refactor the entire repository",
+            "repository": _existing_repository(missing_root),
+        }
+    ).task_graph
+    context = graph.metadata["repository_context"]
+
+    assert [str(task.id) for task in graph.tasks] == ["deliver"]
+    assert context["status"] == "missing-root"
+    assert context["roots"] == [
+        {
+            "index": 0,
+            "path": str(missing_root),
+            "declared_git": False,
+            "declared_dirty_state": "clean",
+            "status": "missing",
+            "observed_entries": [],
+            "entries_truncated": False,
+        }
+    ]
+    assert context["surfaces"] == []
+    assert graph.metadata["decomposition"]["domains"][0]["ownership"] == []

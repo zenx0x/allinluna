@@ -18,7 +18,7 @@ from ..engine.coordinator import CoordinatorEngine
 from ..resource import ResourceBroker
 from ..store import Store
 from .base import CompiledRunGraph
-from .goal_compiler import GoalCompiler, TaskDecomposer
+from .goal_compiler import GoalCompiler, RepositoryContextInspector, TaskDecomposer
 from .manifest import PackRegistry, builtin_registry
 from .research_routes import ResearchRoutesBridge
 
@@ -185,4 +185,4 @@ class SinglePublicSkillAPI:
         )
 
 
-__all__ = ["GoalCompiler", "JITPermissionRouter", "PermissionIntent", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]
+__all__ = ["GoalCompiler", "JITPermissionRouter", "PermissionIntent", "RepositoryContextInspector", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]

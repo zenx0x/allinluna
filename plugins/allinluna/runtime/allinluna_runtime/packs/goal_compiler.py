@@ -14,7 +14,9 @@ domain.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from itertools import islice
+from pathlib import Path
 import re
 from typing import Any
 
@@ -160,6 +162,196 @@ def _looks_like_domain(value: str) -> bool:
     )
 
 
+class RepositoryContextInspector:
+    """Bounded, read-only observation of declared repository roots.
+
+    The inspector deliberately observes directory names only.  It never
+    walks a repository, reads source contents, invokes Git, or invents a
+    surface for a missing/projectless root.  Direct children and one bounded
+    level below common containers are enough to distinguish independent
+    product surfaces such as ``backend`` and ``frontend`` for a broad goal.
+    """
+
+    _CONTAINERS = {"apps", "components", "modules", "packages", "services"}
+    _EXCLUDED = {
+        ".git",
+        ".github",
+        ".idea",
+        ".pytest_cache",
+        ".venv",
+        "__pycache__",
+        "build",
+        "cache",
+        "coverage",
+        "dist",
+        "node_modules",
+        "target",
+        "tmp",
+        "vendor",
+        "venv",
+    }
+    _SURFACE_HINTS = {
+        "api",
+        "app",
+        "auth",
+        "backend",
+        "client",
+        "component",
+        "data",
+        "database",
+        "db",
+        "docs",
+        "documentation",
+        "experiment",
+        "frontend",
+        "integration",
+        "library",
+        "mobile",
+        "research",
+        "server",
+        "service",
+        "test",
+        "ui",
+        "web",
+    }
+
+    def __init__(self, *, max_entries: int = 128, max_nested_entries: int = 32) -> None:
+        if max_entries < 1 or max_nested_entries < 1:
+            raise ValueError("repository inspection bounds must be positive")
+        self.max_entries = int(max_entries)
+        self.max_nested_entries = int(max_nested_entries)
+
+    def inspect(self, repository: Any = None) -> dict[str, Any]:
+        mode = self._field(repository, "mode")
+        mode = getattr(mode, "value", mode)
+        roots = tuple(self._field(repository, "roots") or ())
+        base = {
+            "inspector": "RepositoryContextInspector",
+            "version": "2.1",
+            "mode": str(mode or "projectless"),
+            "scan_policy": {
+                "max_depth": 2,
+                "max_entries_per_root": self.max_entries,
+                "max_entries_per_container": self.max_nested_entries,
+                "content_reads": 0,
+                "git_commands": 0,
+            },
+            "roots": [],
+            "surfaces": [],
+            "independent_surfaces": [],
+        }
+        if not roots:
+            base["status"] = "projectless" if base["mode"] == "projectless" else "no-roots"
+            base["evidence"] = [{"kind": "repository-roots", "observed": False, "reason": "no-declared-roots"}]
+            return base
+
+        multi_root = len(roots) > 1
+        all_surfaces: list[dict[str, Any]] = []
+        for index, root in enumerate(roots):
+            root_record, surfaces = self._inspect_root(root, index=index, multi_root=multi_root)
+            base["roots"].append(root_record)
+            all_surfaces.extend(surfaces)
+        base["surfaces"] = all_surfaces
+        base["independent_surfaces"] = list(all_surfaces)
+        root_statuses = {str(item["status"]) for item in base["roots"]}
+        if all(status == "observed" for status in root_statuses):
+            base["status"] = "observed" if all_surfaces else "observed-no-surfaces"
+        elif all(status in {"missing", "not-directory", "unreadable"} for status in root_statuses):
+            base["status"] = "missing-root"
+        else:
+            base["status"] = "partial"
+        base["evidence"] = [
+            {
+                "kind": "repository-root-observation",
+                "root": item["path"],
+                "status": item["status"],
+                "observed_entries": list(item.get("observed_entries", ())),
+                "surface_paths": [surface["path"] for surface in all_surfaces if surface["root"] == item["path"]],
+            }
+            for item in base["roots"]
+        ]
+        return base
+
+    @staticmethod
+    def _field(value: Any, name: str, default: Any = None) -> Any:
+        if isinstance(value, Mapping):
+            return value.get(name, default)
+        return getattr(value, name, default)
+
+    def _inspect_root(self, root: Any, *, index: int, multi_root: bool) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        raw_path = self._field(root, "path")
+        path_text = str(raw_path or "")
+        root_path = Path(path_text) if path_text else None
+        root_record: dict[str, Any] = {
+            "index": index,
+            "path": path_text,
+            "declared_git": bool(self._field(root, "git", False)),
+            "declared_dirty_state": str(self._field(root, "dirty_state", "unknown")),
+            "status": "missing",
+            "observed_entries": [],
+            "entries_truncated": False,
+        }
+        if root_path is None or not root_path.exists():
+            return root_record, []
+        if not root_path.is_dir():
+            root_record["status"] = "not-directory"
+            return root_record, []
+        try:
+            observed_with_probe = list(islice(root_path.iterdir(), self.max_entries + 1))
+            root_record["entries_truncated"] = len(observed_with_probe) > self.max_entries
+            observed = sorted(observed_with_probe[: self.max_entries], key=lambda item: item.name.lower())
+            root_record["observed_entries"] = [item.name for item in observed]
+        except OSError as exc:
+            root_record.update({"status": "unreadable", "error": type(exc).__name__})
+            return root_record, []
+
+        root_record["status"] = "observed"
+        root_label = root_path.name or f"root-{index + 1}"
+        root_prefix = _slug(root_label) if multi_root else ""
+        surfaces: list[dict[str, Any]] = []
+        for entry in observed:
+            if not entry.is_dir() or entry.name.lower() in self._EXCLUDED:
+                continue
+            entry_name = entry.name
+            if self._is_surface_name(entry_name):
+                surfaces.append(self._surface(entry_name, entry, root_path, root_prefix, index, "root-entry"))
+            if entry_name.lower() in self._CONTAINERS:
+                try:
+                    nested_entries = sorted(
+                        list(islice(entry.iterdir(), self.max_nested_entries)),
+                        key=lambda item: item.name.lower(),
+                    )
+                except OSError:
+                    nested_entries = []
+                for nested in nested_entries:
+                    if nested.is_dir() and nested.name.lower() not in self._EXCLUDED and self._is_surface_name(nested.name):
+                        surfaces.append(self._surface(f"{entry_name}/{nested.name}", nested, root_path, root_prefix, index, "container-entry"))
+        return root_record, surfaces
+
+    @classmethod
+    def _is_surface_name(cls, value: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        return any(hint in normalized.split("-") for hint in cls._SURFACE_HINTS) or any(
+            hint in normalized for hint in ("backend", "frontend", "service", "component", "module")
+        )
+
+    @staticmethod
+    def _surface(label: str, path: Path, root: Path, root_prefix: str, root_index: int, evidence_kind: str) -> dict[str, Any]:
+        relative = label.replace("\\", "/")
+        ownership = f"{root_prefix}/{relative}/**" if root_prefix else f"{relative}/**"
+        surface_id = _slug(f"{root_prefix}-{relative}" if root_prefix else relative)
+        return {
+            "id": surface_id,
+            "name": relative.split("/")[-1],
+            "path": relative,
+            "ownership": ownership,
+            "root": str(root),
+            "root_index": root_index,
+            "kind": "directory",
+            "evidence": {"kind": evidence_kind, "path": relative, "observed": True},
+        }
+
+
 @dataclass(frozen=True)
 class OutcomeDomain:
     """One global outcome domain, which becomes one top-level Task/Lane."""
@@ -234,12 +426,14 @@ class Decomposition(Sequence[OutcomeDomain]):
     strategy: str
     source: str
     explicit: bool = False
+    repository_context: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.domains:
             raise ValueError("goal decomposition must contain at least one outcome domain")
         if self.strategy not in {"atomic", "outcome-domain"}:
             raise ValueError(f"unknown decomposition strategy: {self.strategy}")
+        object.__setattr__(self, "repository_context", dict(self.repository_context))
 
     def __len__(self) -> int:
         return len(self.domains)
@@ -261,6 +455,7 @@ class Decomposition(Sequence[OutcomeDomain]):
             for dependency in domain.dependencies
         ]
         return {
+            "pipeline": ["goal", "repository-context-inspection", "outcome-domain-decomposition"],
             "strategy": self.strategy,
             "source": self.source,
             "explicit": self.explicit,
@@ -268,6 +463,7 @@ class Decomposition(Sequence[OutcomeDomain]):
             "domains": [domain.to_dict() for domain in self.domains],
             "parallel_domain_ids": [domain.id for domain in self.parallel_domains],
             "edges": edges,
+            "repository_context": dict(self.repository_context),
         }
 
 
@@ -275,6 +471,11 @@ class Decomposition(Sequence[OutcomeDomain]):
 class _Fragment:
     text: str
     dependency_refs: tuple[str, ...] = ()
+
+
+_REPOSITORY_WORDS = ("repository", "repo", "codebase", "monorepo", "project")
+_BROAD_QUANTIFIERS = ("entire", "whole", "every", "all", "across", "throughout", "full")
+_BROAD_ACTIONS = ("refactor", "migrate", "modernize", "upgrade", "clean up", "organize", "audit", "review")
 
 
 class TaskDecomposer:
@@ -288,6 +489,9 @@ class TaskDecomposer:
 
     version = "2.1"
 
+    def __init__(self, repository_inspector: RepositoryContextInspector | None = None) -> None:
+        self.repository_inspector = repository_inspector or RepositoryContextInspector()
+
     def decompose(
         self,
         request: str | Mapping[str, Any] | RunIntent,
@@ -295,26 +499,40 @@ class TaskDecomposer:
         done_when: Sequence[str] | None = None,
         config: Mapping[str, Any] | None = None,
     ) -> Decomposition:
-        goal, defaults, request_config = self._request_parts(request)
+        goal, defaults, request_config, repository = self._request_parts(request)
         merged_config = dict(request_config)
         merged_config.update(dict(config or {}))
         default_done = tuple(str(item) for item in (done_when or defaults or (f"{goal} is evidenced",)))
+        repository_context = self.repository_inspector.inspect(repository)
 
         configured = self._configured_domains(merged_config)
         if configured is not None:
             domains = self._from_configured(configured, goal=goal, default_done=default_done)
-            return Decomposition(tuple(domains), "atomic" if len(domains) == 1 else "outcome-domain", "configured", True)
+            return Decomposition(
+                tuple(domains),
+                "atomic" if len(domains) == 1 else "outcome-domain",
+                "configured",
+                True,
+                repository_context,
+            )
 
         fragments = self._parse_goal(goal)
         domains = self._from_fragments(fragments, default_done=default_done)
-        return Decomposition(tuple(domains), "atomic" if len(domains) == 1 else "outcome-domain", "natural-language", False)
+        domains = self._apply_repository_context(domains, goal=goal, default_done=default_done, context=repository_context)
+        return Decomposition(
+            tuple(domains),
+            "atomic" if len(domains) == 1 else "outcome-domain",
+            "natural-language",
+            False,
+            repository_context,
+        )
 
     @staticmethod
-    def _request_parts(request: str | Mapping[str, Any] | RunIntent) -> tuple[str, tuple[str, ...], Mapping[str, Any]]:
+    def _request_parts(request: str | Mapping[str, Any] | RunIntent) -> tuple[str, tuple[str, ...], Mapping[str, Any], Any]:
         if isinstance(request, RunIntent):
-            return request.goal, tuple(request.done_when), request.pack.config
+            return request.goal, tuple(request.done_when), request.pack.config, request.repository
         if isinstance(request, str):
-            return _text(request, "goal"), (), {}
+            return _text(request, "goal"), (), {}, None
         if not isinstance(request, Mapping):
             raise TypeError("TaskDecomposer expects a goal, request mapping, or RunIntent")
         goal = _text(request.get("goal") or request.get("idea") or request.get("objective"), "goal")
@@ -326,7 +544,7 @@ class TaskDecomposer:
             if key in request and key not in config:
                 config[key] = request[key]
         raw_done = request.get("done_when", ())
-        return goal, _as_tuple(raw_done), config
+        return goal, _as_tuple(raw_done), config, request.get("repository")
 
     @staticmethod
     def _configured_domains(config: Mapping[str, Any]) -> Sequence[Any] | None:
@@ -456,6 +674,81 @@ class TaskDecomposer:
                 "metadata": {"source_index": index, "source_text": fragment.text},
             })
         return self._materialize_domains(raw_domains, default_done=default_done)
+
+    def _apply_repository_context(
+        self,
+        domains: Sequence[OutcomeDomain],
+        *,
+        goal: str,
+        default_done: tuple[str, ...],
+        context: Mapping[str, Any],
+    ) -> list[OutcomeDomain]:
+        surfaces = tuple(item for item in context.get("surfaces", ()) if isinstance(item, Mapping))
+        if not surfaces:
+            return list(domains)
+        if self._is_broad_goal(goal) and len(domains) == 1 and len(surfaces) > 1:
+            raw_domains = [
+                {
+                    "id": f"domain-{surface['id']}",
+                    "outcome": f"{goal} ({surface['name']})",
+                    "done_when": default_done,
+                    "ownership": (str(surface["ownership"]),),
+                    "checks": default_done,
+                    "metadata": {
+                        "repository_surface": surface["id"],
+                        "repository_evidence": dict(surface.get("evidence", {})),
+                    },
+                }
+                for surface in surfaces
+            ]
+            return self._materialize_domains(raw_domains, default_done=default_done)
+        return [self._attach_surface_ownership(domain, surfaces) for domain in domains]
+
+    @staticmethod
+    def _is_broad_goal(goal: str) -> bool:
+        lowered = goal.lower()
+        has_repository_reference = any(re.search(rf"\b{re.escape(word)}\b", lowered) for word in _REPOSITORY_WORDS)
+        has_quantifier = any(re.search(rf"\b{re.escape(word)}\b", lowered) for word in _BROAD_QUANTIFIERS)
+        has_broad_action = any(re.search(rf"\b{re.escape(phrase)}\b", lowered) for phrase in _BROAD_ACTIONS)
+        explicit_whole_product = re.search(r"\b(entire|whole|full)\s+(?:product|platform|system|stack)\b", lowered)
+        return bool((has_repository_reference and (has_quantifier or has_broad_action)) or explicit_whole_product)
+
+    @classmethod
+    def _attach_surface_ownership(
+        cls,
+        domain: OutcomeDomain,
+        surfaces: Sequence[Mapping[str, Any]],
+    ) -> OutcomeDomain:
+        matches = [surface for surface in surfaces if cls._surface_matches(domain.outcome, surface)]
+        if not matches:
+            return domain
+        ownership = list(domain.ownership)
+        for surface in matches:
+            path = str(surface.get("ownership") or "")
+            if path and path not in ownership:
+                ownership.append(path)
+        metadata = dict(domain.metadata)
+        metadata["repository_surfaces"] = [str(surface.get("id")) for surface in matches]
+        metadata["repository_evidence"] = [dict(surface.get("evidence", {})) for surface in matches]
+        return replace(domain, ownership=tuple(ownership), metadata=metadata)
+
+    @staticmethod
+    def _surface_matches(outcome: str, surface: Mapping[str, Any]) -> bool:
+        lowered = outcome.lower()
+        surface_name = str(surface.get("name", "")).lower()
+        path_parts = {part for part in re.findall(r"[a-z0-9]+", str(surface.get("path", "")).lower())}
+        outcome_words = set(re.findall(r"[a-z0-9]+", lowered))
+        if surface_name and surface_name in outcome_words:
+            return True
+        if outcome_words & path_parts:
+            return True
+        aliases = {
+            "api": {"backend", "server", "service"},
+            "dashboard": {"frontend", "web", "ui", "client"},
+            "ui": {"frontend", "web", "client"},
+            "web": {"frontend", "ui", "client"},
+        }
+        return bool(any(word in outcome_words and surface_name in names for word, names in aliases.items()))
 
     def _materialize_domains(self, raw_domains: Sequence[Mapping[str, Any]], *, default_done: tuple[str, ...]) -> list[OutcomeDomain]:
         used: set[str] = set()
@@ -625,4 +918,4 @@ class GoalCompiler:
     compile_goal = compile
 
 
-__all__ = ["Decomposition", "GoalCompiler", "OutcomeDomain", "TaskDecomposer"]
+__all__ = ["Decomposition", "GoalCompiler", "OutcomeDomain", "RepositoryContextInspector", "TaskDecomposer"]

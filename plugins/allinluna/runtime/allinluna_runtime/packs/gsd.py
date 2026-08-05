@@ -32,7 +32,7 @@ PHASE_EXPORTS = {
 PHASE_RECIPES = {
     "clarify": (("capture-goal", "Capture the goal and constraints"), ("resolve-material-unknowns", "Resolve only architecture-changing unknowns"), ("emit-goal-contract", "Emit GoalContract")),
     "specify": (("define-contracts", "Define imports, exports, ownership, and done_when"), ("define-verification", "Define executable verification evidence"), ("emit-task-contracts", "Emit TaskContracts")),
-    "decompose": (("build-lanes", "Build independent top-level Lanes"), ("seed-work-graphs", "Seed bounded lane-local WorkGraphs"), ("emit-lane-graph", "Emit LaneGraph with promotion boundaries")),
+    "decompose": (("build-lane-workunit-graph", "Build the lane-local WorkUnit graph"), ("seed-dynamic-expansion", "Seed bounded WorkUnits for lane-local dynamic expansion"), ("emit-promotion-boundary", "Emit lane-local promotion-boundary metadata")),
     "implement": (("execute-work", "Execute ready WorkUnits"), ("check-work", "Run declared checks"), ("correct-same-worker", "Correct defects on the same worker"), ("aggregate-artifacts", "Aggregate verified implementation artifacts")),
     "verify": (("verify-contracts", "Verify contract revision and done_when"), ("verify-workspace", "Verify changed paths and workspace evidence"), ("emit-failure-or-evidence", "Emit failure packet or VerificationEvidence")),
     "integrate": (("confirm-current-inputs", "Confirm required exports and contracts are current"), ("confirm-clean-boundary", "Confirm no unresolved blocker and valid workspace evidence"), ("emit-integrated-result", "Emit IntegratedResult")),
@@ -227,6 +227,7 @@ class GSDPack:
                 "compiler": {"name": "GoalCompiler", "version": "2.1"},
                 "decomposer": {"name": "TaskDecomposer", "version": TaskDecomposer.version},
                 "decomposition": decomposition.to_dict(),
+                "repository_context": dict(decomposition.repository_context),
                 "outcome_domain_layer": {
                     "task_ids": [str(task.id) for task in tasks],
                     "parallel_task_ids": [str(task.id) for task in tasks if not task.dependencies],

@@ -140,6 +140,7 @@ class DeliveryPack:
                 "compiler": {"name": "GoalCompiler", "version": "2.1"},
                 "decomposer": {"name": "TaskDecomposer", "version": TaskDecomposer.version},
                 "decomposition": decomposition.to_dict(),
+                "repository_context": dict(decomposition.repository_context),
                 "outcome_domain_layer": {
                     "task_ids": [str(task.id) for task in tasks],
                     "parallel_task_ids": [str(task.id) for task in tasks if not task.dependencies],

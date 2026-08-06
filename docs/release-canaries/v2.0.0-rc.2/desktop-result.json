@@ -1,0 +1,22 @@
+{
+  "protocol": "desktop-canary-result/v1",
+  "artifact": {
+    "wheel": "dist/allinluna-2.0.0rc2-py3-none-any.whl",
+    "wheel_sha256": "b501de43555e13f0e73623d95a5dacbf36990c1aef941875e051138dec6a4293",
+    "source_commit": "f58aa56a9568036e71b42ffa5fa6884aed17a7c8"
+  },
+  "thread_id": "019fd5b5-6c35-7171-811f-04f90cec5c1e",
+  "host_id": "local",
+  "projectless_output_directory": "C:\\Users\\ZENX0\\Documents\\Codex\\2026-08-06\\allinluna-task-run-desktop-canary-v2-rc2-task-deliver\\outputs",
+  "thread_status": "idle",
+  "turn_id": "019fd5b5-718f-7cc2-92c0-d1775949f4a5",
+  "turn_status": "completed",
+  "child_handoff": {
+    "protocol": "lane-handoff/v1",
+    "handoff_id": "handoff-0bcdad3031ec472e",
+    "status": "blocked",
+    "blocker_code": "lane.incomplete",
+    "blocker_detail": "lane-local native_subagent.spawn returned ACTION_RELAY_REQUIRED because no HostAdapter was bound",
+    "global_task_mutation": false
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "protocol": "host-receipt/v1",
+  "receipt_id": "desktop-canary-receipt-019fd5b56c3571711811f04f90cec5c1e",
+  "dispatch_key": "intent:lane:053bfa860189def493e9",
+  "action_id": "action-197c4ae4d73d894cbaee",
+  "dispatch_id": "lane-run-desktop-canary-v2-rc2:task:deliver-attempt-1",
+  "task_id": "run-desktop-canary-v2-rc2:task:deliver",
+  "thread_id": "019fd5b5-6c35-7171-811f-04f90cec5c1e",
+  "client_thread_id": null,
+  "status": "active",
+  "source": "codex_app",
+  "host_id": "local",
+  "actual": true,
+  "actual_tool": "codex_app__create_thread",
+  "actual_capability": "codex_app__create_thread",
+  "action_contract_hash": "50b03fc7bec0146336d620c969449d66775ebfad7a3b51636707ab3f04a35801",
+  "resource_receipt": {
+    "requested": {
+      "model": "gpt-5.3-codex-spark",
+      "reasoning": "high"
+    },
+    "resolved": {
+      "model": "gpt-5.3-codex-spark",
+      "reasoning": "high"
+    },
+    "actual": null,
+    "actual_state": "unresolved",
+    "evidence_source": null,
+    "observed_at": null
+  },
+  "payload": {
+    "desktop_export_ref": "codex-app://local/019fd5b5-6c35-7171-811f-04f90cec5c1e/turn/019fd5b5-718f-7cc2-92c0-d1775949f4a5"
+  }
+}

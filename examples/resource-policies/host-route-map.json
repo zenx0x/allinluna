@@ -1,0 +1,24 @@
+{
+  "host_id": "example-host",
+  "host_version": "example-1",
+  "plugin_version": "example-plugin-1",
+  "tools": [],
+  "capability_routes": {
+    "planning.semantic": {
+      "model": "deployment-route-planning",
+      "reasoning": "high"
+    },
+    "lane.synthesis": {
+      "model": "deployment-route-synthesis",
+      "reasoning": "medium"
+    },
+    "work.implementation": {
+      "model": "deployment-route-implementation",
+      "reasoning": "high"
+    },
+    "verify.independent": {
+      "model": "deployment-route-verification",
+      "reasoning": "xhigh"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "protocol": "desktop-canary-request/v1",
+  "intent_id": "desktop-canary-v2-rc2",
+  "goal": "Run the v2.0.0-rc.2 real Desktop canary",
+  "model": "gpt-5.3-codex-spark",
+  "reasoning": "high",
+  "target": {
+    "type": "projectless",
+    "directoryName": "allinluna-rc2-desktop-canary"
+  },
+  "external_action_policy": "ask",
+  "receipt_protocol": "host-receipt/v1"
+}

@@ -78,13 +78,11 @@ failure recovery. Do not add GSD phases to Core.
 
 ## Resources and permissions
 
-Model and reasoning choices come from the Run resource envelope and may be
-overridden by a narrower Task or WorkUnit resource envelope. The allowed
-deployment envelope is Luna-class models, normally at medium/high/xhigh
-reasoning, with max reserved for critical work, plus
-`gpt-5.3-codex-spark` outside Luna. Core does not hardcode a concrete model
-route. Preserve requested, resolved, and actual values
-separately. If the host cannot provide an actual model receipt, record
+Resource choices follow this precedence: explicit user request, then a
+Task/WorkUnit override, user preference, Pack capability, deployment/host
+capability, and finally the current session/host default. Core is
+vendor-neutral and does not hardcode a provider or concrete model route.
+Preserve requested, resolved, and actual values separately. If the host cannot provide an actual model receipt, record
 `actual: null` and `actual_state: unresolved`; never claim a fallback or
 fabricate a receipt. A narrower scope may change compute resources but may not
 expand permissions or ownership.

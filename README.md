@@ -1,4 +1,4 @@
-# All in Luna 2.0.0-rc.1
+# All in Luna
 
 [English](README.en.md)
 
@@ -14,6 +14,8 @@ All in Luna 是一个分层执行运行时：把用户目标编译为全局 Task
 - Research Routes route packet。
 
 Skill 会编译 `RunIntent` 与 `TaskContracts`，选择 Workflow Pack，调用 vNext runtime/CLI；用户不需要先学习内部 schema 或调度状态。
+
+从用户视角开始阅读：[快速开始](docs/user/quickstart.md)、[输入与旅程](docs/user/input-and-journeys.md)、[纯目标示例](docs/examples/plain-goal.md)。内部注册表和 launcher 只用于发现能力，不是产品入口。
 
 ## 执行模型
 
@@ -35,7 +37,7 @@ Pack 只能经公开 Core API 访问 Store/Context/Artifact/Host；manifest、en
 
 ## 资源与权限
 
-模型与推理等级由 Run 资源配置决定，并可由更窄的 Task/WorkUnit 配置覆盖。当前 RC 的允许包络是 Luna 类模型，通常使用 medium/high/xhigh，max 仅用于关键任务；Luna 之外额外允许 `gpt-5.3-codex-spark`。Core 不写死具体模型路由。requested、resolved、actual 始终分开记录：requested 与 resolved 描述路由；actual 只在宿主明确回传时记录，绝不从路由或任务正文推断。
+资源选择遵循固定优先级：用户显式请求 > Task/WorkUnit override > 用户偏好 > Pack capability > deployment/host > current session/host default。Core 不写死供应商或具体模型路由。requested、resolved、actual 始终分开记录：requested 与 resolved 描述路由；actual 只在宿主明确回传时记录，绝不从路由或任务正文推断。
 
 宿主资源路由遥测是可选的 adapter diagnostics。只有明确的 `actual host receipt` 能填充 actual；缺少模型、推理或 reroute 遥测时，`actual` 保持 `null`、`actual_state` 保持 `unresolved`；普通执行、handoff 和结果完成仍可继续。`codex_app__create_thread` 的 exact action 只有在 host route resolution 得到非空 model 后才冻结 `action_contract_hash`；route 未解析时只输出不可执行的 route-resolution action。`runtime.db` schema v8 持久化 requested/resolved/actual 三组资源值、outbox、receipt 和 recovery 状态。
 
@@ -74,6 +76,8 @@ Evidence checks 使用受超时约束的受控命令执行并将 stdout、stderr
 
 `LegacyPlanImportAPI`、`LegacyRunStateImportAPI`、`LegacyResourceTranslator` 都是 read-only parse/validate/translate API：旧 plan/run-state 不回写，resource profiles 转成 `ResourceEnvelope`，loss、unknown、warnings 和 model evidence 都显式返回。没有 actual receipt 时 model evidence 保持 unresolved。
 
+遇到 relay、项目解析、资源遥测或恢复问题时，先看[排障指南](docs/troubleshooting/common-issues.md)。
+
 ## 安装与示例
 
 在 Codex Plugins 中选择 `plugins/allinluna/`。Python 入口示例：
@@ -87,5 +91,7 @@ compiled = SinglePublicSkillAPI().compile({
 })
 print(compiled.task_graph.to_dict())
 ```
+
+架构导读见[公开表面与证据边界](docs/architecture/public-surface.md)。RC2 冻结的产品、接口和验收契约位于 `docs/architecture/v2-rc2/`；该目录由契约冻结 lane 维护。
 
 Apache License 2.0，详见 `LICENSE`。

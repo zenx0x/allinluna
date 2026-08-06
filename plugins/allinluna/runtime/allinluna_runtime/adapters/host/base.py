@@ -45,6 +45,40 @@ def _copy(value: Any) -> Any:
     return deepcopy(value)
 
 
+def _public_create_target(value: Any) -> Any:
+    """Normalize an internal project target to the Desktop public schema.
+
+    Project resolution retains path and branch identity for trust checks, but
+    the public ``create_thread`` contract accepts only a typed worktree plus
+    an optional ``startingState``.  Keeping this conversion at the exact
+    HostAction boundary lets internal planners continue to inspect the full
+    resolved identity without leaking unsupported fields into the host call.
+    """
+
+    if not isinstance(value, Mapping) or value.get("type") != "project":
+        return value
+    environment = value.get("environment")
+    if not isinstance(environment, Mapping) or environment.get("type") != "worktree":
+        return value
+    target_environment: dict[str, Any] = {"type": "worktree"}
+    starting_state = environment.get("startingState") or environment.get("starting_state")
+    if isinstance(starting_state, Mapping):
+        if starting_state.get("type") == "branch" and _text(starting_state.get("branchName")):
+            target_environment["startingState"] = {
+                "type": "branch",
+                "branchName": _text(starting_state.get("branchName")),
+            }
+    else:
+        branch = _text(environment.get("branch"))
+        if branch:
+            target_environment["startingState"] = {"type": "branch", "branchName": branch}
+    return {
+        "type": "project",
+        "projectId": value.get("projectId"),
+        "environment": target_environment,
+    }
+
+
 def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -338,7 +372,10 @@ class HostAction(_MappingRecord):
             if required != tool:
                 raise ValueError("top_level_task required capability must equal its exact tool")
             object.__setattr__(self, "host_capability_required", required)
-            arguments = self.arguments if isinstance(self.arguments, Mapping) else {}
+            arguments = dict(self.arguments) if isinstance(self.arguments, Mapping) else {}
+            if "target" in arguments:
+                arguments["target"] = _public_create_target(arguments["target"])
+                object.__setattr__(self, "arguments", arguments)
             missing = [
                 name for name in ("target", "prompt", "model", "title")
                 if name not in arguments

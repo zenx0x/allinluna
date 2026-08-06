@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "distributions" / "distribution-manifest.json"
 EXCLUDED_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 EXCLUDED_FILES = {".DS_Store", "Thumbs.db"}
+RC_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+-rc\.[1-9]\d*$")
 
 
 def is_release_file(path: Path) -> bool:
@@ -35,6 +37,10 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def is_rc_version(value: object) -> bool:
+    return isinstance(value, str) and RC_VERSION_PATTERN.fullmatch(value) is not None
+
+
 def git_value(root: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
@@ -53,14 +59,23 @@ def source_provenance(root: Path) -> dict[str, str]:
 
 def expand_sources(root: Path, entries: list[str]) -> list[tuple[str, Path]]:
     expanded: list[tuple[str, Path]] = []
+    root_resolved = root.resolve()
     for entry in entries:
         source = root / entry
         if not source.exists():
             raise FileNotFoundError(f"shared source does not exist: {entry}")
+        if source.is_symlink():
+            raise ValueError(f"shared source may not be a symlink: {entry}")
+        if root_resolved not in source.resolve().parents and source.resolve() != root_resolved:
+            raise ValueError(f"shared source escapes repository root: {entry}")
         if source.is_file():
             expanded.append((entry, source))
         else:
             for child in sorted(p for p in source.rglob("*") if p.is_file() and is_release_file(p)):
+                if child.is_symlink():
+                    raise ValueError(f"shared source contains a symlink: {child.relative_to(root)}")
+                if root_resolved not in child.resolve().parents:
+                    raise ValueError(f"shared source escapes repository root: {child.relative_to(root)}")
                 expanded.append((child.relative_to(root).as_posix(), child))
     return expanded
 
@@ -74,7 +89,12 @@ def canonical_inventory(root: Path, manifest: dict) -> list[dict[str, str]]:
 
 
 def copy_tree(source: Path, target: Path) -> None:
+    if source.is_symlink():
+        raise ValueError(f"release source may not be a symlink: {source}")
     if source.is_dir():
+        for child in source.rglob("*"):
+            if child.is_symlink():
+                raise ValueError(f"release source contains a symlink: {child}")
         shutil.copytree(
             source,
             target,
@@ -101,10 +121,10 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     rc_tag = spec.get("rc_tag")
     if release.get("status") != "release-candidate" or release.get("stable_release") is not False:
         raise ValueError("distribution manifest must describe an unreleased release candidate")
-    if not isinstance(version, str) or not version.endswith("-rc.1"):
-        raise ValueError(f"{spec['id']} must declare an RC version")
-    if not isinstance(rc_tag, str) or not rc_tag.startswith(f"{spec['plugin_name']}/"):
-        raise ValueError(f"{spec['id']} must declare a namespaced RC tag")
+    if not is_rc_version(version):
+        raise ValueError(f"{spec['id']} must declare a semantic RC version")
+    if rc_tag != f"{spec['plugin_name']}/{version}":
+        raise ValueError(f"{spec['id']} must declare the exact namespaced RC tag for its version")
     artifact = output / spec["id"]
     if artifact.exists():
         shutil.rmtree(artifact)
@@ -131,6 +151,15 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
     overlay = root / spec["overlay"]
     if not overlay.is_dir():
         raise FileNotFoundError(f"overlay does not exist: {spec['overlay']}")
+    allowed_overlay_roots = {
+        "brand.json", "cases.json", "default-entry.md", "README.md", "README.en.md",
+        "social.md", "topics.json", "skill-metadata",
+    }
+    for source in overlay.rglob("*"):
+        if source.is_symlink():
+            raise ValueError(f"overlay contains a symlink: {source}")
+        if source.is_file() and source.relative_to(overlay).parts[0] not in allowed_overlay_roots:
+            raise ValueError(f"overlay file is outside the manifest allowlist: {source.relative_to(overlay)}")
     overlay_target = artifact / "overlay"
     for source in sorted(p for p in overlay.rglob("*") if p.is_file() and is_release_file(p)):
         relative = source.relative_to(overlay)
@@ -140,6 +169,9 @@ def build_distribution(root: Path, output: Path, manifest: dict, spec: dict, pro
             copy_tree(source, artifact / relative.name)
         else:
             copy_tree(source, overlay_target / relative)
+    if spec["id"] == "all-in-luna":
+        copy_tree(root / "README.md", artifact / "README.md")
+        copy_tree(root / "README.en.md", artifact / "README.en.md")
 
     metadata_root = root / "plugins" / spec["plugin_name"]
     metadata_path = metadata_root / ".codex-plugin" / "plugin.json"

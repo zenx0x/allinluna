@@ -1,4 +1,4 @@
-# Research Routes 0.3.0-rc.1
+# Research Routes 0.3.0-rc.2
 
 [简体中文（默认）](README.md) | [English](README.en.md)
 
@@ -10,7 +10,7 @@ Research Routes preserves route-neutral Claims, Evidence, unknowns, contradictio
 question or evidence package -> route map -> claims/evidence -> failure/recovery records -> reversible probe -> HumanDecision seam -> explicit handoff
 ```
 
-The research Pack runtime is under `plugins/research-routes/runtime/research_routes_runtime/` and is version `0.3.0-rc.1`. It uses only generic Core artifact, snapshot, decision, and promotion boundaries. The terrain map never selects a route or authorizes experiments, implementation, or canonical state. A route authorization must name a confirmed HumanDecision; canonical promotion requires a separate `canonical-promotion` decision. Conformance traces distinguish `requested`, `resolved`, and `actual` resource values and use schema v8, route assurance, and exact relay terminology. A diagnostics report is `PASS` when `identity`, `create`, `read`, `wait`, `cancel`, and `idempotency` checks are complete; missing/blocked traces are `BLOCKED`.
+The research Pack runtime is under `plugins/research-routes/runtime/research_routes_runtime/` and is version `0.3.0-rc.2`. It uses only generic Core artifact, snapshot, decision, and promotion boundaries. The terrain map never selects a route or authorizes experiments, implementation, or canonical state. A route authorization must name a confirmed HumanDecision; canonical promotion requires a separate `canonical-promotion` decision. Conformance traces distinguish `requested`, `resolved`, and `actual` resource values and use schema v8, route assurance, and exact relay terminology. A diagnostics report is `PASS` when `identity`, `create`, `read`, `wait`, `cancel`, and `idempotency` checks are complete; missing/blocked traces are `BLOCKED`.
 
 ## Install and file locations
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0-rc.2 / 0.3.0-rc.2 — product hardening
+
+- Distribution validation now derives candidate versions and namespaced tags
+  from the release manifest instead of pinning the implementation to RC1.
+- Built artifacts verify every canonical runtime, Skill, test, and eval file
+  against the source inventory, reject source or overlay symlinks, and enforce
+  the declared overlay allowlist.
+- Standalone marketplace manifests and isolated co-installation checks retain
+  distinct plugin identities and release metadata without authorizing stable
+  publication.
+- The public README and Skill now describe the user journey first and keep
+  resource selection vendor-neutral with explicit precedence.
+- Resource policy preserves layered route sources, strict invalid-policy
+  handling, route-aware host identity, hard locks, and resource inheritance
+  across Store recovery.
+- Verification planning and command trust keep model/legacy/external commands
+  non-executable by default and require provenance, sandbox, and JIT approval.
+
 ## 2.0.0-rc.1 — v2 release hardening
 
 This release candidate hardens the vNext runtime without redesigning Core,

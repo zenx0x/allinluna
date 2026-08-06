@@ -453,6 +453,18 @@ def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
                                 "id": "producer",
                                 "outcome": "produce the upstream artifact",
                                 "done_when": ["producer check passes"],
+                                "verification_specs": [
+                                    {
+                                        "id": "producer-check",
+                                        "kind": "command",
+                                        "command": [
+                                            sys.executable,
+                                            "-c",
+                                            "print('distributed-child-check')",
+                                        ],
+                                        "satisfies": ["producer check passes"],
+                                    }
+                                ],
                                 "ownership": ["seed.txt"],
                                 "exports": ["ProducerArtifact"],
                             },
@@ -460,6 +472,18 @@ def _scenario_public_runtime_flow(fixture: Any) -> dict[str, Any]:
                                 "id": "consumer",
                                 "outcome": "consume the upstream artifact",
                                 "done_when": ["consumer check passes"],
+                                "verification_specs": [
+                                    {
+                                        "id": "consumer-check",
+                                        "kind": "command",
+                                        "command": [
+                                            sys.executable,
+                                            "-c",
+                                            "print('distributed-child-check')",
+                                        ],
+                                        "satisfies": ["consumer check passes"],
+                                    }
+                                ],
                                 "ownership": ["seed.txt"],
                                 "dependencies": ["producer"],
                                 "exports": ["FinalArtifact"],

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shlex
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -21,6 +21,7 @@ from typing import Any, Protocol
 
 from .adapters.workspace.base import stable_digest
 from .artifacts import ArtifactError, ArtifactStore
+from .check_trust import CommandTrustError, CommandTrustEvaluator, allowed_environment, normalize_command
 from .verification import VerificationSpec, VerificationSpecError, verification_specs
 
 
@@ -88,10 +89,13 @@ class CheckReceipt:
     stderr_ref: str | None = None
     satisfies: tuple[str, ...] = ()
     details: Mapping[str, Any] = field(default_factory=dict)
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+    trust: Mapping[str, Any] = field(default_factory=dict)
+    execution: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         command: str | list[str] = list(self.command) if isinstance(self.command, tuple) else self.command
-        return {
+        value = {
             "name": self.name,
             "status": self.status,
             "receipt_id": self.receipt_id,
@@ -104,6 +108,13 @@ class CheckReceipt:
             "satisfies": list(self.satisfies),
             "details": dict(self.details),
         }
+        if self.provenance:
+            value["provenance"] = dict(self.provenance)
+        if self.trust:
+            value["trust"] = dict(self.trust)
+        if self.execution:
+            value["execution"] = dict(self.execution)
+        return value
 
 
 class CheckRunner:
@@ -125,10 +136,16 @@ class CheckRunner:
         *,
         cwd: str | Path | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        trust_evaluator: CommandTrustEvaluator | None = None,
+        output_limit_bytes: int = 2_000_000,
     ) -> None:
         self.artifact_store = artifact_store
         self.cwd = str(cwd) if cwd is not None else None
         self.timeout_seconds = self._timeout(timeout_seconds)
+        self.trust_evaluator = trust_evaluator or CommandTrustEvaluator()
+        if isinstance(output_limit_bytes, bool) or int(output_limit_bytes) < 1:
+            raise ValueError("output_limit_bytes must be positive")
+        self.output_limit_bytes = int(output_limit_bytes)
 
     @classmethod
     def _timeout(cls, value: Any) -> float:
@@ -155,7 +172,8 @@ class CheckRunner:
         name = str(value.get("name") or value.get("id") or value.get("command") or "unnamed-check")
         command_value = value.get("command")
         runner = value.get("runner") or value.get("run")
-        timeout_seconds = self._timeout(value.get("timeout_seconds", self.timeout_seconds))
+        execution = value.get("execution") if isinstance(value.get("execution"), Mapping) else {}
+        timeout_seconds = self._timeout(value.get("timeout_seconds", execution.get("timeout_seconds", self.timeout_seconds)))
         started = _now()
         stdout = ""
         stderr = ""
@@ -167,32 +185,55 @@ class CheckRunner:
         }
         status = "failed"
         command: str | tuple[str, ...] = ""
+        trust = {}
         try:
             if callable(runner):
                 raise ValueError(
                     "direct callable checks are disabled; use an executable command with timeout_seconds"
                 )
             elif command_value:
-                if isinstance(command_value, str):
-                    command = tuple(shlex.split(command_value, posix=False))
-                elif isinstance(command_value, Sequence) and not isinstance(command_value, (bytes, bytearray)):
-                    command = tuple(str(item) for item in command_value)
-                else:
-                    raise TypeError("check command must be a string or sequence")
-                if not command:
-                    raise ValueError("check command is empty")
-                completed = subprocess.run(
-                    list(command),
-                    cwd=str(value.get("cwd") or (scope or {}).get("worktree") or self.cwd or "" ) or None,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=timeout_seconds,
+                command = normalize_command(command_value)
+                decision = self.trust_evaluator.evaluate(
+                    command,
+                    provenance=value.get("provenance"),
+                    trust=value.get("trust"),
+                    execution=execution,
+                    cwd=value.get("cwd") or execution.get("cwd") or (scope or {}).get("worktree") or self.cwd,
+                    workspace=(scope or {}).get("worktree") or execution.get("workspace") or self.cwd,
                 )
-                exit_code = int(completed.returncode)
-                stdout = completed.stdout
-                stderr = completed.stderr
-                status = "pass" if exit_code == 0 else "fail"
+                trust = decision.to_dict()
+                details["trust"] = trust
+                if not decision.executable:
+                    status = "approval_required" if decision.approval_required else "failed"
+                    details.update({
+                        "error": decision.reason,
+                        "error_code": "VERIFICATION_DECISION_REQUIRED" if decision.approval_required else "COMMAND_TRUST_DENIED",
+                    })
+                    command = decision.command
+                else:
+                    cwd = decision.cwd or value.get("cwd") or execution.get("cwd") or (scope or {}).get("worktree") or self.cwd
+                    env_allowlist = decision.env_allowlist
+                    env = allowed_environment(env_allowlist) if env_allowlist else None
+                    if env is not None:
+                        # Python and platform launchers need these two values
+                        # even when a caller supplied a narrow allowlist.
+                        for key in ("SystemRoot", "WINDIR"):
+                            if key in os.environ and key not in env and key in env_allowlist:
+                                env[key] = os.environ[key]
+                    completed = subprocess.run(
+                        list(command),
+                        cwd=str(cwd or "") or None,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        shell=False,
+                        timeout=decision.timeout_seconds or timeout_seconds,
+                    )
+                    exit_code = int(completed.returncode)
+                    stdout = str(completed.stdout or "")[: self.output_limit_bytes]
+                    stderr = str(completed.stderr or "")[: self.output_limit_bytes]
+                    status = "pass" if exit_code == 0 else "fail"
             else:
                 details["error"] = "check has no executable command or runner"
                 command = f"unexecuted:{name}"
@@ -203,6 +244,11 @@ class CheckRunner:
             details.update({"error": timeout_error, "error_code": "timeout"})
             status = "timeout"
             command = command or f"timed-out:{name}"
+        except CommandTrustError as exc:
+            details["error"] = f"{type(exc).__name__}: {exc}"
+            details["error_code"] = "COMMAND_TRUST_DENIED"
+            status = "failed"
+            command = command or f"failed:{name}"
         except (OSError, TypeError, ValueError) as exc:
             details["error"] = f"{type(exc).__name__}: {exc}"
             details["error_code"] = "execution-error"
@@ -234,6 +280,9 @@ class CheckRunner:
             stderr_ref=stderr_ref,
             satisfies=satisfies,
             details={**details, "started_at": started},
+            provenance=value.get("provenance") if isinstance(value.get("provenance"), Mapping) else {},
+            trust=trust,
+            execution=execution,
         ).to_dict()
 
     run_check = run
@@ -358,7 +407,7 @@ class EvidenceCollector:
             supplied_specs = verification_specs(checks) if checks is not None else verification_specs(handoff_value.get("verification_specs", ()))
         except VerificationSpecError as exc:
             raise EvidenceCollectionError(str(exc)) from exc
-        if checks is None and supplied_specs and tuple(spec.to_dict() for spec in supplied_specs) != tuple(spec.to_dict() for spec in declared_specs):
+        if checks is None and tuple(spec.to_dict() for spec in supplied_specs) != tuple(spec.to_dict() for spec in declared_specs) and supplied_specs:
             raise EvidenceCollectionError("handoff cannot replace contract verification_specs")
         # ``checks=`` is a direct Collector compatibility seam for callers
         # that already provide typed procedures.  It never accepts language as
@@ -384,6 +433,11 @@ class EvidenceCollector:
         manual_evidence_required = not automatable_specs or any(spec.kind == "human" for spec in active_specs)
         if manual_evidence_required:
             errors.append("manual_evidence_required")
+        decision_required = any(
+            str(spec.trust.get("state") or "trusted") != "trusted" for spec in active_specs if spec.kind == "command"
+        ) or any(item.get("status") == "approval_required" for item in check_receipts if isinstance(item, Mapping))
+        if decision_required:
+            errors.append("verification_decision_required")
         if selected.checks_required and automatable_specs and (not check_receipts or any(not self._valid_check(item) for item in check_receipts)):
             errors.append("checks_not_verified")
 
@@ -426,6 +480,7 @@ class EvidenceCollector:
             "checks": check_receipts,
             "verification_specs": [spec.to_dict() for spec in active_specs],
             "manual_evidence_required": manual_evidence_required,
+            "decision_required": decision_required,
             "done_when": done_evidence,
             "artifacts": artifact_refs,
             "exports": collected_exports,
@@ -449,6 +504,10 @@ class EvidenceCollector:
         except VerificationSpecError as exc:
             errors.append(f"verification_specs:{exc}")
             declared_specs = bundled_specs = ()
+        # A direct ``checks=`` collection may carry additional observed
+        # procedures when the contract intentionally has no declared command
+        # list.  Once a contract declares procedures, the handoff must match
+        # them exactly and cannot replace them.
         if declared_specs and tuple(item.to_dict() for item in declared_specs) != tuple(item.to_dict() for item in bundled_specs):
             errors.append("verification_specs_contract_mismatch")
         if value.get("kind") != "evidence-bundle" or value.get("protocol") != "evidence-bundle/v1" or value.get("collector") != self.COLLECTOR:
@@ -467,6 +526,8 @@ class EvidenceCollector:
             errors.extend(str(item) for item in value.get("errors", ()))
         if value.get("manual_evidence_required") is True:
             errors.append("manual_evidence_required")
+        if value.get("decision_required") is True:
+            errors.append("verification_decision_required")
         if not value.get("checks") or any(not self._valid_check(item) for item in value.get("checks", ())):
             errors.append("checks_not_verified")
         if not all(isinstance(item, Mapping) and item.get("satisfied") is True for item in value.get("done_when", ())):
@@ -624,7 +685,12 @@ class EvidenceCollector:
 
     @staticmethod
     def _valid_check(value: Any) -> bool:
-        return isinstance(value, Mapping) and value.get("status") == "pass" and bool(value.get("receipt_id")) and str(value.get("source", "")).startswith("allinluna.check-runner")
+        return (
+            isinstance(value, Mapping)
+            and value.get("status") == "pass"
+            and bool(value.get("receipt_id"))
+            and str(value.get("source", "")).startswith(("allinluna.check-runner", "allinluna.evidence-collector"))
+        )
 
     @staticmethod
     def _digest(value: Mapping[str, Any]) -> str:

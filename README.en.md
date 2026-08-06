@@ -1,4 +1,4 @@
-# All in Luna 2.0.0-rc.1
+# All in Luna
 
 [简体中文](README.md)
 
@@ -14,6 +14,8 @@ There is one public Skill: `plugins/allinluna/skills/allinluna/SKILL.md`. It acc
 - a Research Routes packet.
 
 The Skill compiles `RunIntent` and `TaskContracts`, selects a Workflow Pack, and calls the vNext runtime/CLI. Users do not need to learn internal schemas or scheduler state first.
+
+Start with the [quickstart](docs/user/quickstart.md), [inputs and journeys](docs/user/input-and-journeys.md), or [plain-goal example](docs/examples/plain-goal.md). The registry and launcher are discoverability mechanisms, not the product entry point.
 
 ## Execution model
 
@@ -33,7 +35,7 @@ Packs use Store, Context, Artifact, Host, and Capability only through public Cor
 
 ## Resources and permissions
 
-Model and reasoning choices come from the Run resource policy and may be overridden by a narrower Task or WorkUnit policy. This RC allows Luna-class models, normally at medium/high/xhigh reasoning with max reserved for critical work, plus `gpt-5.3-codex-spark` outside Luna. Core does not hardcode a concrete model route. Keep requested, resolved, and actual evidence separate. Requested and resolved describe routing; actual is recorded only from explicit host evidence and is never inferred from either route or task prose.
+Resource selection follows one precedence order: explicit user request > Task/WorkUnit override > user preference > Pack capability > deployment/host > current session/host default. Core remains vendor-neutral and does not hardcode a provider or concrete model route. Keep requested, resolved, and actual evidence separate. Requested and resolved describe routing; actual is recorded only from explicit host evidence and is never inferred from either route or task prose.
 
 Host resource-route telemetry is optional adapter diagnostics. If model, reasoning, or reroute telemetry is unavailable, `actual` remains `null` and `actual_state` remains `unresolved`; ordinary execution, handoff, and result completion continue normally. An exact `codex_app__create_thread` action is frozen only after host route resolution supplies a non-empty model; an unresolved route emits a non-executable resolution action. `runtime.db` schema v8 persists requested/resolved/actual resource values, outbox, receipts, and recovery state.
 
@@ -71,6 +73,8 @@ Neutral action checks require coherent `create`, `read`, `wait`, `cancel`, and `
 
 `LegacyPlanImportAPI`, `LegacyRunStateImportAPI`, and `LegacyResourceTranslator` are read-only parse/validate/translate APIs. Legacy plans and run snapshots are never written back; resource profiles become `ResourceEnvelope` values, and losses, unknowns, warnings, and model evidence are explicit. Without an actual receipt, model evidence remains unresolved.
 
+For relay, project resolution, resource telemetry, or recovery problems, use the [troubleshooting guide](docs/troubleshooting/common-issues.md).
+
 ## Install and example
 
 Choose `plugins/allinluna/` in Codex Plugins. Python entry example:
@@ -84,5 +88,7 @@ compiled = SinglePublicSkillAPI().compile({
 })
 print(compiled.task_graph.to_dict())
 ```
+
+[Public surface and evidence boundaries](docs/architecture/public-surface.md) provides the architecture view. The RC2-frozen product, interface, and acceptance contracts live under `docs/architecture/v2-rc2/`; that subtree is maintained by the contract-freeze lane.
 
 Apache License 2.0. See `LICENSE`.

@@ -1,0 +1,10 @@
+{
+  "top_level_slots": "auto",
+  "total_subagent_slots": "auto",
+  "subagent_slots_per_lane": "auto",
+  "model_policy": "auto",
+  "reasoning_policy": "auto",
+  "capability_class": "work.implementation",
+  "route_assurance": "observe_if_exposed",
+  "external_action_policy": "ask"
+}

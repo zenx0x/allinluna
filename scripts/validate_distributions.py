@@ -8,7 +8,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from build_distributions import ROOT, build, expand_sources, plugin_root_for, read_json, sha256, source_provenance
+from build_distributions import ROOT, build, expand_sources, is_rc_version, plugin_root_for, read_json, sha256, source_provenance
 
 
 SOURCE_ONLY_README_PATHS = ("shared/", "runtime/shared", "allinluna-plan", "allinluna-run")
@@ -18,29 +18,23 @@ EXPECTED_RELEASE = {
     "tag_owner": "T6",
     "tag_timing": "after merged main",
 }
-EXPECTED_DISTRIBUTIONS = {
-    "all-in-luna": {"plugin_name": "allinluna", "version": "2.0.0-rc.1", "rc_tag": "allinluna/2.0.0-rc.1"},
-    "research-routes": {"plugin_name": "research-routes", "version": "0.3.0-rc.1", "rc_tag": "research-routes/0.3.0-rc.1"},
-}
-
-
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     manifest = read_json(root / "distributions" / "distribution-manifest.json")
     errors: list[str] = []
     specs = manifest.get("distributions", [])
-    if {spec.get("id") for spec in specs} != {"all-in-luna", "research-routes"}:
+    if len(specs) != 2 or {spec.get("id") for spec in specs} != {"all-in-luna", "research-routes"}:
         errors.append("manifest must define exactly all-in-luna and research-routes")
     release = manifest.get("release", {})
     for field, expected in EXPECTED_RELEASE.items():
         if release.get(field) != expected:
             errors.append(f"release.{field} must be {expected!r}")
     for spec in specs:
-        expected = EXPECTED_DISTRIBUTIONS.get(spec.get("id"))
-        if expected is None:
-            continue
-        for field, value in expected.items():
-            if spec.get(field) != value:
-                errors.append(f"{spec['id']} manifest {field} must be {value!r}")
+        version = spec.get("version")
+        plugin_name = spec.get("plugin_name")
+        if not is_rc_version(version):
+            errors.append(f"{spec.get('id')} manifest version must be a semantic RC version")
+        if spec.get("rc_tag") != f"{plugin_name}/{version}":
+            errors.append(f"{spec.get('id')} manifest rc_tag must match plugin_name/version")
     if not manifest.get("overlay_allowlist") or not manifest.get("canonical_paths"):
         errors.append("overlay allowlist is missing")
     try:
@@ -64,6 +58,8 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             for path in required:
                 if not path.is_file():
                     errors.append(f"{spec['id']} missing {path.relative_to(artifact)}")
+            if any(not path.is_file() for path in required):
+                continue
             if not (plugin_root / ".codex-plugin/plugin.json").is_file():
                 continue
             plugin = read_json(plugin_root / ".codex-plugin/plugin.json")
@@ -107,13 +103,36 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
                 errors.append(f"{spec['id']} artifact provenance does not match current HEAD")
             if (artifact / "LICENSE").read_bytes() != (root / "LICENSE").read_bytes():
                 errors.append(f"{spec['id']} LICENSE differs from source LICENSE")
+            inventory = read_json(artifact / "canonical-files.json")
+            entries = inventory.get("files", [])
+            sources = [entry.get("source") for entry in entries]
+            if len(sources) != len(set(sources)):
+                errors.append(f"{spec['id']} canonical source inventory contains duplicates")
+            canonical_prefix = "plugins/allinluna/"
+            for entry in entries:
+                source = entry.get("source")
+                expected_hash = entry.get("sha256")
+                if not isinstance(source, str) or not source.startswith((canonical_prefix, "tests/", "evals/")):
+                    errors.append(f"{spec['id']} canonical source path is invalid: {source!r}")
+                    continue
+                if source.startswith(canonical_prefix):
+                    artifact_path = plugin_root / source.removeprefix(canonical_prefix)
+                elif source.startswith(("tests/", "evals/")):
+                    artifact_path = plugin_root / source
+                else:
+                    errors.append(f"{spec['id']} canonical source path is invalid: {source!r}")
+                    continue
+                if not artifact_path.is_file():
+                    errors.append(f"{spec['id']} canonical file is missing: {source}")
+                elif sha256(artifact_path) != expected_hash:
+                    errors.append(f"{spec['id']} canonical file hash mismatch: {source}")
             if spec["id"] == "research-routes":
                 for readme_name in ("README.md", "README.en.md"):
                     readme = (artifact / readme_name).read_text(encoding="utf-8")
                     for source_only_path in SOURCE_ONLY_README_PATHS:
                         if source_only_path in readme:
                             errors.append(f"{spec['id']} {readme_name} contains source-only path {source_only_path}")
-            inventories.append(read_json(artifact / "canonical-files.json"))
+            inventories.append(inventory)
             if (plugin_root / "shared").exists() or (plugin_root / "runtime" / "shared").exists():
                 errors.append(f"{spec['id']} contains a duplicate shared runtime")
         if len(inventories) == 2 and inventories[0] != inventories[1]:

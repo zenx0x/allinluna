@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,6 +17,16 @@ from .adapters.host.codex_app_server import assemble_app_server_receipt
 from .packs.public_skill import SinglePublicSkillAPI
 from .resource import ResourceBroker
 from .store import Store
+
+
+def _runtime_version() -> str:
+    """Return the installed distribution version without requiring packaging."""
+
+    try:
+        return version("allinluna")
+    except PackageNotFoundError:
+        # Source checkouts intentionally remain runnable through PYTHONPATH.
+        return "2.0.0-rc.2"
 
 
 def _json(value: Any) -> str:
@@ -44,6 +55,7 @@ def _intent_id(explicit: str | None, goal: str) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="allinluna", description="All in Luna vNext runtime")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_runtime_version()}")
     parser.add_argument("--db", default="runtime.db", help="runtime.db path")
     sub = parser.add_subparsers(dest="command", required=True)
 

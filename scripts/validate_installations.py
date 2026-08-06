@@ -9,14 +9,19 @@ import tempfile
 from pathlib import Path
 import shutil
 
-from build_distributions import ROOT, build, read_json
-
-
-EXPECTED_VERSIONS = {"allinluna": "2.0.0-rc.1", "research-routes": "0.3.0-rc.1"}
+from build_distributions import ROOT, build, is_rc_version, read_json
 
 
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     errors: list[str] = []
+    manifest = read_json(root / "distributions" / "distribution-manifest.json")
+    expected_versions = {
+        spec.get("plugin_name"): spec.get("version")
+        for spec in manifest.get("distributions", [])
+    }
+    for name, version in expected_versions.items():
+        if not name or not is_rc_version(version):
+            errors.append(f"manifest has an invalid RC version for {name!r}: {version!r}")
     with tempfile.TemporaryDirectory(prefix="allinluna-install-") as temp:
         build_dir = Path(temp) / "build"
         artifacts = build(root, build_dir) if dist is None else [dist / "all-in-luna", dist / "research-routes"]
@@ -45,9 +50,9 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             if not name:
                 errors.append(f"plugin name missing in {artifact}")
                 continue
-            if name not in EXPECTED_VERSIONS:
+            if name not in expected_versions:
                 errors.append(f"unexpected plugin identity in {artifact}: {name}")
-            elif plugin.get("version") != EXPECTED_VERSIONS[name]:
+            elif plugin.get("version") != expected_versions[name]:
                 errors.append(f"{name} plugin version is stale: {plugin.get('version')!r}")
             destination = install_root / name
             shutil.copytree(artifact, destination)
@@ -73,8 +78,8 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             elif name == "allinluna":
                 text = skill.read_text(encoding="utf-8")
                 installed_manifest = read_json(installed_plugin_root / ".codex-plugin/plugin.json")
-                if installed_manifest.get("version") != "2.0.0-rc.1":
-                    errors.append("installed All in Luna plugin version is not 2.0.0-rc.1")
+                if installed_manifest.get("version") != expected_versions.get("allinluna"):
+                    errors.append("installed All in Luna plugin version does not match the manifest")
                 if not all(needle in text for needle in ("not hard", "locked", "resource_receipt.requested")):
                     errors.append("installed All in Luna Skill lacks configurable-resource receipt guidance")
             if not (install_root / name / "canonical-files.json").is_file():
@@ -84,7 +89,7 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
                 errors.append(f"{name} has no distribution release manifest")
             else:
                 artifact_manifest = read_json(artifact_manifest_path)
-                if artifact_manifest.get("version") != EXPECTED_VERSIONS.get(name):
+                if artifact_manifest.get("version") != expected_versions.get(name):
                     errors.append(f"{name} distribution manifest version is stale")
                 if artifact_manifest.get("release_status") != "release-candidate":
                     errors.append(f"{name} distribution is not marked release-candidate")

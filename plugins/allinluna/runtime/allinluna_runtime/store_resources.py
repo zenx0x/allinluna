@@ -424,20 +424,25 @@ class StoreResources:
                 run_policy = _loads(row.get("policy_json"), {})
                 task_resource = _loads(row.get("task_resource_json"), {})
                 entity_resource = _loads(row.get("resource_json"), {})
-                requested = entity_resource or task_resource or run_policy
+                # Recovery must replay the same narrowing/inheritance rule as
+                # live resolution: the run supplies defaults, then the Task,
+                # then the WorkUnit overrides only what it declares.  Picking
+                # the first non-empty mapping silently drops neutral
+                # capability classes or route assurance from a parent.
+                requested: dict[str, Any] = {}
+                for source in (run_policy, task_resource, entity_resource):
+                    if isinstance(source, Mapping):
+                        requested.update(source)
                 resolved = {
                     "capability_class": requested.get("capability_class")
-                    or run_policy.get("capability_class")
                     or ("lane.synthesis" if scope == "top-level" else "work.implementation"),
                     "route_assurance": requested.get("route_assurance")
-                    or run_policy.get("route_assurance")
                     or "observe_if_exposed",
                     "external_action_policy": run_policy.get("external_action_policy") or "deny",
                 }
-                model = requested.get("model") or run_policy.get("model")
+                model = requested.get("model")
                 reasoning = (
                     requested.get("reasoning") or requested.get("thinking")
-                    or run_policy.get("reasoning") or run_policy.get("thinking")
                 )
                 if model:
                     resolved["model"] = model

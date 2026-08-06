@@ -414,7 +414,27 @@ def target_for_task(state: Mapping[str, Any], task_id: str | None = None) -> dic
     environment = dict(resolved.get("environment") or {})
     if not environment or not _string(environment, "type"):
         return None
-    return {"type": "project", "projectId": resolved["projectId"], "environment": environment}
+    # The Codex App public create_thread contract accepts a typed worktree
+    # environment plus an optional startingState.  Project-resolution receipts
+    # also carry path/branch identity for trust checks, but those identity
+    # fields are not valid public-tool arguments and must not leak into the
+    # exact action relay payload.
+    if environment.get("type") != "worktree":
+        return None
+    target_environment: dict[str, Any] = {"type": "worktree"}
+    starting_state = environment.get("startingState") or environment.get("starting_state")
+    if isinstance(starting_state, Mapping):
+        state_type = _string(starting_state, "type")
+        if state_type == "branch" and _string(starting_state, "branchName"):
+            target_environment["startingState"] = {
+                "type": "branch",
+                "branchName": _string(starting_state, "branchName"),
+            }
+    else:
+        branch = _string(environment, "branch")
+        if branch:
+            target_environment["startingState"] = {"type": "branch", "branchName": branch}
+    return {"type": "project", "projectId": resolved["projectId"], "environment": target_environment}
 
 
 def owner_target(state: Mapping[str, Any]) -> dict[str, Any] | None:

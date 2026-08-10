@@ -2,6 +2,10 @@
 
 [简体中文](README.md)
 
+<p align="center">
+  <img src="docs/assets/brand/all-in-luna-mark.svg" width="112" alt="All in Luna mark" />
+</p>
+
 > **Stop running an entire project inside one AI conversation.**
 
 Give All in Luna one big goal.
@@ -11,6 +15,10 @@ It turns the work into independent top-level tasks: **run what can run in parall
 Each task can still use its own subagents, tools, Skills, or MCPs.
 
 **Parallel across tasks. Recursive inside tasks.**
+
+<p align="center">
+  <img src="docs/assets/brand/hero-topology.svg" alt="All in Luna task topology" />
+</p>
 
 ---
 
@@ -37,6 +45,10 @@ After enough turns, familiar problems appear:
 - the agent says “done,” but the outcome may not actually be complete.
 
 **All in Luna starts from one simple idea: one conversation should not have to carry an entire project.**
+
+<p align="center">
+  <img src="docs/assets/brand/before-after.svg" alt="One giant context versus clear task lanes" />
+</p>
 
 ---
 
@@ -253,6 +265,10 @@ If you are fixing one typo, explaining one function, changing one CSS rule, or d
 
 # Models & performance
 
+<p align="center">
+  <img src="docs/assets/brand/models-performance.svg" alt="Models and performance routing" />
+</p>
+
 ## You do not have to configure anything
 
 Most users do not need to choose a model policy first.
@@ -275,6 +291,10 @@ Verification    → strong / independent
 ```
 
 > **Spend strong reasoning where it matters, not everywhere.**
+
+All in Luna also separates the problem itself. Strong models can work on narrower, more stable objectives with less unrelated context and fewer cross-task switches.
+
+**Less unrelated context. Less task switching. Less room for drift.**
 
 Common ways to use the resource system include:
 
@@ -459,6 +479,7 @@ All in Luna runs complex work without silently expanding the user's goal.
 - [Troubleshooting](docs/troubleshooting/common-issues.md)
 - [Public runtime surface](docs/architecture/public-surface.md)
 - [Architecture](docs/architecture/)
+- [Brand guide](docs/brand/BRAND.md)
 
 ---
 

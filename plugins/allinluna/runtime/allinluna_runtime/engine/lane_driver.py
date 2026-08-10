@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
 
 from ..context import ContextKernel
+from ..adapters.host.base import DirectWorkResult, LaneDirectExecutionPlan
 from ..protocols.lane_bootstrap import LaneBootstrapEnvelope, LaneBootstrapError
 from .driver_support import cursor_from, extract_handoffs, raw, source_thread_id
 from .lane import LaneEngine
@@ -264,6 +265,107 @@ class LaneDriver:
             )
         return results
 
+    def _persisted_direct_result(self, plan_value: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        value = plan_value.get("direct_work_result")
+        return value if isinstance(value, Mapping) else None
+
+    def _ingest_direct_result_value(
+        self,
+        result: Mapping[str, Any],
+        *,
+        recorded: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        work_unit_id = str(result.get("work_unit_id") or "")
+        if not work_unit_id:
+            raise ValueError("direct result requires work_unit_id")
+        plan_value = self.store.get_lane_direct_plan(
+            self.task_id,
+            work_unit_id,
+            attempt_id=str(result.get("attempt_id") or "") or None,
+        )
+        if plan_value is None:
+            plan_value = self.store.get_lane_direct_plan(self.task_id, work_unit_id)
+        if plan_value is None:
+            raise ValueError("direct result does not belong to a persisted lane-direct plan")
+        plan = LaneDirectExecutionPlan.from_value(plan_value)
+        canonical = DirectWorkResult.from_value(result, plan=plan).to_dict()
+        persisted = dict(recorded or self.store.record_direct_work_result(canonical))
+        stored_plan = persisted.get("plan") if isinstance(persisted.get("plan"), Mapping) else plan_value
+        stored_result = persisted.get("result") if isinstance(persisted.get("result"), Mapping) else canonical
+        handoff = persisted.get("handoff")
+        if not isinstance(handoff, Mapping):
+            handoff = self.lane.direct_executor.ingest_result(
+                LaneDirectExecutionPlan.from_value(stored_plan),
+                DirectWorkResult.from_value(stored_result, plan=LaneDirectExecutionPlan.from_value(stored_plan)),
+            )
+            self.store.attach_direct_work_handoff(
+                idempotency_key=str(canonical["idempotency_key"]),
+                handoff=handoff,
+            )
+        unit = self.store.get_work_unit(work_unit_id) or {}
+        if str(unit.get("state")) not in {"completed", "blocked", "failed", "cancelled"}:
+            self.lane.ingest_handoff(handoff)
+        handoff_id = str(handoff.get("handoff_id") or "")
+        if handoff_id and self.store.get_driver_handoff(self.DRIVER_KIND, self.task_id, handoff_id) is None:
+            self.store.record_driver_handoff(
+                self.DRIVER_KIND,
+                self.task_id,
+                dict(handoff),
+                source_thread_id=None,
+            )
+        return {
+            "work_unit_id": work_unit_id,
+            "attempt_id": canonical["attempt_id"],
+            "idempotency_key": canonical["idempotency_key"],
+            "plan_digest": canonical["plan_digest"],
+            "result_digest": canonical["result_digest"],
+            "status": str(handoff.get("status") or "blocked"),
+            "handoff": dict(handoff),
+            "idempotent": bool(persisted.get("idempotent")),
+        }
+
+    def _resume_direct_results(self) -> list[dict[str, Any]]:
+        """Finish results durably recorded before a possible process crash."""
+
+        recovered: list[dict[str, Any]] = []
+        for plan in self.store.lane_direct_plans(self.task_id, include_completed=True):
+            result = self._persisted_direct_result(plan)
+            if result is None:
+                continue
+            unit = self.store.get_work_unit(str(plan.get("work_unit_id"))) or {}
+            if str(unit.get("state")) in {"completed", "blocked", "failed", "cancelled"}:
+                continue
+            recovered.append(self._ingest_direct_result_value(result))
+        return recovered
+
+    def next_actions(self) -> dict[str, Any]:
+        """Materialize and return the next external action without a callback."""
+
+        result = self.tick(monitor=False)
+        plans = list(result.get("direct_plans") or ())
+        required = [
+            item for item in result.get("receipts", ())
+            if isinstance(item, Mapping) and item.get("status") == "LANE_DIRECT_EXECUTION_REQUIRED"
+        ]
+        return {
+            "run_id": self.run_id,
+            "task_id": self.task_id,
+            "status": "LANE_DIRECT_EXECUTION_REQUIRED" if required else ("READY" if plans or result.get("actions") else "NO_ACTION"),
+            "actions": required,
+            "plans": plans,
+            "native_actions": list(result.get("actions") or ()),
+            "boundary": result.get("boundary"),
+            "checkpoint": result.get("checkpoint"),
+        }
+
+    def ingest_direct_result(self, result: Any) -> dict[str, Any]:
+        """Validate, persist, independently verify, and ingest one direct result."""
+
+        value = raw(result)
+        if value.get("protocol") != "direct-work-result/v1":
+            raise ValueError("direct result must use direct-work-result/v1")
+        return self._ingest_direct_result_value(value)
+
     def ingest_receipt(self, receipt: Any) -> dict[str, Any]:
         """Ingest a durable local host receipt without fabricating a WorkUnit id."""
 
@@ -331,6 +433,13 @@ class LaneDriver:
             return {"kind": "lane-blocked", "work_unit_states": sorted(states)}
         if units and states == {"completed"}:
             return {"kind": "lane-handoff-ready", "handoff": dict(handoff or self.lane.synthesize_handoff())}
+        pending = self.store.lane_direct_plans(self.task_id)
+        if pending:
+            return {
+                "kind": "lane-direct-required",
+                "status": "LANE_DIRECT_EXECUTION_REQUIRED",
+                "plans": pending,
+            }
         return None
 
     def tick(self, *, monitor: bool = True) -> dict[str, Any]:
@@ -342,12 +451,17 @@ class LaneDriver:
         created = self._expand(before)
         # LaneEngine's correction path sends only to the persisted original
         # worker thread; it never replaces a WorkUnit with a new worker.
+        resumed_direct = self._resume_direct_results()
         execution = self.lane.tick(dispatch=True)
         observations, next_cursor = self._monitor(cursor=cursor) if monitor else ([], cursor)
         direct_handoffs = self._record_direct_handoffs(
             execution.get("work_handoffs", ())
         )
-        work_handoffs = [*direct_handoffs, *self._ingest_work_handoffs(observations)]
+        work_handoffs = [
+            *resumed_direct,
+            *direct_handoffs,
+            *self._ingest_work_handoffs(observations),
+        ]
         synthesized = self._synthesize_handoff() if self.lane._all_work_terminal() else None
         boundary = self._boundary(synthesized)
         checkpoint = self.store.save_driver_checkpoint(

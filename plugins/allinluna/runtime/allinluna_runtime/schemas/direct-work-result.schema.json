@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "direct-work-result/v1",
+  "title": "External Direct Work Result",
+  "description": "A report of work that requires independent runtime verification.",
+  "type": "object",
+  "required": [
+    "protocol",
+    "result_digest",
+    "plan_digest",
+    "work_unit_id",
+    "attempt_id",
+    "idempotency_key"
+  ],
+  "properties": {
+    "protocol": {"const": "direct-work-result/v1"},
+    "result_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "plan_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "work_unit_id": {"type": "string", "minLength": 1},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["completed", "blocked", "failed", "in_progress"]},
+    "summary": {"type": "string"},
+    "changed_paths": {"type": "array", "items": {"type": "string"}},
+    "raw_outputs": {"type": "array"},
+    "artifacts": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

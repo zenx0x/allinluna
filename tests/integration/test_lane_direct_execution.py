@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 
 from allinluna_runtime.artifacts import ArtifactStore
 from allinluna_runtime.engine.lane_driver import LaneDriver
+from allinluna_runtime.cli import main
 from allinluna_runtime.evidence import CheckRunner, EvidenceCollector
 from allinluna_runtime.protocols.lane_bootstrap import LaneBootstrapEnvelope
 from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
@@ -182,13 +184,122 @@ def test_native_preferred_without_concrete_direct_executor_blocks(tmp_path):
             direct_evidence_collector=collector,
         ).drive(max_cycles=2, monitor=False)
 
-        assert result["boundary"]["kind"] == "lane-blocked"
-        assert store.get_work_unit("work-direct")["state"] == "blocked"
-        rows = store._fetchall(
-            "SELECT payload_json FROM driver_handoffs "
-            "WHERE driver_kind = 'lane' AND scope_id = 'task-direct'"
+        assert result["boundary"]["kind"] == "lane-direct-required"
+        assert result["boundary"]["status"] == "LANE_DIRECT_EXECUTION_REQUIRED"
+        assert store.get_work_unit("work-direct")["state"] == "active"
+        outbox = store._fetchone(
+            "SELECT action_json FROM dispatch_outbox WHERE target_type = 'work_unit'"
         )
-        assert any("lane.direct_executor_unavailable" in row["payload_json"] for row in rows)
+        assert outbox is not None
+        assert json.loads(outbox["action_json"])["protocol"] == "lane-direct-work/v1"
+    finally:
+        store.close()
+
+
+def _external_result(plan, *, status="completed", changed_paths=(), raw_outputs=()):
+    return {
+        "protocol": "direct-work-result/v1",
+        "work_unit_id": plan["work_unit_id"],
+        "attempt_id": plan["attempt_id"],
+        "idempotency_key": plan["idempotency_key"],
+        "plan_digest": plan["plan_digest"],
+        "status": status,
+        "summary": "reported direct work",
+        "changed_paths": list(changed_paths),
+        "raw_outputs": list(raw_outputs),
+        "artifacts": [],
+        "blockers": [],
+    }
+
+
+def test_cli_only_native_preferred_completes_without_injected_callback(tmp_path, capsys):
+    store, _bootstrap, _collector = _runtime(tmp_path)
+    store.close()
+
+    assert main(["--db", str(tmp_path / "runtime.db"), "lane", "next-actions", "run-direct", "task-direct"]) == 0
+    next_actions = json.loads(capsys.readouterr().out)
+    assert next_actions["status"] == "LANE_DIRECT_EXECUTION_REQUIRED"
+    plan = next_actions["plans"][0]
+    result_path = tmp_path / "RESULT.json"
+    result_path.write_text(json.dumps(_external_result(plan, raw_outputs=[{"ok": True}])), encoding="utf-8")
+
+    assert main([
+        "--db", str(tmp_path / "runtime.db"), "lane", "ingest-direct-result",
+        "run-direct", "task-direct", str(result_path),
+    ]) == 0
+    ingested = json.loads(capsys.readouterr().out)
+    assert ingested["status"] == "completed"
+    assert ingested["handoff"]["protocol"] == "work-handoff/v1"
+    assert ingested["handoff"]["execution_source"] == "lane-direct-external"
+
+    with Store(tmp_path / "runtime.db") as reopened:
+        assert reopened.get_work_unit("work-direct")["state"] == "completed"
+        assert reopened.attempts_for_work_unit("work-direct")[-1]["attempt"] == 1
+        plan_row = reopened._fetchone("SELECT action_json FROM dispatch_outbox WHERE target_type = 'work_unit'")
+        durable = json.loads(plan_row["action_json"])
+        assert durable["direct_work_result"]["protocol"] == "direct-work-result/v1"
+        assert durable["direct_work_handoff"]["protocol"] == "work-handoff/v1"
+
+
+def test_direct_result_identity_mismatch_is_rejected(tmp_path):
+    store, bootstrap, _collector = _runtime(tmp_path)
+    try:
+        required = LaneDriver.from_bootstrap(store, bootstrap).next_actions()
+        plan = required["plans"][0]
+        bad = _external_result(plan)
+        bad["attempt_id"] = "different-attempt"
+        try:
+            LaneDriver.from_bootstrap(store, bootstrap).ingest_direct_result(bad)
+        except ValueError as exc:
+            assert "attempt_id" in str(exc)
+        else:
+            raise AssertionError("identity mismatch must be rejected")
+        assert store.get_work_unit("work-direct")["state"] == "active"
+    finally:
+        store.close()
+
+
+def test_direct_result_replay_is_idempotent(tmp_path):
+    store, bootstrap, _collector = _runtime(tmp_path)
+    try:
+        plan = LaneDriver.from_bootstrap(store, bootstrap).next_actions()["plans"][0]
+        driver = LaneDriver.from_bootstrap(store, bootstrap)
+        first = driver.ingest_direct_result(_external_result(plan, raw_outputs=[{"ok": True}]))
+        second = LaneDriver.from_bootstrap(store, bootstrap).ingest_direct_result(
+            _external_result(plan, raw_outputs=[{"ok": True}])
+        )
+        assert first["status"] == "completed"
+        assert second["idempotent"] is True
+        assert second["result_digest"] == first["result_digest"]
+        assert len(store.attempts_for_work_unit("work-direct")) == 1
+    finally:
+        store.close()
+
+
+def test_unverified_direct_result_cannot_complete(tmp_path):
+    store, bootstrap, _collector = _runtime(tmp_path)
+    try:
+        plan = LaneDriver.from_bootstrap(store, bootstrap).next_actions()["plans"][0]
+        result = LaneDriver.from_bootstrap(store, bootstrap).ingest_direct_result(
+            _external_result(plan, changed_paths=["outside-owned-file.txt"])
+        )
+        assert result["status"] == "blocked"
+        assert result["handoff"]["status"] == "blocked"
+        assert store.get_work_unit("work-direct")["state"] == "blocked"
+    finally:
+        store.close()
+
+
+def test_restart_resumes_same_direct_attempt_without_duplicate_plan(tmp_path):
+    store, bootstrap, _collector = _runtime(tmp_path)
+    try:
+        first = LaneDriver.from_bootstrap(store, bootstrap).next_actions()["plans"][0]
+        restarted = LaneDriver.from_bootstrap(store, bootstrap).next_actions()["plans"][0]
+        assert restarted["attempt_id"] == first["attempt_id"]
+        assert restarted["idempotency_key"] == first["idempotency_key"]
+        assert restarted["plan_digest"] == first["plan_digest"]
+        assert len(store.attempts_for_work_unit("work-direct")) == 1
+        assert store._fetchone("SELECT COUNT(*) AS count FROM dispatch_outbox WHERE target_type = 'work_unit'")["count"] == 1
     finally:
         store.close()
 

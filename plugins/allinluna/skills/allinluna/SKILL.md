@@ -123,7 +123,9 @@ allinluna lane start RUN_ID TASK_ID
 allinluna lane status RUN_ID TASK_ID
 allinluna lane tick RUN_ID TASK_ID
 allinluna lane drive RUN_ID TASK_ID
+allinluna lane next-actions RUN_ID TASK_ID
 allinluna lane ingest-receipt RUN_ID TASK_ID RECEIPT.json
+allinluna lane ingest-direct-result RUN_ID TASK_ID RESULT.json
 allinluna lane handoff RUN_ID TASK_ID
 ```
 

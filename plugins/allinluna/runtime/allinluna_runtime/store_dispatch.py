@@ -185,6 +185,145 @@ class StoreDispatch:
 
     create_work_unit_dispatch_intent = persist_work_unit_dispatch_intent
 
+    def lane_direct_plans(
+        self,
+        task_id: str,
+        *,
+        include_completed: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Read durable lane-direct plans from the local dispatch outbox."""
+
+        rows = self._fetchall(
+            """SELECT o.* FROM dispatch_outbox o
+               JOIN work_units wu ON wu.id = o.target_id
+               WHERE o.target_type = 'work_unit' AND wu.task_id = ?
+               ORDER BY o.created_at, o.id""",
+            (str(task_id),),
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _loads(row.get("action_json"), {})
+            if not isinstance(payload, Mapping) or payload.get("protocol") != "lane-direct-work/v1":
+                continue
+            direct_result = payload.get("direct_work_result")
+            if direct_result is not None and not include_completed:
+                continue
+            item = dict(payload)
+            item["outbox_id"] = row.get("id")
+            item["outbox_state"] = row.get("state")
+            item["outbox_created_at"] = row.get("created_at")
+            item["outbox_updated_at"] = row.get("updated_at")
+            if direct_result is not None:
+                item["direct_work_result"] = dict(direct_result) if isinstance(direct_result, Mapping) else direct_result
+            if isinstance(payload.get("direct_work_handoff"), Mapping):
+                item["direct_work_handoff"] = dict(payload["direct_work_handoff"])
+            result.append(item)
+        return result
+
+    def get_lane_direct_plan(
+        self,
+        task_id: str,
+        work_unit_id: str,
+        *,
+        attempt_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        candidates = self.lane_direct_plans(str(task_id), include_completed=True)
+        candidates = [item for item in candidates if str(item.get("work_unit_id")) == str(work_unit_id)]
+        if attempt_id is not None:
+            candidates = [item for item in candidates if str(item.get("attempt_id")) == str(attempt_id)]
+        return candidates[-1] if candidates else None
+
+    def record_direct_work_result(self, result: Mapping[str, Any]) -> dict[str, Any]:
+        """Atomically attach one immutable direct result to its outbox plan."""
+
+        value = _as_mapping(result)
+        if value.get("protocol") != "direct-work-result/v1":
+            raise ValueError("direct result must use direct-work-result/v1")
+        key = str(value.get("idempotency_key") or "")
+        work_unit_id = str(value.get("work_unit_id") or "")
+        if not key or not work_unit_id:
+            raise ValueError("direct result requires work_unit_id and idempotency_key")
+        row = self._fetchone(
+            "SELECT * FROM dispatch_outbox WHERE idempotency_key = ? AND target_type = 'work_unit'",
+            (key,),
+        )
+        if row is None:
+            row = self._fetchone(
+                """SELECT o.* FROM dispatch_outbox o
+                   WHERE o.target_type = 'work_unit' AND o.target_id = ?
+                   ORDER BY o.created_at DESC, o.id DESC LIMIT 1""",
+                (work_unit_id,),
+            )
+            if row is None:
+                raise ValueError("direct result does not belong to a persisted lane-direct plan")
+            raise ValueError("direct result idempotency_key does not match the persisted plan")
+        payload = _loads(row.get("action_json"), {})
+        if not isinstance(payload, Mapping) or payload.get("protocol") != "lane-direct-work/v1":
+            raise ValueError("direct result target is not a lane-direct plan")
+        if str(payload.get("work_unit_id")) != work_unit_id:
+            raise ValueError("direct result work_unit_id does not match the persisted plan")
+        existing_result = payload.get("direct_work_result")
+        if isinstance(existing_result, Mapping):
+            existing_digest = str(existing_result.get("result_digest") or "")
+            incoming_digest = str(value.get("result_digest") or "")
+            if existing_digest and incoming_digest == existing_digest:
+                return {
+                    "idempotent": True,
+                    "outbox_id": row.get("id"),
+                    "plan": dict(payload),
+                    "result": dict(existing_result),
+                    "handoff": payload.get("direct_work_handoff"),
+                }
+            raise ValueError("a different direct result is already persisted for this attempt")
+        next_payload = dict(payload)
+        next_payload["direct_work_result"] = dict(value)
+        next_payload["direct_result_digest"] = value.get("result_digest")
+
+        def persist() -> dict[str, Any]:
+            self._execute(
+                "UPDATE dispatch_outbox SET action_json = ?, state = 'acknowledged', updated_at = ? WHERE id = ?",
+                (_json(next_payload), _now(), row["id"]),
+            )
+            return {
+                "idempotent": False,
+                "outbox_id": row.get("id"),
+                "plan": dict(next_payload),
+                "result": dict(value),
+                "handoff": None,
+            }
+
+        return self._write(persist)
+
+    def attach_direct_work_handoff(
+        self,
+        *,
+        idempotency_key: str,
+        handoff: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        row = self._fetchone(
+            "SELECT * FROM dispatch_outbox WHERE idempotency_key = ? AND target_type = 'work_unit'",
+            (str(idempotency_key),),
+        )
+        if row is None:
+            raise ValueError("cannot attach a handoff without a persisted direct plan")
+        payload = _loads(row.get("action_json"), {})
+        if not isinstance(payload, Mapping) or payload.get("protocol") != "lane-direct-work/v1":
+            raise ValueError("outbox target is not a lane-direct plan")
+        existing = payload.get("direct_work_handoff")
+        if isinstance(existing, Mapping):
+            return dict(existing)
+        next_payload = dict(payload)
+        next_payload["direct_work_handoff"] = dict(handoff)
+
+        def persist() -> dict[str, Any]:
+            self._execute(
+                "UPDATE dispatch_outbox SET action_json = ?, state = 'acknowledged', updated_at = ? WHERE id = ?",
+                (_json(next_payload), _now(), row["id"]),
+            )
+            return dict(handoff)
+
+        return self._write(persist)
+
     def _attempt_result(self, row: Mapping[str, Any]) -> dict[str, Any]:
         result = dict(row)
         result["attempt"] = result.get("attempt_no")

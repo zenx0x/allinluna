@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lane-direct-work/v1",
+  "title": "Lane Direct Work Plan",
+  "type": "object",
+  "required": [
+    "protocol",
+    "plan_digest",
+    "work_unit_id",
+    "attempt_id",
+    "idempotency_key",
+    "return_contract"
+  ],
+  "properties": {
+    "protocol": {"const": "lane-direct-work/v1"},
+    "plan_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "work_unit_id": {"type": "string", "minLength": 1},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "return_contract": {"const": "work-handoff/v1"},
+    "execution_class": {"const": "lane_direct"},
+    "direct_work_result": {"type": "object"},
+    "direct_work_handoff": {"type": "object"}
+  },
+  "additionalProperties": true
+}

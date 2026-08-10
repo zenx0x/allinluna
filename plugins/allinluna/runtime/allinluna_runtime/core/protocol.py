@@ -11,5 +11,7 @@ STATUS_PROTOCOL: Final = "status/v1"
 TASK_ENVELOPE_PROTOCOL: Final = "task-envelope/v1"
 WORK_UNIT_ENVELOPE_PROTOCOL: Final = "work-unit-envelope/v1"
 WORK_HANDOFF_PROTOCOL: Final = "work-handoff/v1"
+LANE_DIRECT_WORK_PROTOCOL: Final = "lane-direct-work/v1"
+DIRECT_WORK_RESULT_PROTOCOL: Final = "direct-work-result/v1"
 
 __all__ = [name for name in globals() if name.endswith("_PROTOCOL")]

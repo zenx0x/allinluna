@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, HOST_RECEIPT_PROTOCOL
+from ...core.protocol import DIRECT_WORK_RESULT_PROTOCOL, LANE_DIRECT_WORK_PROTOCOL
 from ...resource_observation import ResourceObservation
 
 # Host adapters may leave a route unspecified and let the host choose its
@@ -35,7 +36,6 @@ LOCAL_SUBAGENT_EXECUTION_CLASS = "local_subagent"
 DIRECT_EXECUTION_CLASS = "direct"
 TOP_LEVEL_CREATE_THREAD_TOOL = "codex_app__create_thread"
 LOCAL_DISPATCH_INTENT_PROTOCOL = "local-dispatch-intent/v1"
-LANE_DIRECT_WORK_PROTOCOL = "lane-direct-work/v1"
 WORK_HANDOFF_PROTOCOL = "work-handoff/v1"
 NATIVE_SUBAGENT_CAPABILITY = "native_subagent"
 NATIVE_PREFERRED = "native_preferred"
@@ -488,7 +488,7 @@ class LaneDirectExecutionPlan(_MappingRecord):
 
     def _raw_dict(self) -> dict[str, Any]:
         value = self.intent.to_dict()
-        return {
+        plan = {
             "protocol": LANE_DIRECT_WORK_PROTOCOL,
             "execution_class": "lane_direct",
             "run_ref": value["run_ref"],
@@ -511,16 +511,118 @@ class LaneDirectExecutionPlan(_MappingRecord):
             "execution_mode": value["execution_mode"],
             "reason": self.reason,
         }
+        plan["plan_digest"] = "sha256:" + stable_digest(plan, length=64)
+        return plan
 
     @classmethod
     def from_value(cls, value: Any) -> "LaneDirectExecutionPlan":
         if isinstance(value, cls):
             return value
         raw = mapping_from(value)
-        return cls(
+        if raw.get("protocol") not in {None, LANE_DIRECT_WORK_PROTOCOL}:
+            raise ValueError("lane-direct plan must use lane-direct-work/v1")
+        plan = cls(
             LocalDispatchIntent.from_value(raw),
             reason=str(raw.get("reason") or "lane-direct-requested"),
         )
+        supplied = raw.get("plan_digest")
+        if supplied is not None and str(supplied) != str(plan.to_dict()["plan_digest"]):
+            raise ValueError("lane-direct plan digest does not match its immutable plan")
+        return plan
+
+
+@dataclass(frozen=True, slots=True)
+class DirectWorkResult(_MappingRecord):
+    """An external report of direct work; it never proves completion itself."""
+
+    work_unit_id: str
+    attempt_id: str
+    idempotency_key: str
+    plan_digest: str
+    status: str = "reported"
+    summary: str = ""
+    changed_paths: tuple[str, ...] = ()
+    raw_outputs: tuple[Any, ...] = ()
+    artifacts: tuple[str, ...] = ()
+    blockers: tuple[Mapping[str, Any], ...] = ()
+    result_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("work_unit_id", "attempt_id", "idempotency_key", "plan_digest"):
+            if not _text(getattr(self, name)):
+                raise ValueError(f"direct work result requires {name}")
+        object.__setattr__(self, "changed_paths", tuple(map(str, self.changed_paths)))
+        object.__setattr__(self, "artifacts", tuple(map(str, self.artifacts)))
+        object.__setattr__(self, "raw_outputs", tuple(_copy(item) for item in self.raw_outputs))
+        object.__setattr__(self, "blockers", tuple(_copy(item) for item in self.blockers))
+
+    def _material(self) -> dict[str, Any]:
+        return {
+            "protocol": DIRECT_WORK_RESULT_PROTOCOL,
+            "work_unit_id": self.work_unit_id,
+            "attempt_id": self.attempt_id,
+            "idempotency_key": self.idempotency_key,
+            "plan_digest": self.plan_digest,
+            "status": self.status,
+            "summary": self.summary,
+            "changed_paths": list(self.changed_paths),
+            "raw_outputs": [_copy(item) for item in self.raw_outputs],
+            "artifacts": list(self.artifacts),
+            "blockers": [dict(item) for item in self.blockers],
+        }
+
+    def _raw_dict(self) -> dict[str, Any]:
+        value = self._material()
+        value["result_digest"] = self.result_digest or "sha256:" + stable_digest(value, length=64)
+        return value
+
+    @property
+    def computed_result_digest(self) -> str:
+        return "sha256:" + stable_digest(self._material(), length=64)
+
+    @classmethod
+    def from_value(
+        cls,
+        value: Any,
+        *,
+        plan: "LaneDirectExecutionPlan | Mapping[str, Any] | None" = None,
+    ) -> "DirectWorkResult":
+        if isinstance(value, cls):
+            result = value
+        else:
+            raw = mapping_from(value)
+            if raw.get("protocol") not in {None, DIRECT_WORK_RESULT_PROTOCOL}:
+                raise ValueError("direct result must use direct-work-result/v1")
+            result = cls(
+                work_unit_id=str(raw.get("work_unit_id") or raw.get("workUnitId") or ""),
+                attempt_id=str(raw.get("attempt_id") or raw.get("attemptId") or ""),
+                idempotency_key=str(raw.get("idempotency_key") or raw.get("idempotencyKey") or ""),
+                plan_digest=str(raw.get("plan_digest") or raw.get("planDigest") or ""),
+                status=str(raw.get("status") or "reported"),
+                summary=str(raw.get("summary") or ""),
+                changed_paths=tuple(raw.get("changed_paths") or raw.get("changedPaths") or ()),
+                raw_outputs=tuple(raw.get("raw_outputs") or raw.get("rawOutputs") or ()),
+                artifacts=tuple(str(item) for item in (raw.get("artifacts") or ())),
+                blockers=tuple(item for item in (raw.get("blockers") or ()) if isinstance(item, Mapping)),
+                result_digest=str(raw.get("result_digest") or raw.get("resultDigest") or "") or None,
+            )
+        if plan is not None:
+            expected = LaneDirectExecutionPlan.from_value(plan).to_dict()
+            if result.plan_digest != expected["plan_digest"]:
+                raise ValueError("direct work result plan digest does not match the persisted plan")
+            intent = LocalDispatchIntent.from_value(expected)
+            for name, actual, expected_value in (
+                ("work_unit_id", result.work_unit_id, intent.work_unit_id),
+                ("attempt_id", result.attempt_id, intent.attempt_id),
+                ("idempotency_key", result.idempotency_key, intent.idempotency_key),
+            ):
+                if str(actual) != str(expected_value):
+                    raise ValueError(f"direct work result {name} does not match the persisted plan")
+        if result.result_digest is not None:
+            expected_digest = "sha256:" + stable_digest(result._material(), length=64)
+            if result.result_digest != expected_digest:
+                raise ValueError("direct work result digest does not match its immutable result")
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -1072,6 +1174,7 @@ __all__ = [
     "ACTION_BRIDGE_PROTOCOL",
     "DIRECT_EXECUTION_CLASS",
     "DISPATCH_INTENT_PROTOCOL",
+    "DIRECT_WORK_RESULT_PROTOCOL",
     "DispatchIntent",
     "HOST_RECEIPT_PROTOCOL",
     "DEFAULT_MODEL",
@@ -1079,6 +1182,7 @@ __all__ = [
     "DIRECT_ONLY",
     "LANE_DIRECT_WORK_PROTOCOL",
     "LaneDirectExecutionPlan",
+    "DirectWorkResult",
     "LOCAL_DISPATCH_INTENT_PROTOCOL",
     "LOCAL_EXECUTION_MODES",
     "LocalDispatchIntent",

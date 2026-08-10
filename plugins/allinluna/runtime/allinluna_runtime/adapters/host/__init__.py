@@ -3,6 +3,7 @@
 from .base import (
     ACTION_BRIDGE_PROTOCOL,
     DISPATCH_INTENT_PROTOCOL,
+    DIRECT_WORK_RESULT_PROTOCOL,
     HOST_RECEIPT_PROTOCOL,
     DEFAULT_MODEL,
     DEFAULT_REASONING,
@@ -17,6 +18,8 @@ from .base import (
     HostReceiptAPI,
     HostReceiptError,
     HostUnavailableError,
+    DirectWorkResult,
+    LANE_DIRECT_WORK_PROTOCOL,
     canonical_json,
     dispatch_intent,
     stable_digest,
@@ -78,7 +81,7 @@ from .codex_app_server import (
 __all__ = [
     "ACTION_BRIDGE_PROTOCOL", "APP_SERVER_SOURCE", "AppServerProtocolError", "CANCEL_THREAD_TOOL", "CODEX_APP_SOURCE", "CREATE_THREAD_TOOL",
     "DESKTOP_EVENT_ORIGIN", "DESKTOP_SOURCE", "DESKTOP_TOOL",
-    "DISPATCH_INTENT_PROTOCOL", "DispatchIntent", "HOST_RECEIPT_PROTOCOL", "HostAction",
+    "DISPATCH_INTENT_PROTOCOL", "DIRECT_WORK_RESULT_PROTOCOL", "LANE_DIRECT_WORK_PROTOCOL", "DirectWorkResult", "DispatchIntent", "HOST_RECEIPT_PROTOCOL", "HostAction",
     "HostActionError", "HostAdapter", "HostAdapterAPI", "HostAdapterError", "HostCapabilities",
     "HostReceipt", "HostReceiptAPI", "HostReceiptError", "HostUnavailableError", "LIST_PROJECTS_TOOL",
     "LIST_THREADS_TOOL", "NativeSubagentFallback", "NativeSubagentFallbackContract", "NativeSubagentHost",

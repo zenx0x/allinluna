@@ -12,6 +12,7 @@ from ..adapters.host.base import (
     LOCAL_EXECUTION_MODES,
     NATIVE_PREFERRED,
     HostAction,
+    LaneDirectExecutionPlan,
     LocalDispatchIntent,
     stable_digest,
 )
@@ -375,6 +376,37 @@ class LocalScheduler:
             adapter=self.adapter,
         )
 
+    def persist_direct_plan(
+        self,
+        local: LocalAction,
+        plan: LaneDirectExecutionPlan | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist the external lane-direct plan in the same attempt outbox."""
+
+        value = LaneDirectExecutionPlan.from_value(plan)
+        payload = value.to_dict()
+        if payload.get("work_unit_id") != local.work_unit_id:
+            raise ValueError("lane-direct plan changed the WorkUnit identity")
+        if str(payload.get("attempt_id")) != str(local.attempt_id):
+            raise ValueError("lane-direct plan changed the attempt identity")
+        if payload.get("idempotency_key") != local.intent.idempotency_key:
+            raise ValueError("lane-direct plan changed the idempotency identity")
+        existing = self.store._fetchone(
+            "SELECT action_json FROM dispatch_outbox WHERE idempotency_key = ?",
+            (local.intent.idempotency_key,),
+        )
+        if existing is not None:
+            prior = json.loads(str(existing["action_json"]))
+            if prior.get("protocol") != "lane-direct-work/v1":
+                raise ValueError("persisted dispatch identity is not a lane-direct plan")
+            if prior.get("plan_digest") != payload.get("plan_digest"):
+                raise ValueError("lane-direct plan differs from the persisted attempt")
+        return self.store.persist_work_unit_dispatch_intent(
+            payload,
+            attempt_id=local.attempt_id,
+            adapter="lane-direct",
+        )
+
     def resume_unresolved_actions(self) -> list[LocalAction]:
         """Recover Lane-local attempts that do not yet have a durable receipt."""
 
@@ -399,6 +431,18 @@ class LocalScheduler:
         for row in rows:
             unit = self._unit(str(row["work_unit_id"]))
             base = self._default_intent(unit, {})
+            persisted: Mapping[str, Any] | None = None
+            if row.get("action_json"):
+                try:
+                    candidate = json.loads(str(row["action_json"]))
+                    if isinstance(candidate, Mapping) and candidate.get("protocol") == "lane-direct-work/v1":
+                        # Rehydrate the exact logical intent, including the
+                        # resolved resource receipt, instead of reconstructing
+                        # a new plan from the WorkUnit defaults.
+                        persisted = candidate
+                        base = LocalDispatchIntent.from_value(candidate)
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError("persisted local dispatch action is invalid") from exc
             raw = base.to_dict()
             raw["idempotency_key"] = str(row["dispatch_key"])
             raw["attempt_id"] = str(row["attempt_id"])
@@ -408,13 +452,11 @@ class LocalScheduler:
                 (str(row["work_unit_id"]),),
             )
             resolved_action = None
-            if row.get("action_json"):
+            if row.get("action_json") and persisted is None:
                 try:
-                    resolved_action = HostAction.from_value(
-                        json.loads(str(row["action_json"]))
-                    )
+                    resolved_action = HostAction.from_value(json.loads(str(row["action_json"])))
                 except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                    raise ValueError("persisted local HostAction is invalid") from exc
+                    raise ValueError("persisted local dispatch action is invalid") from exc
             recovered.append(
                 LocalAction(
                     str(row["work_unit_id"]),
@@ -477,8 +519,33 @@ class LocalScheduler:
                 raise ValueError("WorkHandoff identity does not match the WorkUnit")
             if handoff.get("execution_mode") == "lane_direct":
                 evidence = handoff.get("evidence")
+                active_attempt = self.store._fetchone(
+                    "SELECT * FROM work_unit_attempts WHERE work_unit_id = ? "
+                    "AND state IN ('active','delegated') ORDER BY attempt_no DESC LIMIT 1",
+                    (unit_id,),
+                )
+                if active_attempt is not None:
+                    if str(handoff.get("attempt_id") or "") != str(active_attempt.get("id")):
+                        raise ValueError("lane-direct completion attempt_id does not match the active attempt")
+                    if str(handoff.get("idempotency_key") or "") != str(active_attempt.get("dispatch_key")):
+                        raise ValueError("lane-direct completion idempotency_key does not match the active attempt")
+                plan_digest = handoff.get("plan_digest")
+                result_digest = handoff.get("result_digest")
+                if not plan_digest or not result_digest:
+                    raise ValueError("lane-direct completion requires plan and result digests")
+                outbox = self.store._fetchone(
+                    "SELECT action_json FROM dispatch_outbox WHERE idempotency_key = ?",
+                    (handoff.get("idempotency_key"),),
+                )
+                if outbox is not None:
+                    persisted = json.loads(str(outbox.get("action_json") or "{}"))
+                    if persisted.get("protocol") == "lane-direct-work/v1" and persisted.get("plan_digest") != plan_digest:
+                        raise ValueError("lane-direct completion plan digest does not match the outbox")
+                    persisted_result = persisted.get("direct_work_result")
+                    if isinstance(persisted_result, Mapping) and persisted_result.get("result_digest") != result_digest:
+                        raise ValueError("lane-direct completion result digest does not match the outbox")
                 if (
-                    handoff.get("execution_source") != "lane-direct-executor"
+                    handoff.get("execution_source") not in {"lane-direct-executor", "lane-direct-external"}
                     or handoff.get("subagent_created") is not False
                     or handoff.get("thread_id") is not None
                     or not isinstance(evidence, Mapping)

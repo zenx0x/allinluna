@@ -156,20 +156,43 @@ class LaneEngine:
                 if isinstance(resolution, LaneDirectExecutionPlan):
                     direct_plans.append(resolution)
                     self.scheduler.mark_direct_active(local, resolution.to_dict())
-                    work_handoff = self.direct_executor.execute(resolution)
-                    self.ingest_handoff(work_handoff)
-                    work_handoffs.append(work_handoff)
-                    routing_receipt = self.local_adapter.direct_fallback_receipt(
-                        resolution
-                    ).to_dict()
-                    receipts.append(
-                        {
-                            "status": "lane-direct-routed",
-                            "receipt": routing_receipt,
-                            "work_handoff_id": work_handoff.get("handoff_id"),
-                            "completion_source": "work-handoff/v1",
-                        }
-                    )
+                    if self.direct_executor.has_embedded_executor:
+                        work_handoff = self.direct_executor.execute(resolution)
+                        self.ingest_handoff(work_handoff)
+                        work_handoffs.append(work_handoff)
+                        receipts.append(
+                            {
+                                "status": "lane-direct-routed",
+                                "receipt": self.local_adapter.direct_fallback_receipt(
+                                    resolution
+                                ).to_dict(),
+                                "work_handoff_id": work_handoff.get("handoff_id"),
+                                "completion_source": "work-handoff/v1",
+                            }
+                        )
+                    else:
+                        self.scheduler.persist_direct_plan(local, resolution)
+                        outbox_row = self.store._fetchone(
+                            "SELECT id FROM dispatch_outbox WHERE idempotency_key = ?",
+                            (local.intent.idempotency_key,),
+                        )
+                        routing_receipt = self.local_adapter.direct_fallback_receipt(
+                            resolution
+                        ).to_dict()
+                        receipts.append(
+                            {
+                                "status": "LANE_DIRECT_EXECUTION_REQUIRED",
+                                "protocol": "lane-direct-work/v1",
+                                "receipt": routing_receipt,
+                                "plan": resolution.to_dict(),
+                                "plan_digest": resolution.to_dict().get("plan_digest"),
+                                "attempt_id": local.attempt_id,
+                                "work_unit_id": local.work_unit_id,
+                                "idempotency_key": local.intent.idempotency_key,
+                                "outbox_ref": f"dispatch://{local.intent.idempotency_key}",
+                                "outbox_id": (outbox_row or {}).get("id"),
+                            }
+                        )
                     continue
                 actions.append(resolution)
                 self.scheduler.persist_resolved_action(local, resolution)

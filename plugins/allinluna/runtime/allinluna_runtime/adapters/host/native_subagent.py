@@ -12,6 +12,7 @@ from typing import Any, Callable
 from ...core.policy import contains, contains_all
 from .base import (
     ACTION_BRIDGE_PROTOCOL,
+    DIRECT_WORK_RESULT_PROTOCOL,
     DIRECT_ONLY,
     HOST_RECEIPT_PROTOCOL,
     NATIVE_PREFERRED,
@@ -23,6 +24,7 @@ from .base import (
     HostCapabilities,
     HostReceipt,
     HostUnavailableError,
+    DirectWorkResult,
     LaneDirectExecutionPlan,
     LocalDispatchIntent,
     as_host_action,
@@ -86,6 +88,10 @@ class WorkHandoff(Mapping[str, Any]):
     checks: tuple[Mapping[str, Any], ...] = ()
     evidence: Mapping[str, Any] | None = None
     blockers: tuple[Mapping[str, Any], ...] = ()
+    plan_digest: str | None = None
+    result_digest: str | None = None
+    idempotency_key: str | None = None
+    execution_source: str = "lane-direct-executor"
     handoff_id: str | None = None
     created_at: str = field(default_factory=_now)
 
@@ -102,6 +108,8 @@ class WorkHandoff(Mapping[str, Any]):
                 "work_unit_id": self.work_unit_id,
                 "attempt_id": self.attempt_id,
                 "status": self.status,
+                "plan_digest": self.plan_digest,
+                "result_digest": self.result_digest,
                 "evidence": self.evidence,
             }
         )
@@ -114,10 +122,13 @@ class WorkHandoff(Mapping[str, Any]):
             "task_id": self.task_id,
             "work_unit_id": self.work_unit_id,
             "attempt_id": self.attempt_id,
+            "idempotency_key": self.idempotency_key,
+            "plan_digest": self.plan_digest,
+            "result_digest": self.result_digest,
             "status": self.status,
             "summary": self.summary,
             "execution_mode": self.execution_mode,
-            "execution_source": "lane-direct-executor",
+            "execution_source": self.execution_source,
             "subagent_created": False,
             "thread_id": None,
             "changed_paths": list(self.changed_paths),
@@ -168,6 +179,12 @@ class LaneDirectExecutor:
         self.artifacts = artifact_store or getattr(evidence_collector, "artifacts", None)
         self.work_executor = work_executor
 
+    @property
+    def has_embedded_executor(self) -> bool:
+        """Whether the optional in-process callback fast path is available."""
+
+        return self.work_executor is not None
+
     def _artifact_refs(
         self, plan: LaneDirectExecutionPlan, result: Mapping[str, Any]
     ) -> list[str]:
@@ -208,6 +225,8 @@ class LaneDirectExecutor:
         evidence: Mapping[str, Any] | None = None,
         artifacts: Sequence[str] = (),
         changed_paths: Sequence[str] = (),
+        result: DirectWorkResult | None = None,
+        execution_source: str | None = None,
     ) -> dict[str, Any]:
         return WorkHandoff(
             work_unit_id=plan.intent.work_unit_id,
@@ -231,27 +250,23 @@ class LaneDirectExecutor:
                     "recoverable": True,
                 },
             ),
+            plan_digest=plan.to_dict().get("plan_digest"),
+            result_digest=result.to_dict().get("result_digest") if result is not None else None,
+            idempotency_key=plan.intent.idempotency_key,
+            execution_source=execution_source or self.EXECUTION_SOURCE,
         ).to_dict()
 
-    def execute(self, value: LaneDirectExecutionPlan | Mapping[str, Any]) -> dict[str, Any]:
-        plan = LaneDirectExecutionPlan.from_value(value)
-        if self.work_executor is None:
-            return self._blocked(
-                plan,
-                code="lane.direct_executor_unavailable",
-                message="lane-direct execution requires a concrete Lane work executor",
-            )
-        try:
-            observed = self.work_executor(plan.to_dict())
-            result = dict(observed or {})
-        except Exception as exc:
-            return self._blocked(
-                plan,
-                code="lane.direct_execution_failed",
-                message=f"lane-direct execution failed: {type(exc).__name__}: {exc}",
-            )
+    def _build_handoff(
+        self,
+        plan: LaneDirectExecutionPlan,
+        result: DirectWorkResult,
+        *,
+        execution_source: str,
+    ) -> dict[str, Any]:
+        """Turn a report into a handoff only after independent observation."""
 
-        changed_paths = tuple(str(item) for item in (result.get("changed_paths") or ()))
+        result_value = result.to_dict()
+        changed_paths = tuple(result.changed_paths)
         if changed_paths and (
             not plan.intent.ownership or not _subset(changed_paths, plan.intent.ownership)
         ):
@@ -259,16 +274,19 @@ class LaneDirectExecutor:
                 plan,
                 code="lane.direct_ownership_violation",
                 message="lane-direct changed_paths exceed WorkUnit ownership",
-                changed_paths=changed_paths,
+                result=result,
+                execution_source=execution_source,
             )
-        artifacts = self._artifact_refs(plan, result)
-        if str(result.get("status") or "completed") in {"failed", "blocked"}:
+        artifacts = self._artifact_refs(plan, result_value)
+        if str(result.status).lower() in {"failed", "blocked"} or result.blockers:
             return self._blocked(
                 plan,
-                code=str(result.get("code") or "lane.direct_execution_blocked"),
-                message=str(result.get("summary") or "lane-direct execution did not complete"),
+                code="lane.direct_execution_blocked",
+                message=str(result.summary or "lane-direct execution did not complete"),
                 artifacts=artifacts,
                 changed_paths=changed_paths,
+                result=result,
+                execution_source=execution_source,
             )
 
         candidate = {
@@ -298,6 +316,8 @@ class LaneDirectExecutor:
                 message=f"independent evidence collection failed: {type(exc).__name__}: {exc}",
                 artifacts=artifacts,
                 changed_paths=changed_paths,
+                result=result,
+                execution_source=execution_source,
             )
         verified_paths = tuple(str(item) for item in evidence.get("changed_paths", ()))
         workspace = evidence.get("workspace_evidence")
@@ -319,6 +339,8 @@ class LaneDirectExecutor:
                 evidence=evidence,
                 artifacts=artifacts,
                 changed_paths=changed_paths,
+                result=result,
+                execution_source=execution_source,
             )
         checks = tuple(
             dict(item) for item in evidence.get("checks", ()) if isinstance(item, Mapping)
@@ -328,7 +350,7 @@ class LaneDirectExecutor:
             task_id=plan.intent.task_id,
             attempt_id=plan.intent.attempt_id,
             status="completed",
-            summary=str(result.get("summary") or f"completed {plan.intent.objective}"),
+            summary=str(result.summary or f"completed {plan.intent.objective}"),
             execution_mode="lane_direct",
             changed_paths=verified_paths,
             artifacts=tuple(
@@ -337,7 +359,51 @@ class LaneDirectExecutor:
             checks=checks,
             evidence=evidence,
             blockers=(),
+            plan_digest=plan.to_dict().get("plan_digest"),
+            result_digest=result_value.get("result_digest"),
+            idempotency_key=plan.intent.idempotency_key,
+            execution_source=execution_source,
         ).to_dict()
+
+    def ingest_result(
+        self,
+        plan: LaneDirectExecutionPlan | Mapping[str, Any],
+        result: DirectWorkResult | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Independently verify an external result and build its WorkHandoff."""
+
+        direct_plan = LaneDirectExecutionPlan.from_value(plan)
+        direct_result = DirectWorkResult.from_value(result, plan=direct_plan)
+        return self._build_handoff(
+            direct_plan,
+            direct_result,
+            execution_source="lane-direct-external",
+        )
+
+    def execute(self, value: LaneDirectExecutionPlan | Mapping[str, Any]) -> dict[str, Any]:
+        plan = LaneDirectExecutionPlan.from_value(value)
+        if self.work_executor is None:
+            raise RuntimeError("lane-direct external execution is required when no callback is bound")
+        try:
+            observed = self.work_executor(plan.to_dict())
+            result = DirectWorkResult.from_value(
+                {
+                    **dict(observed or {}),
+                    "protocol": DIRECT_WORK_RESULT_PROTOCOL,
+                    "work_unit_id": plan.intent.work_unit_id,
+                    "attempt_id": plan.intent.attempt_id,
+                    "idempotency_key": plan.intent.idempotency_key,
+                    "plan_digest": plan.to_dict()["plan_digest"],
+                },
+                plan=plan,
+            )
+        except Exception as exc:
+            return self._blocked(
+                plan,
+                code="lane.direct_execution_failed",
+                message=f"lane-direct execution failed: {type(exc).__name__}: {exc}",
+            )
+        return self._build_handoff(plan, result, execution_source=self.EXECUTION_SOURCE)
 
 
 @dataclass(frozen=True, slots=True)

@@ -57,6 +57,7 @@ class VerificationSpec:
     source: str | None = None
     provenance: Mapping[str, Any] = field(default_factory=dict)
     trust: Mapping[str, Any] = field(default_factory=dict)
+    approval: Mapping[str, Any] = field(default_factory=dict)
     execution: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -109,7 +110,7 @@ class VerificationSpec:
             if not source:
                 raise VerificationSpecError("verification source must be non-empty")
             object.__setattr__(self, "source", source)
-        for field_name in ("provenance", "trust", "execution"):
+        for field_name in ("provenance", "trust", "approval", "execution"):
             value = getattr(self, field_name)
             if value is None:
                 value = {}
@@ -151,6 +152,8 @@ class VerificationSpec:
             value["provenance"] = dict(self.provenance)
         if self.trust:
             value["trust"] = dict(self.trust)
+        if self.approval:
+            value["approval"] = dict(self.approval)
         if self.execution:
             value["execution"] = dict(self.execution)
         return value
@@ -177,6 +180,7 @@ class VerificationSpec:
             source=data.get("source"),
             provenance=data.get("provenance", {}),
             trust=data.get("trust", {}),
+            approval=data.get("approval", {}),
             execution=data.get("execution", {}),
         )
 

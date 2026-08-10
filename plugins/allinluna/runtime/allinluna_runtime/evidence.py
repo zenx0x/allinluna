@@ -197,6 +197,7 @@ class CheckRunner:
                     command,
                     provenance=value.get("provenance"),
                     trust=value.get("trust"),
+                    approval=value.get("approval"),
                     execution=execution,
                     cwd=value.get("cwd") or execution.get("cwd") or (scope or {}).get("worktree") or self.cwd,
                     workspace=(scope or {}).get("worktree") or execution.get("workspace") or self.cwd,
@@ -434,7 +435,9 @@ class EvidenceCollector:
         if manual_evidence_required:
             errors.append("manual_evidence_required")
         decision_required = any(
-            str(spec.trust.get("state") or "trusted") != "trusted" for spec in active_specs if spec.kind == "command"
+            str(spec.trust.get("state") or "approval_required") != "trusted"
+            for spec in active_specs
+            if spec.kind == "command"
         ) or any(item.get("status") == "approval_required" for item in check_receipts if isinstance(item, Mapping))
         if decision_required:
             errors.append("verification_decision_required")

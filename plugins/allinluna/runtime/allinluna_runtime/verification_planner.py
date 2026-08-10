@@ -44,6 +44,8 @@ def _slug(value: str) -> str:
 
 
 def _repo_roots(repository_context: Any) -> tuple[Path, ...]:
+    if repository_context is None:
+        return ()
     value = _raw(repository_context) if not isinstance(repository_context, Mapping) else dict(repository_context)
     roots = value.get("roots") or ()
     result: list[Path] = []
@@ -65,7 +67,7 @@ def _metadata(domain: Any) -> dict[str, Any]:
 def _origin_metadata(domain: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     metadata = _metadata(domain)
     raw = metadata.get("verification_provenance") or metadata.get("provenance")
-    provenance = {"source_kind": "user-approved", "generated_by": "VerificationPlanner"}
+    provenance = {"source_kind": "unknown", "generated_by": "VerificationPlanner"}
     if isinstance(raw, str):
         provenance["source_kind"] = raw
     elif isinstance(raw, Mapping):
@@ -81,6 +83,19 @@ def _pack_id(pack: Any) -> str:
     return str(getattr(pack, "id", None) or pack or "pack")
 
 
+def _pack_registry_identity(pack: Any) -> tuple[str | None, bool]:
+    manifest = pack.get("manifest") if isinstance(pack, Mapping) else getattr(pack, "manifest", None)
+    if hasattr(manifest, "to_dict"):
+        manifest = manifest.to_dict()
+    manifest_value = dict(manifest) if isinstance(manifest, Mapping) else {}
+    source = manifest_value.get("source") if isinstance(manifest_value.get("source"), Mapping) else {}
+    if source.get("kind") == "builtin" and source.get("ref") == "allinluna":
+        version = str(manifest_value.get("version") or getattr(pack, "version", "unknown"))
+        return f"builtin://allinluna/{_pack_id(pack)}@{version}", True
+    identity = str(source.get("registry_identity") or "").strip() or None
+    return identity, source.get("registry_trusted") is True
+
+
 def _pack_specs(pack: Any, domain: Any) -> tuple[VerificationSpec, ...]:
     verifier = getattr(pack, "verifiers", None)
     if not callable(verifier):
@@ -91,15 +106,24 @@ def _pack_specs(pack: Any, domain: Any) -> tuple[VerificationSpec, ...]:
     except (TypeError, VerificationSpecError, AttributeError):
         return ()
     result: list[VerificationSpec] = []
+    registry_identity, registry_trusted = _pack_registry_identity(pack)
     for spec in specs:
         data = spec.to_dict()
         provenance = dict(data.get("provenance") or {})
         provenance.setdefault("source_kind", "pack-signed")
         provenance.setdefault("source_ref", f"pack://{_pack_id(pack)}")
         provenance.setdefault("generated_by", "VerificationPlanner")
+        if registry_identity:
+            provenance.setdefault("registry_identity", registry_identity)
+        provenance.setdefault("registry_trusted", registry_trusted)
         trust = dict(data.get("trust") or {})
-        trust.setdefault("state", "trusted")
-        trust.setdefault("reason", "declared by the selected Workflow Pack")
+        trust.setdefault("state", "trusted" if registry_identity and registry_trusted else "approval_required")
+        trust.setdefault(
+            "reason",
+            "declared by a trusted registered Workflow Pack"
+            if registry_identity and registry_trusted
+            else "Pack identity is not trusted by the active registry",
+        )
         data.update(
             source="pack-signed",
             provenance=provenance,
@@ -136,7 +160,7 @@ class VerificationPlan:
         return tuple(
             spec
             for spec in self.specs
-            if str(spec.trust.get("state", "trusted")) == "trusted" and spec.kind != "human"
+            if str(spec.trust.get("state") or "approval_required") == "trusted" and spec.kind != "human"
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -204,18 +228,23 @@ class VerificationPlanner:
 
     @staticmethod
     def _approval_required(spec: VerificationSpec) -> bool:
-        return str(spec.trust.get("state") or "trusted") != "trusted"
+        return str(spec.trust.get("state") or "approval_required") != "trusted"
 
     def _annotate_explicit(self, spec: VerificationSpec, domain: Mapping[str, Any]) -> VerificationSpec:
         data = spec.to_dict()
-        provenance, trust = _origin_metadata(domain)
-        data.setdefault("source", "user-approved")
-        data.setdefault("provenance", provenance)
+        origin_provenance, origin_trust = _origin_metadata(domain)
+        provenance = dict(data.get("provenance") or origin_provenance)
+        provenance.setdefault("source_kind", "unknown")
+        provenance.setdefault("generated_by", "VerificationPlanner")
+        data.setdefault("source", str(provenance["source_kind"]))
+        data["provenance"] = provenance
         if not data.get("trust"):
-            state = "approval_required" if provenance.get("source_kind") in {"model-proposed", "legacy-imported", "external-packet"} else "trusted"
-            data["trust"] = {"state": state, "reason": "explicit typed verification procedure" if state == "trusted" else "untrusted source requires approval"}
-        if trust:
-            data["trust"] = {**trust, **dict(data.get("trust") or {})}
+            data["trust"] = dict(origin_trust) or {
+                "state": "approval_required",
+                "reason": "explicit command lacks trusted provenance and approval evidence",
+            }
+        elif origin_trust:
+            data["trust"] = {**origin_trust, **dict(data["trust"])}
         execution = dict(data.get("execution") or {})
         if spec.kind == "command":
             execution.setdefault("sandbox", "worktree")
@@ -320,7 +349,7 @@ class VerificationPlanner:
     def _unresolved(conditions: Sequence[str], specs: Sequence[VerificationSpec]) -> tuple[str, ...]:
         covered: set[str] = set()
         for spec in specs:
-            if spec.kind in {"command", "artifact", "workspace"} and str(spec.trust.get("state") or "trusted") == "trusted":
+            if spec.kind in {"command", "artifact", "workspace"} and str(spec.trust.get("state") or "approval_required") == "trusted":
                 covered.update(map(str, spec.satisfies))
         return tuple(str(condition) for condition in conditions if str(condition) not in covered)
 
@@ -332,7 +361,7 @@ class VerificationPlanner:
             kind="human",
             satisfies=conditions,
             source="planner-decision",
-            provenance={"source_kind": "user-approved", "generated_by": "VerificationPlanner"},
+            provenance={"source_kind": "unknown", "generated_by": "VerificationPlanner"},
             trust={"state": "approval_required", "reason": "no safe repository verification entrypoint was found"},
             execution={"sandbox": "none", "network": "deny", "destructive": False},
         )

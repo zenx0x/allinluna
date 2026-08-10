@@ -3,7 +3,7 @@ name = "allinluna"
 version = "2.0.0-rc.2"
 description = "Complete, resource-aware agent development workflows for Codex"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "zenx0x" }]
 
 [project.scripts]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 
 from allinluna_runtime.artifacts import ArtifactStore
 from allinluna_runtime.engine.lane_driver import LaneDriver
@@ -12,7 +13,7 @@ from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
 from allinluna_runtime.store import Store
 
 
-def _runtime(tmp_path, *, mode: str = "native_preferred"):
+def _runtime(tmp_path, *, mode: str = "native_preferred", exports=()):
     (tmp_path / "pyproject.toml").write_text(
         "[project]\nname = 'allinluna-lane-direct-fixture'\n",
         encoding="utf-8",
@@ -37,6 +38,7 @@ def _runtime(tmp_path, *, mode: str = "native_preferred"):
             "version": 1,
             "outcome": "complete direct work",
             "done_when": ["direct work verified"],
+            "exports": [{"name": name, "version": 1} for name in exports],
             "verification_specs": [
                 {
                     "id": "direct-check",
@@ -90,6 +92,29 @@ def _runtime(tmp_path, *, mode: str = "native_preferred"):
     return store, bootstrap, collector
 
 
+class _MaterializingEvidenceCollector(EvidenceCollector):
+    """Test collector that materializes declared exports when asked."""
+
+    def collect(self, task, handoff=None, *, exports=None, **kwargs):
+        if exports is None:
+            task_value = self.store.get_task(str(task)) if not isinstance(task, Mapping) else dict(task)
+            contract = self.store.get_contract(
+                str(task_value["contract_id"]), int(task_value.get("contract_version", 1))
+            ) or {}
+            exports = []
+            for declared in contract.get("exports", ()):
+                name = str(declared.get("name") if isinstance(declared, Mapping) else declared)
+                if not name:
+                    continue
+                artifact = self.artifacts.put(
+                    f"{task_value['id']}:{name}".encode(),
+                    kind="summary",
+                    produced_by="test-export-materializer",
+                )
+                exports.append({"name": name, "artifact_ref": artifact.ref, "version": 1})
+        return super().collect(task, handoff, exports=exports, **kwargs)
+
+
 def test_native_preferred_without_native_host_executes_direct_and_closes_workunit(tmp_path):
     store, bootstrap, collector = _runtime(tmp_path)
     executed: list[dict] = []
@@ -141,6 +166,48 @@ def test_native_preferred_without_native_host_executes_direct_and_closes_workuni
         assert handoff["artifacts"]
         for ref in handoff["artifacts"]:
             assert collector.artifacts.verify(ref) is True
+    finally:
+        store.close()
+
+
+def test_embedded_direct_executor_preserves_declared_exports_for_collector(tmp_path):
+    store, bootstrap, _collector = _runtime(tmp_path, exports=("ProducerArtifact",))
+    artifacts = ArtifactStore(store, root=tmp_path / "artifacts")
+    collector = _MaterializingEvidenceCollector(
+        store,
+        artifact_store=artifacts,
+        check_runner=CheckRunner(artifacts),
+        profile="projectless-analysis",
+    )
+
+    def execute(_plan):
+        return {
+            "status": "completed",
+            "summary": "direct work performed",
+            "changed_paths": [],
+            "raw_outputs": [{"operation": "bounded-direct-work", "ok": True}],
+        }
+
+    try:
+        result = LaneDriver.from_bootstrap(
+            store,
+            bootstrap,
+            host=None,
+            direct_evidence_collector=collector,
+            direct_work_executor=execute,
+        ).drive(max_cycles=4, monitor=False)
+
+        assert result["handoff"]["status"] == "completed"
+        rows = store._fetchall(
+            "SELECT payload_json FROM driver_handoffs "
+            "WHERE driver_kind = 'lane' AND scope_id = 'task-direct'"
+        )
+        work_handoff = next(
+            json.loads(row["payload_json"])
+            for row in rows
+            if json.loads(row["payload_json"]).get("protocol") == "work-handoff/v1"
+        )
+        assert work_handoff["evidence"]["exports"][0]["name"] == "ProducerArtifact"
     finally:
         store.close()
 

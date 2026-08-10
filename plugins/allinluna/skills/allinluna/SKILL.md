@@ -10,11 +10,9 @@ All in Luna is one public entry point. Accept one of these inputs:
 - an existing plan;
 - an active run or legacy run snapshot;
 - a Research Routes packet.
-Compile the input to a typed `RunIntent`, select a registered Workflow Pack,
-and compile its `TaskGraph` containing contracts, dependencies, ownership,
+Compile the input to a typed `RunIntent`, select a registered Workflow Pack, and compile its `TaskGraph` containing contracts, dependencies, ownership,
 done-when conditions, WorkGraph templates, and resource defaults. Then call the
-vNext runtime/CLI to persist the graph, release ready Lanes, ingest real host
-receipts, and continue until the root result is complete or a concrete blocker
+vNext runtime/CLI to persist the graph, release ready Lanes, ingest real host receipts, and continue until the root result is complete or a concrete blocker
 is returned.
 ## Highest-priority exact Action Relay
 Logical `LocalDispatchIntent` values are not HostActions. A HostAdapter first

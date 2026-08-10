@@ -314,7 +314,14 @@ class LaneDirectExecutor:
                 candidate,
                 checks=plan.intent.checks,
                 artifacts=artifacts,
-                exports=export_values,
+                # An embedded Lane callback may intentionally leave export
+                # materialization to the collector.  Preserve that hook while
+                # keeping an external payload's explicit empty list fail-closed.
+                exports=(
+                    export_values
+                    if export_values or execution_source == "lane-direct-external"
+                    else None
+                ),
                 workspace_scope={
                     "workspace": plan.intent.resource_envelope.get("workspace"),
                     "ownership": list(plan.intent.ownership),

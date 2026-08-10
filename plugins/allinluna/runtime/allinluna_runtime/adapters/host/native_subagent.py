@@ -277,7 +277,19 @@ class LaneDirectExecutor:
                 result=result,
                 execution_source=execution_source,
             )
-        artifacts = self._artifact_refs(plan, result_value)
+        export_values = tuple(
+            dict(item) for item in (result_value.get("exports") or ()) if isinstance(item, Mapping)
+        )
+        artifact_inputs = list(result_value.get("artifacts") or ())
+        artifact_inputs.extend(
+            str(item["artifact_ref"])
+            for item in export_values
+            if item.get("artifact_ref")
+        )
+        artifacts = self._artifact_refs(
+            plan,
+            {**result_value, "artifacts": artifact_inputs},
+        )
         if str(result.status).lower() in {"failed", "blocked"} or result.blockers:
             return self._blocked(
                 plan,
@@ -302,6 +314,7 @@ class LaneDirectExecutor:
                 candidate,
                 checks=plan.intent.checks,
                 artifacts=artifacts,
+                exports=export_values,
                 workspace_scope={
                     "workspace": plan.intent.resource_envelope.get("workspace"),
                     "ownership": list(plan.intent.ownership),

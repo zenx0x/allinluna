@@ -544,6 +544,7 @@ class DirectWorkResult(_MappingRecord):
     changed_paths: tuple[str, ...] = ()
     raw_outputs: tuple[Any, ...] = ()
     artifacts: tuple[str, ...] = ()
+    exports: tuple[Mapping[str, Any], ...] = ()
     blockers: tuple[Mapping[str, Any], ...] = ()
     result_digest: str | None = None
 
@@ -554,6 +555,12 @@ class DirectWorkResult(_MappingRecord):
         object.__setattr__(self, "changed_paths", tuple(map(str, self.changed_paths)))
         object.__setattr__(self, "artifacts", tuple(map(str, self.artifacts)))
         object.__setattr__(self, "raw_outputs", tuple(_copy(item) for item in self.raw_outputs))
+        normalized_exports: list[Mapping[str, Any]] = []
+        for item in self.exports:
+            if not isinstance(item, Mapping):
+                raise TypeError("direct work result exports must be mappings")
+            normalized_exports.append(_copy(dict(item)))
+        object.__setattr__(self, "exports", tuple(normalized_exports))
         object.__setattr__(self, "blockers", tuple(_copy(item) for item in self.blockers))
 
     def _material(self) -> dict[str, Any]:
@@ -568,6 +575,7 @@ class DirectWorkResult(_MappingRecord):
             "changed_paths": list(self.changed_paths),
             "raw_outputs": [_copy(item) for item in self.raw_outputs],
             "artifacts": list(self.artifacts),
+            "exports": [_copy(dict(item)) for item in self.exports],
             "blockers": [dict(item) for item in self.blockers],
         }
 
@@ -603,6 +611,7 @@ class DirectWorkResult(_MappingRecord):
                 changed_paths=tuple(raw.get("changed_paths") or raw.get("changedPaths") or ()),
                 raw_outputs=tuple(raw.get("raw_outputs") or raw.get("rawOutputs") or ()),
                 artifacts=tuple(str(item) for item in (raw.get("artifacts") or ())),
+                exports=tuple(_copy(item) for item in (raw.get("exports") or ())),
                 blockers=tuple(item for item in (raw.get("blockers") or ()) if isinstance(item, Mapping)),
                 result_digest=str(raw.get("result_digest") or raw.get("resultDigest") or "") or None,
             )

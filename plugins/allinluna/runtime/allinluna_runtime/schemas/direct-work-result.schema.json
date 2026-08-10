@@ -24,6 +24,19 @@
     "changed_paths": {"type": "array", "items": {"type": "string"}},
     "raw_outputs": {"type": "array"},
     "artifacts": {"type": "array", "items": {"type": "string"}},
+    "exports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "artifact_ref"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "artifact_ref": {"type": "string", "minLength": 1},
+          "version": {"type": "integer", "minimum": 1}
+        },
+        "additionalProperties": true
+      }
+    },
     "blockers": {"type": "array", "items": {"type": "object"}}
   },
   "additionalProperties": false

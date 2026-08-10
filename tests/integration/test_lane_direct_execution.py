@@ -208,8 +208,31 @@ def _external_result(plan, *, status="completed", changed_paths=(), raw_outputs=
         "changed_paths": list(changed_paths),
         "raw_outputs": list(raw_outputs),
         "artifacts": [],
+        "exports": [],
         "blockers": [],
     }
+
+
+def test_external_direct_result_propagates_verified_exports(tmp_path):
+    store, bootstrap, _collector = _runtime(tmp_path)
+    try:
+        plan = LaneDriver.from_bootstrap(store, bootstrap).next_actions()["plans"][0]
+        artifact = ArtifactStore(store, root=tmp_path / "artifacts").put(
+            b"producer-export", kind="summary", produced_by="external-lane"
+        )
+        result = _external_result(plan, raw_outputs=[{"ok": True}])
+        result["artifacts"] = [artifact.ref]
+        result["exports"] = [{"name": "ProducerArtifact", "artifact_ref": artifact.ref, "version": 1}]
+        ingested = LaneDriver.from_bootstrap(store, bootstrap).ingest_direct_result(result)
+
+        assert ingested["status"] == "completed"
+        assert ingested["handoff"]["execution_source"] == "lane-direct-external"
+        assert ingested["handoff"]["evidence"]["exports"] == [
+            {"name": "ProducerArtifact", "artifact_ref": artifact.ref, "version": 1, "evidence_source": "allinluna.evidence-collector/v1"}
+        ]
+        assert store.get_work_unit("work-direct")["state"] == "completed"
+    finally:
+        store.close()
 
 
 def test_cli_only_native_preferred_completes_without_injected_callback(tmp_path, capsys):

@@ -6,11 +6,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
-from ..adapters.host.base import HostAction, stable_digest
+from ..adapters.host.base import HostAction, LaneDirectExecutionPlan, stable_digest
+from ..adapters.host.native_subagent import (
+    LaneDirectExecutor,
+    LocalCapabilityUnavailable,
+    NativeSubagentHost,
+)
 from ..evidence import EvidenceCollector
 from ..resource import ResourceBroker
-from ..scheduler.local_scheduler import LocalAction, LocalScheduler
 from ..scheduler.conflicts import path_overlaps
+from ..scheduler.local_scheduler import LocalAction, LocalScheduler
 from .action_bridge import ActionBridge
 
 
@@ -32,7 +37,7 @@ class LaneEngine:
 
     API_VERSION = 1
 
-    def __init__(self, store: Any, task_id: str, *, context_kernel: Any = None, artifact_store: Any = None, host: Any = None, resource_broker: ResourceBroker | None = None, bridge: ActionBridge | None = None, scheduler: LocalScheduler | None = None, adapter: str = "native-subagent", evidence_collector: EvidenceCollector | None = None) -> None:
+    def __init__(self, store: Any, task_id: str, *, context_kernel: Any = None, artifact_store: Any = None, host: Any = None, resource_broker: ResourceBroker | None = None, bridge: ActionBridge | None = None, scheduler: LocalScheduler | None = None, adapter: str = "native-subagent", evidence_collector: EvidenceCollector | None = None, direct_evidence_collector: EvidenceCollector | None = None, direct_executor: LaneDirectExecutor | None = None, direct_work_executor: Any = None, execution_mode: str = "native_preferred") -> None:
         self.store = store
         persisted_task = store.get_task(str(task_id))
         self.task_id = str(persisted_task["id"] if persisted_task is not None else task_id)
@@ -46,8 +51,29 @@ class LaneEngine:
         if persisted_task is not None:
             self.resource_broker.bind(store, str(persisted_task["run_id"]))
             self.resource_broker.recover()
-        self.bridge = bridge or ActionBridge(store, host, adapter=adapter, resource_broker=self.resource_broker)
-        self.scheduler = scheduler or LocalScheduler(store, self.task_id, resource_broker=self.resource_broker, adapter=adapter)
+        raw_host = host if host is not None else getattr(bridge, "host", None)
+        self.local_adapter = (
+            raw_host
+            if isinstance(raw_host, NativeSubagentHost)
+            else NativeSubagentHost(raw_host, host_id=adapter)
+        )
+        self.bridge = bridge or ActionBridge(
+            store, self.local_adapter, adapter=adapter, resource_broker=self.resource_broker
+        )
+        self.bridge.host = self.local_adapter
+        self.scheduler = scheduler or LocalScheduler(
+            store,
+            self.task_id,
+            resource_broker=self.resource_broker,
+            adapter=adapter,
+            execution_mode=execution_mode,
+        )
+        self.direct_executor = direct_executor or LaneDirectExecutor(
+            store,
+            evidence_collector=direct_evidence_collector,
+            artifact_store=artifact_store,
+            work_executor=direct_work_executor,
+        )
         self.last_handoff: dict[str, Any] | None = None
 
     def context_bundle(self) -> Any:
@@ -94,12 +120,101 @@ class LaneEngine:
 
     def tick(self, *, dispatch: bool = True) -> dict[str, Any]:
         correction_results = self.process_corrections(dispatch=dispatch)
-        actions = self.scheduler.step()
+        local_actions = self.scheduler.resume_unresolved_actions()
+        resumed_ids = {item.work_unit_id for item in local_actions}
+        local_actions.extend(
+            item for item in self.scheduler.step() if item.work_unit_id not in resumed_ids
+        )
         receipts: list[Any] = []
+        actions: list[HostAction] = []
+        direct_plans: list[LaneDirectExecutionPlan] = []
+        work_handoffs: list[dict[str, Any]] = []
         if dispatch:
-            for local in actions:
-                result = self.bridge.dispatch(local.action)
+            for local in local_actions:
+                try:
+                    resolution = local.resolved_action or self.bridge.resolve_local(
+                        local.intent
+                    )
+                except LocalCapabilityUnavailable as exc:
+                    self.scheduler.mark_active(
+                        local.work_unit_id,
+                        {
+                            "status": "blocked",
+                            "attempt_id": local.attempt_id,
+                            "execution_state": "native_required_unavailable",
+                        },
+                    )
+                    blocked = self._local_blocked_handoff(
+                        local,
+                        code=exc.code,
+                        message=exc.reason,
+                        execution_mode=local.intent.execution_mode,
+                    )
+                    self.ingest_handoff(blocked)
+                    work_handoffs.append(blocked)
+                    continue
+                if isinstance(resolution, LaneDirectExecutionPlan):
+                    direct_plans.append(resolution)
+                    self.scheduler.mark_direct_active(local, resolution.to_dict())
+                    work_handoff = self.direct_executor.execute(resolution)
+                    self.ingest_handoff(work_handoff)
+                    work_handoffs.append(work_handoff)
+                    routing_receipt = self.local_adapter.direct_fallback_receipt(
+                        resolution
+                    ).to_dict()
+                    receipts.append(
+                        {
+                            "status": "lane-direct-routed",
+                            "receipt": routing_receipt,
+                            "work_handoff_id": work_handoff.get("handoff_id"),
+                            "completion_source": "work-handoff/v1",
+                        }
+                    )
+                    continue
+                actions.append(resolution)
+                self.scheduler.persist_resolved_action(local, resolution)
+                try:
+                    result = self.bridge.dispatch(resolution)
+                except LocalCapabilityUnavailable as exc:
+                    self.scheduler.mark_active(
+                        local.work_unit_id,
+                        {"status": "blocked", "attempt_id": local.attempt_id},
+                    )
+                    blocked = self._local_blocked_handoff(
+                        local,
+                        code=exc.code,
+                        message=exc.reason,
+                        execution_mode=local.intent.execution_mode,
+                    )
+                    self.ingest_handoff(blocked)
+                    work_handoffs.append(blocked)
+                    continue
                 receipts.append(result)
+                result_status = str(
+                    result.get("status") if isinstance(result, Mapping) else ""
+                )
+                if result_status in {
+                    "HOST_CAPABILITY_BLOCKED",
+                    "HOST_PROTOCOL_VIOLATION",
+                    "HOST_RECEIPT_TRUST_VIOLATION",
+                }:
+                    blocker = result.get("blocker") if isinstance(result, Mapping) else {}
+                    self.scheduler.mark_active(
+                        local.work_unit_id,
+                        {"status": "blocked", "attempt_id": local.attempt_id},
+                    )
+                    blocked = self._local_blocked_handoff(
+                        local,
+                        code=str((blocker or {}).get("code") or result_status),
+                        message=str(
+                            (blocker or {}).get("message")
+                            or "resolved local host action was rejected"
+                        ),
+                        execution_mode=local.intent.execution_mode,
+                    )
+                    self.ingest_handoff(blocked)
+                    work_handoffs.append(blocked)
+                    continue
                 # LocalScheduler's scheduling snapshot predates the host call.
                 # Advance the same WorkUnit attempt immediately from the real
                 # receipt so a WorkHandoff observed in this tick is not
@@ -110,10 +225,60 @@ class LaneEngine:
                 }:
                     self.scheduler.mark_active(local.work_unit_id, observed)
         handoff = self.synthesize_handoff() if self._all_work_terminal() else None
-        return {"task_id": self.task_id, "actions": [item.action.to_dict() for item in actions], "receipts": receipts, "corrections": correction_results, "handoff": handoff}
+        return {
+            "task_id": self.task_id,
+            "intents": [item.intent.to_dict() for item in local_actions],
+            "actions": [item.to_dict() for item in actions],
+            "direct_plans": [item.to_dict() for item in direct_plans],
+            "work_handoffs": work_handoffs,
+            "receipts": receipts,
+            "corrections": correction_results,
+            "handoff": handoff,
+        }
+
+    def _local_blocked_handoff(
+        self,
+        local: LocalAction,
+        *,
+        code: str,
+        message: str,
+        execution_mode: str,
+    ) -> dict[str, Any]:
+        return {
+            "kind": "handoff",
+            "schema_version": "1.0",
+            "protocol": "work-handoff/v1",
+            "handoff_kind": "work",
+            "handoff_id": "work-handoff-"
+            + stable_digest(
+                {"attempt_id": local.attempt_id, "code": code, "message": message}
+            ),
+            "task_id": self.task_id,
+            "work_unit_id": local.work_unit_id,
+            "attempt_id": local.attempt_id,
+            "status": "blocked",
+            "summary": message,
+            "execution_mode": execution_mode,
+            "execution_source": "host-adapter-resolution",
+            "subagent_created": False,
+            "thread_id": None,
+            "changed_paths": [],
+            "artifacts": [],
+            "checks": [],
+            "evidence": None,
+            "blockers": [
+                {
+                    "code": code,
+                    "message": message,
+                    "owner_scope": local.work_unit_id,
+                    "recoverable": True,
+                }
+            ],
+            "created_at": _now(),
+        }
 
     def ingest_receipt(self, unit_id: str, receipt: Any) -> dict[str, Any]:
-        result = self.bridge.ingest_receipt(receipt)
+        self.bridge.ingest_receipt(receipt)
         return self.scheduler.mark_active(unit_id, _raw(receipt))
 
     def ingest_handoff(self, handoff: Mapping[str, Any]) -> dict[str, Any]:
@@ -247,8 +412,6 @@ class LaneEngine:
         if status is None:
             status = "completed" if all(unit["state"] == "completed" for unit in units) and bool(units) and not any(boundaries.values()) else "blocked"
         task = self.store.get_task(self.task_id) or {}
-        contract = self.store.get_contract(str(task.get("contract_id") or ""), int(task.get("contract_version", 1))) or {}
-        complete = status == "completed"
         handoff = {
             "kind": "handoff",
             "schema_version": "1.0",

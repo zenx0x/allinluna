@@ -10,7 +10,6 @@ from ..protocols.lane_bootstrap import LaneBootstrapEnvelope, LaneBootstrapError
 from .driver_support import cursor_from, extract_handoffs, raw, source_thread_id
 from .lane import LaneEngine
 
-
 WorkGraphExpander = Callable[[LaneEngine, Mapping[str, Any]], Sequence[Mapping[str, Any]] | None]
 
 
@@ -31,6 +30,10 @@ class LaneDriver:
         lane: LaneEngine | None = None,
         expander: WorkGraphExpander | None = None,
         evidence_collector: Any = None,
+        direct_evidence_collector: Any = None,
+        direct_executor: Any = None,
+        direct_work_executor: Any = None,
+        execution_mode: str = "native_preferred",
     ) -> None:
         if bootstrap is None:
             if run_id is None or task_id is None:
@@ -50,10 +53,15 @@ class LaneDriver:
             context_kernel=self.context_kernel,
             host=host,
             evidence_collector=evidence_collector,
+            direct_evidence_collector=direct_evidence_collector,
+            direct_executor=direct_executor,
+            direct_work_executor=direct_work_executor,
+            execution_mode=execution_mode,
         )
         if host is not None:
-            self.lane.bridge.host = host
-        self.host = host if host is not None else self.lane.bridge.host
+            self.lane.local_adapter.host = host
+            self.lane.bridge.host = self.lane.local_adapter
+        self.host = self.lane.local_adapter
         self.expander = expander
         self._started = False
 
@@ -227,6 +235,35 @@ class LaneDriver:
                 results.append({"handoff_id": handoff_id, "work_unit_id": unit_id, "state": "ingested", "work_unit": unit_result})
         return results
 
+    def _record_direct_handoffs(
+        self, handoffs: Sequence[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for handoff in handoffs:
+            handoff_id = str(handoff.get("handoff_id") or "")
+            if not handoff_id:
+                raise ValueError("lane-direct WorkHandoff requires handoff_id")
+            if self.store.get_driver_handoff(
+                self.DRIVER_KIND, self.task_id, handoff_id
+            ) is None:
+                self.store.record_driver_handoff(
+                    self.DRIVER_KIND,
+                    self.task_id,
+                    dict(handoff),
+                    source_thread_id=None,
+                )
+                state = "executed-and-ingested"
+            else:
+                state = "already-ingested"
+            results.append(
+                {
+                    "handoff_id": handoff_id,
+                    "work_unit_id": handoff.get("work_unit_id"),
+                    "state": state,
+                }
+            )
+        return results
+
     def ingest_receipt(self, receipt: Any) -> dict[str, Any]:
         """Ingest a durable local host receipt without fabricating a WorkUnit id."""
 
@@ -307,7 +344,10 @@ class LaneDriver:
         # worker thread; it never replaces a WorkUnit with a new worker.
         execution = self.lane.tick(dispatch=True)
         observations, next_cursor = self._monitor(cursor=cursor) if monitor else ([], cursor)
-        work_handoffs = self._ingest_work_handoffs(observations)
+        direct_handoffs = self._record_direct_handoffs(
+            execution.get("work_handoffs", ())
+        )
+        work_handoffs = [*direct_handoffs, *self._ingest_work_handoffs(observations)]
         synthesized = self._synthesize_handoff() if self.lane._all_work_terminal() else None
         boundary = self._boundary(synthesized)
         checkpoint = self.store.save_driver_checkpoint(
@@ -327,6 +367,8 @@ class LaneDriver:
             "task_id": self.task_id,
             "created_work_units": created,
             "actions": execution.get("actions", []),
+            "intents": execution.get("intents", []),
+            "direct_plans": execution.get("direct_plans", []),
             "receipts": execution.get("receipts", []),
             "corrections": execution.get("corrections", []),
             "observations": [raw(item) for item in observations],

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 import tempfile
 import unittest
 from collections import Counter
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
-
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+from tests.e2e._lane_direct_runtime import qualify_two_lane_runtime
 from tests.fixtures.vnext import scenario_runner
 
 
@@ -347,31 +347,37 @@ class VNextE2ETests(unittest.TestCase):
             self.assertLessEqual(set(item["ownership"]), set(item["ancestor_ownership"]))
 
     def test_public_runtime_flow_completes_from_single_public_api(self) -> None:
-        result = self.execute("public_runtime_flow")
-        entry = require(result, "public_api_entry")
-        flow = require(result, "flow")
-        self.assertEqual(entry.get("started_via"), "SinglePublicSkillAPI.start")
-        self.assertTrue(flow.get("task_graph_persisted"))
-        self.assertTrue(flow.get("work_graphs_persisted"))
-        self.assertEqual(flow.get("top_level_receipts"), 2)
-        self.assertEqual(flow.get("verified_lane_handoffs"), 2)
-        self.assertGreaterEqual(flow.get("work_unit_handoffs", 0), 2)
-        self.assertEqual(len(flow.get("exports", [])), 2)
-        self.assertEqual(flow.get("actual_changed_paths"), ["seed.txt"])
-        self.assertTrue(flow.get("protected_unchanged"))
-        self.assertIn("exports_available", flow.get("dependency_condition", ""))
-        self.assertEqual(flow.get("run_status"), "completed", flow)
-        self.assertEqual(flow.get("child_bootstraps_loaded"), 2)
+        with tempfile.TemporaryDirectory(prefix="public-runtime-flow-") as directory:
+            result = qualify_two_lane_runtime(
+                Path(directory), intent_id="catalog-public-runtime-flow"
+            )
+        host = result["host"]
+        self.assertEqual(result["driver"].get("boundary"), {"kind": "completed"})
+        self.assertEqual(result["run_status"], "completed")
         self.assertEqual(
-            flow.get("public_create_thread_fields"),
-            ["model", "prompt", "target", "thinking", "title"],
+            result["task_states"], {"producer": "completed", "consumer": "completed"}
         )
-        self.assertEqual(flow.get("requested_resources"), [("gpt-5.6-luna", "max")])
-        self.assertFalse(flow.get("public_create_thread_hidden_payload"))
-        self.assertTrue(flow.get("parent_lane_engine_closure"))
-        self.assertTrue(flow.get("dependency_released_next_wave"))
-        self.assertEqual(flow.get("restart_duplicate_dispatches"), 0)
-        self.assertTrue(flow.get("telemetry_missing_non_blocking"))
+        self.assertEqual(result["coordinator_handoff_statuses"], ["completed", "completed"])
+        self.assertEqual(len(host.created_task_ids), 2)
+        self.assertEqual(len(host.child_bootstraps), 2)
+        self.assertEqual(len(host.direct_plans), 2)
+        self.assertTrue(
+            all(plan["protocol"] == "lane-direct-work/v1" for plan in host.direct_plans)
+        )
+        self.assertTrue(all(item["status"] == "completed" for item in host.child_handoffs))
+        self.assertEqual(
+            sorted(host.public_calls[0]), ["model", "prompt", "target", "thinking", "title"]
+        )
+        self.assertTrue(
+            all(
+                not any(
+                    key in call
+                    for key in ("payload", "task_envelope", "action_contract_hash", "idempotency_key")
+                )
+                for call in host.public_calls
+            )
+        )
+        self.assertIn("exports_available", result["dependency"]["condition_json"])
 
     def test_blocked_lane_does_not_stop_unrelated_lanes(self) -> None:
         result = self.execute("blocked_lane_continuation")

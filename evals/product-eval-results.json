@@ -4,7 +4,7 @@
   "status": "ready",
   "matrix": "evals/product-journey-matrix.json",
   "runner": "scripts/validate_product_experience.py --run",
-  "required_journeys": 7,
+  "required_journeys": 10,
   "result_semantics": {
     "pass": "the journey assertion was exercised and supported by evidence",
     "fail": "the journey assertion was exercised and contradicted by evidence",
@@ -18,6 +18,9 @@
     {"journey_id": "research-route-boundary", "status": "pass"},
     {"journey_id": "project-aware-exact-dispatch", "status": "pass"},
     {"journey_id": "no-host-exact-relay", "status": "pass"},
-    {"journey_id": "recovery-to-work-and-lane-handoff", "status": "pass"}
+    {"journey_id": "recovery-to-work-and-lane-handoff", "status": "pass"},
+    {"journey_id": "plain-goal-full-runtime-completion", "status": "pass"},
+    {"journey_id": "two-lane-export-dependency-completion", "status": "pass"},
+    {"journey_id": "native-capability-policy", "status": "pass"}
   ]
 }

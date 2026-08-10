@@ -15,9 +15,15 @@ if str(RUNTIME_ROOT) not in sys.path:
 from allinluna_runtime.engine.coordinator import CoordinatorEngine
 from allinluna_runtime.packs.public_skill import SinglePublicSkillAPI
 from allinluna_runtime.store import Store
-from tests.fixtures.vnext.hosts import FakeDistributedCodexHost, FakeSubagentHost
-from tests.fixtures.vnext import scenario_runner
+
+from tests.e2e._lane_direct_runtime import (
+    qualify_native_required_negative,
+    qualify_single_lane_runtime,
+    qualify_two_lane_runtime,
+)
 from tests.e2e.test_vnext_scenarios import temporary_git_fixture
+from tests.fixtures.vnext import scenario_runner
+from tests.fixtures.vnext.hosts import FakeDistributedCodexHost, FakeSubagentHost
 
 
 class ProductUserJourneyTests(unittest.TestCase):
@@ -219,6 +225,55 @@ class ProductUserJourneyTests(unittest.TestCase):
         finally:
             store.close()
             directory.cleanup()
+
+    def test_plain_goal_full_runtime_reaches_completed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="product-full-runtime-") as directory:
+            result = qualify_single_lane_runtime(
+                Path(directory), intent_id="product-full-runtime"
+            )
+        host = result["host"]
+        self.assertEqual(result["driver"]["boundary"], {"kind": "completed"})
+        self.assertEqual(result["run_status"], "completed")
+        self.assertEqual(result["task_state"], "completed")
+        self.assertEqual(result["coordinator_handoff_statuses"], ["completed"])
+        self.assertEqual(len(host.direct_plans), 1)
+        self.assertEqual(host.direct_plans[0]["protocol"], "lane-direct-work/v1")
+        self.assertEqual(host.child_handoffs[0]["protocol"], "lane-handoff/v1")
+        self.assertTrue(host.child_handoffs[0]["evidence"]["verified"])
+
+    def test_two_lane_export_dependency_releases_and_completes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="product-two-lane-") as directory:
+            result = qualify_two_lane_runtime(
+                Path(directory), intent_id="product-two-lane"
+            )
+        host = result["host"]
+        self.assertEqual(result["run_status"], "completed")
+        self.assertEqual(
+            result["task_states"], {"producer": "completed", "consumer": "completed"}
+        )
+        self.assertIn("exports_available", result["dependency"]["condition_json"])
+        self.assertEqual(
+            [item.rsplit(":task:", 1)[-1] for item in host.created_task_ids],
+            ["producer", "consumer"],
+        )
+        self.assertEqual(
+            host.child_handoffs[0]["evidence"]["exports"][0]["name"],
+            "ProducerArtifact",
+        )
+
+    def test_native_capability_policy_is_conditional_and_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="product-native-policy-") as directory:
+            preferred = qualify_single_lane_runtime(
+                Path(directory) / "preferred", intent_id="product-native-preferred"
+            )
+            required = qualify_native_required_negative(
+                Path(directory) / "required", intent_id="product-native-required"
+            )
+        self.assertEqual(preferred["run_status"], "completed")
+        self.assertEqual(preferred["host"].direct_plans[0]["execution_mode"], "native_preferred")
+        self.assertEqual(required["driver"]["boundary"]["kind"], "lane-blocked")
+        self.assertEqual(required["executed"], [])
+        self.assertIn("HOST_CAPABILITY_BLOCKED", required["handoffs"][0]["payload_json"])
 
 
 if __name__ == "__main__":

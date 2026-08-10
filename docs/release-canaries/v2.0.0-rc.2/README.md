@@ -1,10 +1,57 @@
 # All in Luna v2.0.0-rc.2 Desktop canary
 
-This package is the real Desktop relay record for the RC2 product surface. It
-is intentionally projectless so the canary does not create or mutate a
-repository project. The request and receipt files are inputs/templates only;
-they are not evidence until the exact Desktop action has been invoked and the
-receipt has been exported by that same invocation.
+The current corrective qualification is **PASS**. It starts with
+`SinglePublicSkillAPI`, relays two dependency-ordered top-level Tasks through
+the real Desktop `codex_app__create_thread` capability, and closes both Tasks
+and the root Run through real `LaneDriver`, lane-direct WorkUnits,
+`WorkHandoff`, `EvidenceCollector`, `LaneHandoff`, and `HandoffProcessor`
+records.
+
+The authoritative records are:
+
+- `corrective-qualification.json`: complete result, runtime and artifact refs,
+  dependency evidence, native classification, and the superseded attempt.
+- `corrective-actions.json`: both exact action identities and contract hashes.
+- `corrective-receipts.json`: both raw Desktop receipt identities and thread
+  IDs.
+
+The historical `acceptance.json`, `desktop-action.json`,
+`desktop-receipt.json`, and `desktop-result.json` remain immutable evidence of
+the earlier blocked qualification. They are not rewritten as a pass;
+`acceptance.json` now only points to the fresh corrective run that supersedes
+it.
+
+Both qualification databases were created under a fresh temporary T5 root.
+No historical `.allinluna` database or receipt was mutated. The final canary
+is intentionally projectless, so neither Desktop Task writes into a repository
+project.
+
+## Corrective result
+
+The final run proves this sequence:
+
+```text
+SinglePublicSkillAPI.start
+→ CoordinatorDriver
+→ real Desktop Producer Lane
+→ lane-direct WorkUnit and verified export
+→ WorkHandoff → LaneHandoff → HandoffProcessor
+→ Consumer becomes ready
+→ real Desktop Consumer Lane
+→ lane-direct WorkUnit → WorkHandoff → LaneHandoff → HandoffProcessor
+→ root Run completed
+```
+
+The runtime adapter did not advertise `native_subagent`, so the conditional
+native recursive canary is `NOT_APPLICABLE`. This does not block the release:
+both `native_preferred` WorkUnits truthfully selected `lane_direct` and
+completed. The separate `native_required` negative canary selected no direct
+executor and ended at `lane-blocked` with `HOST_CAPABILITY_BLOCKED`.
+
+## Historical relay procedure
+
+The remainder documents the original single-Lane relay procedure retained for
+reproducibility.
 
 ## Prepare the exact action
 

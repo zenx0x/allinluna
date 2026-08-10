@@ -1,0 +1,30 @@
+{
+  "protocol": "desktop-canary-receipts/v1",
+  "run_ref": "run://run-rc2-pr2-universal-desktop-final",
+  "receipts": [
+    {
+      "receipt_id": "desktop-final-producer-019fea1fdb557d90bf69a7ead8827daa",
+      "action_id": "action-5c9f97b9a6b2331048da",
+      "dispatch_key": "intent:lane:96083b7dca5d1398b1cd",
+      "thread_id": "019fea1f-db55-7d90-bf69-a7ead8827daa",
+      "host_id": "local",
+      "status": "active",
+      "actual": true,
+      "actual_tool": "codex_app__create_thread",
+      "actual_capability": "codex_app__create_thread",
+      "action_contract_hash": "d8cc96553156a04f729397d19afe491c3b7822672864d57fcc6ac1836e5a1174"
+    },
+    {
+      "receipt_id": "desktop-final-consumer-019fea223f8e7012a07a6c2816fcc417",
+      "action_id": "action-0d5bf714fb3c27d4c980",
+      "dispatch_key": "intent:lane:6e0baffc773f9d0f6f9a",
+      "thread_id": "019fea22-3f8e-7012-a07a-6c2816fcc417",
+      "host_id": "local",
+      "status": "active",
+      "actual": true,
+      "actual_tool": "codex_app__create_thread",
+      "actual_capability": "codex_app__create_thread",
+      "action_contract_hash": "27adccf3b76d4f2e00694c58c32f533b19d4af914874c09bb834f20390a00145"
+    }
+  ]
+}

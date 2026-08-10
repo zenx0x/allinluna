@@ -80,6 +80,39 @@
         "completed handoffs carry independently verified artifact and workspace evidence"
       ],
       "evidence": ["restart_duplicate_dispatches", "work_unit_handoffs", "verified_lane_handoffs", "exports", "protected_unchanged"]
+    },
+    {
+      "id": "plain-goal-full-runtime-completion",
+      "input": "plain goal with an explicit trusted repository check",
+      "test": "test_plain_goal_full_runtime_reaches_completed",
+      "assertions": [
+        "SinglePublicSkillAPI persists the run and CoordinatorDriver dispatches a real top-level Lane",
+        "native_preferred resolves to lane-direct when nested capability is absent",
+        "WorkHandoff and independently collected evidence precede LaneHandoff and root completion"
+      ],
+      "evidence": ["run_status", "lane-direct-work/v1", "work-handoff/v1", "evidence-bundle/v1", "lane-handoff/v1"]
+    },
+    {
+      "id": "two-lane-export-dependency-completion",
+      "input": "two top-level Tasks with an exports_available dependency",
+      "test": "test_two_lane_export_dependency_releases_and_completes",
+      "assertions": [
+        "only Lane A is initially ready",
+        "Lane A exports an independently verified artifact before Lane B is released",
+        "Lane B and the root Run complete"
+      ],
+      "evidence": ["initial_task_ids", "ProducerArtifact", "created_task_ids", "task_states", "run_status"]
+    },
+    {
+      "id": "native-capability-policy",
+      "input": "host without an advertised nested native capability",
+      "test": "test_native_capability_policy_is_conditional_and_fail_closed",
+      "assertions": [
+        "native_preferred completes by lane-direct execution",
+        "native_required never invokes the direct executor",
+        "native_required reports HOST_CAPABILITY_BLOCKED truthfully"
+      ],
+      "evidence": ["execution_mode", "direct_plans", "lane-blocked", "HOST_CAPABILITY_BLOCKED"]
     }
   ]
 }

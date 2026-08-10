@@ -38,5 +38,8 @@
     "child_blocker": "lane-local native_subagent.spawn required an unavailable HostAdapter"
   },
   "qualification": "blocked",
-  "qualification_reason": "The exact real Desktop top-level relay and receipt succeeded, but the child Lane could not close its local WorkUnit without a native_subagent HostAdapter; no PASS is claimed."
+  "qualification_reason": "The exact real Desktop top-level relay and receipt succeeded, but the child Lane could not close its local WorkUnit without a native_subagent HostAdapter; no PASS is claimed.",
+  "historical": true,
+  "superseded_by": "corrective-qualification.json",
+  "supersession_note": "The historical receipt and database remain unchanged. A fresh corrective qualification proves native_preferred lane-direct completion instead."
 }

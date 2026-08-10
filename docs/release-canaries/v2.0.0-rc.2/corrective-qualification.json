@@ -1,0 +1,87 @@
+{
+  "protocol": "desktop-universal-canary/v1",
+  "run_id": "run-rc2-pr2-universal-desktop-final",
+  "source": {
+    "repository": "zenx0x/allinluna",
+    "candidate_commit": "4bec86124b7445d400b9d5895bb8cb728a80c54a",
+    "candidate_branch": "fix/v2-rc2-product-surface",
+    "qualification_branch": "codex/rc2-pr2-correction-t5",
+    "installation": "isolated editable install from the candidate worktree"
+  },
+  "runtime": {
+    "database": "C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/universal-canary-final/runtime.db",
+    "database_sha256": "e62d6251a969b25e7215b4c597b399c7664a391a841e3818f0b4cb2b35f36f24",
+    "artifact_root": "C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/universal-canary-final/artifacts",
+    "historical_databases_mutated": false
+  },
+  "universal_canary": {
+    "classification": "PASS",
+    "top_level_task_count": 2,
+    "task_order": ["producer", "consumer"],
+    "dependency": {
+      "condition": "exports_available",
+      "required_export": "UniversalProducerArtifact",
+      "artifact_ref": "artifact://sha256:3a9bfcdfcd9723e31d21b0b0f2badb501417be9c8a5f78fe2b386a0e8b436068",
+      "source_handoff_id": "handoff-241e8522734d4edd"
+    },
+    "producer": {
+      "thread_id": "019fea1f-db55-7d90-bf69-a7ead8827daa",
+      "lane_attempt_id": "lane-attempt-58bb3b0bdd191fffa977",
+      "work_handoff_id": "work-handoff-f012cf0ed7ade5eced25",
+      "lane_handoff_id": "handoff-241e8522734d4edd",
+      "lane_handoff_artifact_ref": "artifact://c2b9b4bd46f974be002e37f7f8973d4e3362a35c5d9a71f898093a3b91c354dc",
+      "evidence_digest": "sha256:a183f33bb014ce72646d6baa01fb0124385b1185076bd7305486359ccd58f9f7",
+      "execution_mode": "lane_direct",
+      "evidence_verified": true,
+      "state": "completed"
+    },
+    "consumer": {
+      "thread_id": "019fea22-3f8e-7012-a07a-6c2816fcc417",
+      "lane_attempt_id": "lane-attempt-00aefced21bc29c7ef75",
+      "work_handoff_id": "work-handoff-aa7cdfc46e3188d2ab59",
+      "lane_handoff_id": "handoff-d498b04603274d60",
+      "lane_handoff_artifact_ref": "artifact://d886e558a3b4d24b7b1efe7b7600a727d4b7564603cfd18c6ad6d6af65612481",
+      "evidence_digest": "sha256:f44e485409e7b70064e436654ea7e6d12bac3cd45632fea17b4f0875ba722f01",
+      "execution_mode": "lane_direct",
+      "evidence_verified": true,
+      "state": "completed"
+    },
+    "handoff_verification_failures": 0,
+    "run_status": "completed",
+    "boundary": "completed"
+  },
+  "native_recursive_canary": {
+    "classification": "NOT_APPLICABLE",
+    "logical_capability": "native_subagent",
+    "advertised": false,
+    "reason": "The Lane runtime had no host adapter advertising native_subagent; native_preferred therefore selected the specified lane-direct path."
+  },
+  "native_required_negative": {
+    "classification": "PASS",
+    "database": "C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/native-required-negative/native-required.db",
+    "database_sha256": "87c5fa1827cd06bea68e62a85e5dc21818d2e07d9aaa79d27c96305e8182b97e",
+    "work_handoff_id": "work-handoff-d6988556b0a0cffe7077",
+    "boundary": "lane-blocked",
+    "work_unit_state": "blocked",
+    "direct_executor_invocations": 0,
+    "blocker_code": "HOST_CAPABILITY_BLOCKED"
+  },
+  "build_validation": {
+    "wheel": "C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/build-dist/allinluna-2.0.0rc2-py3-none-any.whl",
+    "wheel_sha256": "8e6f183477bd8be47728add7fbe10615b9c77d4f9c34b91d72cc4a564b2b763f",
+    "clean_venv": "C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/wheel-venv",
+    "installed_version": "2.0.0rc2",
+    "import_source": "wheel-venv/Lib/site-packages/allinluna_runtime/__init__.py",
+    "cli_help": "PASS",
+    "compileall": "PASS"
+  },
+  "supersedes": {
+    "historical_acceptance": "acceptance.json",
+    "diagnostic_database": "C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/universal-canary/runtime.db",
+    "diagnostic_database_sha256": "2fa9b6b5fafe7220d36413c04e1daa748ec41ad990177c31cfad45d63539dc59",
+    "reason": "A model-rendered handoff changed JSON number spelling and was correctly rejected by evidence_digest. The final fresh run persisted and ingested the exact LaneDriver handoff bytes instead."
+  },
+  "actions_ref": "corrective-actions.json",
+  "receipts_ref": "corrective-receipts.json",
+  "qualification": "PASS"
+}

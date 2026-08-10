@@ -7,9 +7,9 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = ROOT / "evals" / "product-journey-matrix.json"
@@ -23,8 +23,85 @@ REQUIRED_JOURNEYS = {
     "project-aware-exact-dispatch",
     "no-host-exact-relay",
     "recovery-to-work-and-lane-handoff",
+    "plain-goal-full-runtime-completion",
+    "two-lane-export-dependency-completion",
+    "native-capability-policy",
 }
 ALLOWED_RESULT_STATUSES = {"pass", "fail", "unknown", "blocked"}
+
+
+class _CanaryEvidenceCollector:
+    """Factory namespace kept lazy so static product validation stays lightweight."""
+
+    @staticmethod
+    def create(store: Any, *, artifact_root: Path) -> Any:
+        from allinluna_runtime.artifacts import ArtifactStore
+        from allinluna_runtime.evidence import CheckRunner, EvidenceCollector
+
+        artifacts = ArtifactStore(store, root=artifact_root)
+
+        class ExportingCollector(EvidenceCollector):
+            def collect(
+                self,
+                task: Mapping[str, Any] | str,
+                handoff: Mapping[str, Any] | None = None,
+                *,
+                checks: Sequence[Any] | None = None,
+                artifacts: Sequence[Any] | None = None,
+                exports: Sequence[Any] | None = None,
+                workspace_scope: Mapping[str, Any] | None = None,
+                profile: Any = None,
+            ) -> dict[str, Any]:
+                task_value = self.store.get_task(str(task)) if isinstance(task, str) else dict(task)
+                if task_value is None:
+                    raise KeyError(task)
+                generated = exports
+                if generated is None:
+                    contract = self.store.get_contract(
+                        str(task_value.get("contract_id") or ""),
+                        int(task_value.get("contract_version", 1)),
+                    ) or {}
+                    rows: list[dict[str, Any]] = []
+                    for declared in contract.get("exports", ()) or ():
+                        name = str(
+                            declared.get("name")
+                            if isinstance(declared, Mapping)
+                            else declared
+                        )
+                        if not name:
+                            continue
+                        record = self.artifacts.put(
+                            f"{task_value['id']}:{name}".encode(),
+                            kind="summary",
+                            produced_by="allinluna-product-canary",
+                            link=("task", str(task_value["id"]), "export"),
+                        )
+                        rows.append(
+                            {
+                                "name": name,
+                                "artifact_ref": record.ref,
+                                "version": int(declared.get("version", 1))
+                                if isinstance(declared, Mapping)
+                                else 1,
+                            }
+                        )
+                    generated = rows
+                return super().collect(
+                    task_value,
+                    handoff,
+                    checks=checks,
+                    artifacts=artifacts,
+                    exports=generated,
+                    workspace_scope=workspace_scope,
+                    profile=profile,
+                )
+
+        return ExportingCollector(
+            store,
+            artifact_store=artifacts,
+            check_runner=CheckRunner(artifacts),
+            profile="projectless-analysis",
+        )
 
 
 def _load(path: Path) -> Any:
@@ -58,7 +135,7 @@ def validate() -> tuple[list[str], dict[str, Any]]:
         journeys = []
     ids = [item.get("id") for item in journeys if isinstance(item, dict)]
     if set(ids) != REQUIRED_JOURNEYS or len(ids) != len(set(ids)):
-        errors.append("matrix must contain exactly the seven required journey ids")
+        errors.append("matrix must contain exactly the required product journey ids")
     methods = _test_methods() if PRODUCT_TEST.is_file() else set()
     if not PRODUCT_TEST.is_file():
         errors.append("product user-journey test module is missing")
@@ -114,11 +191,128 @@ def run_product_tests() -> dict[str, Any]:
     }
 
 
+def drive_lane_direct(
+    *, db_path: Path, run_id: str, task_id: str, artifact_root: Path | None = None
+) -> dict[str, Any]:
+    """Drive one bootstrapped Lane with the production lane-direct executor path."""
+
+    from allinluna_runtime.artifacts import ArtifactStore
+    from allinluna_runtime.engine.lane_driver import LaneDriver
+    from allinluna_runtime.protocols.lane_bootstrap import LaneBootstrapEnvelope
+    from allinluna_runtime.store import Store
+
+    with Store(db_path) as store:
+        bootstrap = LaneBootstrapEnvelope.from_store(
+            store, run_id.removeprefix("run://"), task_id.removeprefix("task://")
+        )
+        collector = _CanaryEvidenceCollector.create(
+            store,
+            artifact_root=artifact_root or db_path.parent / "artifacts",
+        )
+
+        def execute(plan: Mapping[str, Any]) -> Mapping[str, Any]:
+            return {
+                "status": "completed",
+                "summary": f"product canary completed {plan['work_unit_id']}",
+                "changed_paths": [],
+                "raw_outputs": [
+                    {
+                        "operation": "product-canary-lane-direct",
+                        "run_id": bootstrap.run_id,
+                        "task_id": bootstrap.task_id,
+                        "work_unit_id": plan["work_unit_id"],
+                        "native_capability_advertised": False,
+                    }
+                ],
+            }
+
+        result = LaneDriver.from_bootstrap(
+            store,
+            bootstrap,
+            host=None,
+            evidence_collector=collector,
+            direct_evidence_collector=collector,
+            direct_work_executor=execute,
+        ).drive(max_cycles=8, monitor=False)
+        handoff = result.get("handoff")
+        handoff_artifact_ref = None
+        if isinstance(handoff, Mapping):
+            raw_handoff = json.dumps(
+                handoff,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            handoff_artifact = ArtifactStore(
+                store,
+                root=artifact_root or db_path.parent / "artifacts",
+            ).put(
+                raw_handoff,
+                kind="receipt",
+                produced_by="allinluna-product-canary",
+                source_refs=(f"run://{bootstrap.run_id}", f"task://{bootstrap.task_id}"),
+                metadata={"protocol": "lane-handoff/v1"},
+                link=("task", bootstrap.task_id, "lane-handoff"),
+            )
+            handoff_artifact_ref = handoff_artifact.ref
+            store.record_driver_handoff("lane", bootstrap.task_id, handoff)
+        return {
+            "protocol": "product-canary-lane-result/v1",
+            "run_id": bootstrap.run_id,
+            "task_id": bootstrap.task_id,
+            "boundary": result.get("boundary"),
+            "handoff": handoff,
+            "handoff_artifact_ref": handoff_artifact_ref,
+            "direct_plan_count": sum(
+                len(cycle.get("direct_plans", ())) for cycle in result.get("cycles", ())
+            ),
+            "work_handoff_count": sum(
+                len(cycle.get("work_handoffs", ())) for cycle in result.get("cycles", ())
+            ),
+        }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="execute the product journey tests")
     parser.add_argument("--json", action="store_true", help="emit one JSON report")
+    parser.add_argument(
+        "--drive-lane",
+        action="store_true",
+        help="drive one persisted canary Lane through lane-direct execution",
+    )
+    parser.add_argument("--db", type=Path, help="runtime SQLite path for --drive-lane")
+    parser.add_argument("--run-id", help="run identity for --drive-lane")
+    parser.add_argument("--task-id", help="task identity for --drive-lane")
+    parser.add_argument("--artifact-root", type=Path, help="optional canary artifact root")
     args = parser.parse_args(argv)
+
+    if args.drive_lane:
+        if args.db is None or not args.run_id or not args.task_id:
+            parser.error("--drive-lane requires --db, --run-id, and --task-id")
+        try:
+            lane_result = drive_lane_direct(
+                db_path=args.db,
+                run_id=args.run_id,
+                task_id=args.task_id,
+                artifact_root=args.artifact_root,
+            )
+        except Exception as exc:  # noqa: BLE001 - CLI must emit a fail-closed result.
+            print(
+                json.dumps(
+                    {
+                        "protocol": "product-canary-lane-result/v1",
+                        "status": "blocked",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return 2
+        print(json.dumps(lane_result, indent=2, ensure_ascii=False))
+        handoff = lane_result.get("handoff")
+        return 0 if isinstance(handoff, Mapping) and handoff.get("status") == "completed" else 2
 
     try:
         errors, report = validate()

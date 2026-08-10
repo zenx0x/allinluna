@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Without and with All in Luna</title>
+  <desc id="desc">Without All in Luna, unrelated project work converges into one noisy context. With All in Luna, work is separated into independent task lanes with a clean main conversation.</desc>
+  <defs>
+    <style>.bg{fill:#0B1020}.panel{fill:#111827;stroke:#243047;stroke-width:1.5}.text{fill:#F8FAFC;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.muted{fill:#94A3B8}.bad{fill:#F87171}.good{fill:#67E8F9}.violet{fill:#A78BFA}.line{fill:none;stroke:#334155;stroke-width:2.5}.title{font-size:28px;font-weight:750}.head{font-size:22px;font-weight:700}.small{font-size:16px}.tiny{font-size:14px}</style>
+  </defs>
+  <rect class="bg" width="1200" height="620" rx="28"/>
+  <text class="text title" x="60" y="60">One giant context vs. clear task lanes</text>
+
+  <rect class="panel" x="60" y="96" width="510" height="456" rx="22"/>
+  <text class="text head" x="92" y="136">Without All in Luna</text>
+  <text class="text small muted" x="92" y="164">Everything keeps returning to the same conversation.</text>
+  <g class="text small">
+    <rect x="92" y="206" width="126" height="42" rx="12" fill="#1F2937"/><text x="116" y="233">backend</text>
+    <rect x="236" y="206" width="126" height="42" rx="12" fill="#1F2937"/><text x="260" y="233">frontend</text>
+    <rect x="380" y="206" width="126" height="42" rx="12" fill="#1F2937"/><text x="414" y="233">tests</text>
+    <rect x="136" y="274" width="126" height="42" rx="12" fill="#1F2937"/><text x="168" y="301">docs</text>
+    <rect x="306" y="274" width="154" height="42" rx="12" fill="#1F2937"/><text x="332" y="301">migration</text>
+  </g>
+  <path class="line" d="M155 248C155 330 315 315 315 372"/><path class="line" d="M299 248C299 315 315 315 315 372"/><path class="line" d="M443 248C443 330 315 315 315 372"/><path class="line" d="M199 316C199 345 315 342 315 372"/><path class="line" d="M383 316C383 345 315 342 315 372"/>
+  <rect x="164" y="372" width="302" height="104" rx="20" fill="#301C27" stroke="#7F1D1D" stroke-width="1.5"/>
+  <text class="text head" x="214" y="412">one huge context</text>
+  <text class="text tiny muted" x="202" y="441">logs · files · errors · subagents · decisions</text>
+  <text class="text tiny bad" x="224" y="463">more switching · more drift pressure</text>
+
+  <rect class="panel" x="630" y="96" width="510" height="456" rx="22"/>
+  <text class="text head" x="662" y="136">With All in Luna</text>
+  <text class="text small muted" x="662" y="164">The main conversation sees state. Tasks keep local detail.</text>
+
+  <rect x="662" y="200" width="446" height="58" rx="16" fill="#151D2E" stroke="#334155"/>
+  <text class="text small" x="686" y="224">Main conversation</text>
+  <text class="text tiny muted" x="686" y="245">progress · blockers · decisions · results</text>
+
+  <g>
+    <rect x="662" y="292" width="130" height="92" rx="16" fill="#102A32" stroke="#155E75"/>
+    <text class="text small" x="687" y="322">Backend</text><text class="text tiny muted" x="687" y="347">own context</text><circle class="good" cx="688" cy="366" r="5"/><text class="text tiny muted" x="701" y="371">tools</text>
+    <rect x="817" y="292" width="130" height="92" rx="16" fill="#17213B" stroke="#3730A3"/>
+    <text class="text small" x="842" y="322">Frontend</text><text class="text tiny muted" x="842" y="347">own context</text><circle cx="843" cy="366" r="5" fill="#7C9CFF"/><text class="text tiny muted" x="856" y="371">worker</text>
+    <rect x="972" y="292" width="136" height="92" rx="16" fill="#211A36" stroke="#6D28D9"/>
+    <text class="text small" x="994" y="322">Migration</text><text class="text tiny muted" x="994" y="347">waits if needed</text><circle class="violet" cx="995" cy="366" r="5"/><text class="text tiny muted" x="1008" y="371">deps</text>
+  </g>
+
+  <path d="M727 258V292M882 258V292M1040 258V292" stroke="#475569" stroke-width="2.5"/>
+  <path d="M727 384V446H882V384M882 446H1040V384" stroke="#334155" stroke-width="2.5" fill="none"/>
+  <rect x="790" y="446" width="184" height="58" rx="16" fill="#132236" stroke="#1D4ED8"/>
+  <text class="text small" x="834" y="471">typed results</text><text class="text tiny muted" x="818" y="491">not entire transcripts</text>
+
+  <text class="text small good" x="664" y="535">Less unrelated context. Less task switching. Less room for drift.</text>
+</svg>

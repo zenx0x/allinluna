@@ -58,13 +58,48 @@ Accents:
 
 State accents should remain secondary to the lane system.
 
-## Logo / mark
+## Logo system
 
-The mark represents one main line splitting into three independent lanes and converging again. It should read as task topology first and an orbital/Luna reference second.
+### Mark
 
-Canonical asset:
+The mark represents one main line splitting into three independent lanes. It should read as task topology first and an orbital/Luna reference second.
+
+Canonical mark:
 
 `docs/assets/brand/all-in-luna-mark.svg`
+
+Use the mark when space is limited: repository avatar, small diagrams, badges, or places where the name already appears nearby.
+
+### Lockup
+
+The canonical horizontal lockup combines the mark, **All in Luna**, and the brand line **Clear lanes. Deep focus.**
+
+Canonical lockup:
+
+`docs/assets/brand/all-in-luna-lockup.svg`
+
+Use the lockup for docs title pages, release pages, presentations, and external references where the brand name should travel with the mark.
+
+Do not place the full lockup directly below a separate large `All in Luna` heading unless the repetition is intentional. The README therefore uses the mark in the hero and reserves the lockup for external surfaces.
+
+## GitHub social preview
+
+Canonical source artwork:
+
+`docs/assets/brand/social-preview.svg`
+
+Canvas: `1200 × 630`.
+
+The social preview should communicate, in order:
+
+1. the All in Luna identity;
+2. the problem: one conversation should not carry an entire project;
+3. three independent lanes as the visual proof;
+4. the mechanism line: **Parallel across tasks. Recursive inside tasks.**
+
+Keep text away from the outer ~60 px safe area. Prefer a dark graphite background so GitHub cards remain stable across surrounding light/dark UI.
+
+GitHub repository settings require a raster upload for the actual social preview in some surfaces; export this source SVG to PNG at 1200×630 without changing its layout.
 
 ## README visual hierarchy
 
@@ -80,14 +115,40 @@ Recommended order:
 
 Do not put CI/version/license badges above the product hero. They may sit below the hero as secondary metadata.
 
+README artwork:
+
+- `hero-topology.svg` — the minimum product topology;
+- `before-after.svg` — one giant context versus separated task contexts;
+- `models-performance.svg` — strong reasoning routed to focused work;
+- `all-in-luna-mark.svg` — hero identity.
+
 ## Models & focus claim
 
 Safe wording:
 
-> All in Luna gives strong models a cleaner problem to solve.
+> **All in Luna gives strong models a cleaner problem to solve.**
 
-> Less unrelated context. Less task switching. Less room for drift.
+> **Less unrelated context. Less task switching. Less room for drift.**
+
+The product claim is structural, not magical: narrower task objectives, separate context, local tool noise, typed handoffs, and capability-aware resource routing reduce sources of task drift and avoid spending strong reasoning on mechanical work.
 
 Do not claim a quantified accuracy improvement unless benchmark evidence exists.
 
-The architectural basis is narrower task objectives, separate context, local tool noise, and typed handoffs — not a claim that any particular model becomes intrinsically smarter.
+Do not phrase the feature as "making Luna smarter." The stronger and portable claim is that All in Luna lets capable models spend more of their attention on a narrower, better-scoped problem.
+
+## Brand voice
+
+Prefer:
+
+- short sentences;
+- concrete outcomes before architecture terms;
+- examples before definitions;
+- calm confidence instead of hype;
+- precise claims that can survive technical scrutiny.
+
+Avoid:
+
+- "revolutionary", "magic", "autonomous everything", or generic AGI language;
+- unexplained runtime vocabulary in the first screen;
+- claims that every task needs All in Luna;
+- claims of better model accuracy without evidence.

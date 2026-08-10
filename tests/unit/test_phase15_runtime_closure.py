@@ -16,6 +16,7 @@ from allinluna_runtime.packs.public_skill import SinglePublicSkillAPI
 from allinluna_runtime.resource import ResourceBroker
 from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
 from allinluna_runtime.store import Store
+from tests.fixtures.vnext.trusted_checks import trusted_command_spec
 
 
 def _request(intent_id: str) -> dict:
@@ -149,7 +150,14 @@ def test_completed_lane_handoff_is_verified_before_exports_and_completion(tmp_pa
             profile="projectless-analysis",
         ).collect(
             store.get_task("deliver") or {},
-            checks=[{"id": "check-passes", "kind": "command", "command": [sys.executable, "-c", "print('pass')"], "satisfies": ["check passes"]}],
+                checks=[
+                    trusted_command_spec(
+                        tmp_path,
+                        identifier="check-passes",
+                        command=[sys.executable, "-c", "print('pass')"],
+                        satisfies=["check passes"],
+                    )
+                ],
             exports=[{"name": "Result", "artifact_ref": artifact.ref, "version": 1}],
         )
         assert evidence["verified"] is True

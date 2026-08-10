@@ -58,7 +58,7 @@ class DistributionTests(unittest.TestCase):
         self.assertTrue(any("reversible" in error for error in errors))
         self.assertTrue(any("cannot authorize experiment" in error for error in errors))
 
-    def test_both_artifacts_carry_the_canonical_runtime_and_compat(self) -> None:
+    def test_artifacts_keep_product_runtimes_isolated(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "dist"
             subprocess.run(
@@ -68,15 +68,21 @@ class DistributionTests(unittest.TestCase):
                 text=True,
                 check=True,
             )
-            for distribution in ("all-in-luna", "research-routes"):
-                plugin_root = output / distribution / "plugins/research-routes" if distribution == "research-routes" else output / distribution
-                runtime = plugin_root / "runtime/allinluna_runtime/__init__.py"
-                compat = plugin_root / "runtime/allinluna_runtime/compat/legacy_plan.py"
-                self.assertTrue(runtime.is_file(), runtime)
-                self.assertTrue(compat.is_file(), compat)
-                if distribution == "research-routes":
-                    self.assertTrue((plugin_root / "runtime/research_routes_runtime/__init__.py").is_file())
-                    self.assertTrue((plugin_root / "runtime/research_routes_runtime/schemas/research-pack.schema.json").is_file())
+            allinluna = output / "all-in-luna"
+            self.assertTrue((allinluna / "runtime/allinluna_runtime/__init__.py").is_file())
+            self.assertTrue(
+                (allinluna / "runtime/allinluna_runtime/compat/legacy_plan.py").is_file()
+            )
+            research = output / "research-routes" / "plugins/research-routes"
+            self.assertTrue((research / "runtime/research_routes_runtime/__init__.py").is_file())
+            self.assertTrue(
+                (
+                    research
+                    / "runtime/research_routes_runtime/schemas/research-pack.schema.json"
+                ).is_file()
+            )
+            self.assertFalse((research / "runtime/allinluna_runtime").exists())
+            self.assertFalse((research / "skills/allinluna").exists())
 
     def test_release_artifacts_exclude_python_cache_and_keep_research_readmes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -125,8 +131,13 @@ class DistributionTests(unittest.TestCase):
                 self.assertTrue(readme)
                 self.assertFalse(any(path in readme for path in forbidden), name)
             research_readme = (research / "README.en.md").read_text(encoding="utf-8")
-            self.assertIn("plugins/research-routes/skills/allinluna", research_readme)
-            self.assertIn("plugins/research-routes/runtime/allinluna_runtime", research_readme)
+            self.assertIn(
+                "plugins/research-routes/runtime/research_routes_runtime",
+                research_readme,
+            )
+            self.assertIn("research-routes-bridge/v1", research_readme)
+            self.assertNotIn("plugins/research-routes/skills/allinluna", research_readme)
+            self.assertNotIn("plugins/research-routes/runtime/allinluna_runtime", research_readme)
             self.assertTrue((research / "plugins/research-routes/.codex-plugin/plugin.json").is_file())
 
     def test_host_conformance_markers_in_distribution_readmes(self) -> None:

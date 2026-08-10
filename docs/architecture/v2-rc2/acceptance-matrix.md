@@ -39,6 +39,23 @@ changed paths, and the synthesized lane handoff is valid under
 `lane-handoff/v1`. Downstream rows remain explicit until their owning lanes
 provide evidence.
 
+## RC2 correction qualification
+
+The original T0 freeze above remains immutable context. The corrective
+candidate adds the following independently executable evidence; external PR CI
+is reported from GitHub rather than rewritten into the frozen T0 rows.
+
+| Correction assertion | Evidence | Candidate state |
+| --- | --- | --- |
+| Candidate package is installed before collection and a built wheel works in a clean environment. | `.github/workflows/ci.yml`, `tests/integration/test_installed_cli.py` | PASS locally; remote PR CI required |
+| Local capability intent is resolved to an exact physical action or a real Lane-direct plan. | `tests/unit/test_local_execution_routing.py`, `tests/integration/test_lane_direct_execution.py` | PASS |
+| Missing/self-asserted command trust cannot execute without explicit approval evidence. | `tests/unit/test_command_trust_matrix.py`, `tests/integration/test_check_trust.py` | PASS |
+| Plain goal and two dependent Lanes reach root completion without a parent-fabricated final handoff. | `tests/integration/test_plain_goal_completion.py`, `tests/e2e/test_full_runtime_completion.py` | PASS |
+| Real Desktop universal canary runs two exact top-level Tasks and completes through Lane-direct WorkUnits. | `docs/release-canaries/v2.0.0-rc.2/corrective-qualification.json` | PASS |
+| Native recursion follows capability truth: pass when advertised, not-applicable when absent; native-required absence blocks. | `docs/release-canaries/v2.0.0-rc.2/corrective-qualification.json` | NOT_APPLICABLE / negative test PASS |
+| End-user artifacts omit full tests/evals and Research Routes does not duplicate the public All in Luna Skill/runtime. | `release/versions.json`, `tests/integration/test_distribution_integrity.py` | PASS |
+| No merge, tag, release, ready transition, force-push, rebase, or stable publication occurs during qualification. | Git/PR state and final coordinator report | REQUIRED; PR remains Draft |
+
 ## Failure and unknown semantics
 
 - `fail` means the assertion was exercised and contradicted by evidence.

@@ -17,21 +17,23 @@ vNext runtime/CLI to persist the graph, release ready Lanes, ingest real host
 receipts, and continue until the root result is complete or a concrete blocker
 is returned.
 ## Highest-priority exact Action Relay
-When the runtime emits a `HostAction`, `HostAction.tool` is an opcode:
+Logical `LocalDispatchIntent` values are not HostActions. A HostAdapter first
+resolves them to a `lane-direct-work/v1` plan or an exact `HostAction.tool` opcode:
 
 1. Invoke that exact tool with `HostAction.arguments`.
 2. Never translate, approximate, or substitute another capability.
 3. A `top_level_task` may never fall back to a subagent, the current thread, or direct execution.
 4. Ingest the raw receipt immediately, then tick again.
-5. If no `HostAdapter` is bound, return `ACTION_RELAY_REQUIRED` and preserve
-   the exact action for the Desktop relay.
+5. If no `HostAdapter` is bound, return `ACTION_RELAY_REQUIRED` and preserve the exact action.
 6. Return `HOST_CAPABILITY_BLOCKED` only after capability discovery confirms
    that the exact tool is absent.
 
-The receipt must explicitly provide the action's `action_contract_hash`,
-`actual_tool`, and `actual_capability`; never infer observed fields from the
-requested action. A wrong actual tool is `HOST_PROTOCOL_VIOLATION`, not
-evidence that a Task started.
+For local work, `native_preferred` uses an advertised native worker or a real Lane-direct plan;
+`native_required` blocks when absent and `direct_only` never spawns. A direct receipt is not
+completion: the Lane must execute the WorkUnit and produce a verified `work-handoff/v1`.
+
+Receipts explicitly provide `action_contract_hash`, `actual_tool`, and `actual_capability`.
+A wrong actual tool is `HOST_PROTOCOL_VIOLATION`, not evidence that a Task started.
 ## Lane bootstrap and persistent drivers
 
 Every public `codex_app__create_thread` dispatch embeds a complete

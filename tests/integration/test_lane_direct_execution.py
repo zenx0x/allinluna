@@ -11,6 +11,10 @@ from allinluna_runtime.store import Store
 
 
 def _runtime(tmp_path, *, mode: str = "native_preferred"):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'allinluna-lane-direct-fixture'\n",
+        encoding="utf-8",
+    )
     database = tmp_path / "runtime.db"
     store = Store(database)
     store.create_run(

@@ -103,7 +103,45 @@
         "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 900},
         "artifact_ref": {"$ref": "#/$defs/artifact_ref"},
         "assertion": {"type": "string", "minLength": 1},
-        "details": {"type": "object", "additionalProperties": true}
+        "details": {"type": "object", "additionalProperties": true},
+        "source": {"type": "string", "minLength": 1},
+        "provenance": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "source_kind": {"type": "string", "minLength": 1},
+            "source_ref": {"type": "string", "minLength": 1},
+            "registry_identity": {"type": "object", "additionalProperties": true}
+          }
+        },
+        "trust": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "state": {"enum": ["trusted", "approval_required", "denied"]}
+          }
+        },
+        "approval": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "decision_id": {"type": "string", "minLength": 1},
+            "actor": {"type": "string", "minLength": 1},
+            "scope": {"type": ["string", "array"]},
+            "command_digest": {"type": "string", "minLength": 1},
+            "approved_at": {"type": "string", "format": "date-time"}
+          }
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "sandbox": {"type": "string", "minLength": 1},
+            "network": {"type": "string", "minLength": 1},
+            "workspace": {"type": "string", "minLength": 1},
+            "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 900}
+          }
+        }
       },
       "allOf": [
         {"if": {"properties": {"kind": {"const": "command"}}}, "then": {"required": ["command"]}},

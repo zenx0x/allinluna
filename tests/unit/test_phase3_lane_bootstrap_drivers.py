@@ -11,6 +11,7 @@ from allinluna_runtime.protocols.lane_bootstrap import LaneBootstrapEnvelope
 from allinluna_runtime.scheduler.global_scheduler import GlobalScheduler
 from allinluna_runtime.store import Store
 from tests.fixtures.vnext.hosts import FakeDistributedCodexHost
+from tests.fixtures.vnext.trusted_checks import trusted_command_spec
 
 
 def _contract(identifier: str, *, done_when: list[str] | None = None) -> dict:
@@ -187,13 +188,14 @@ def test_coordinator_driver_ingests_handoff_and_releases_dependency_immediately(
             profile="projectless-analysis",
         ).collect(
             store.get_task("producer") or {},
-            checks=[
-                {
-                    "name": "producer check",
-                    "command": [sys.executable, "-c", "print('pass')"],
-                    "satisfies": ["producer check"],
-                }
-            ],
+                checks=[
+                    trusted_command_spec(
+                        tmp_path,
+                        identifier="producer-check",
+                        command=[sys.executable, "-c", "print('pass')"],
+                        satisfies=["producer check"],
+                    )
+                ],
         )
         handoff = {
             "kind": "handoff",

@@ -46,3 +46,6 @@ jobs:
       - name: Validate installed plugin Skills
         if: runner.os == 'Linux'
         run: python scripts/validate_installations.py
+      - name: Validate product experience
+        if: runner.os == 'Linux'
+        run: python scripts/validate_product_experience.py

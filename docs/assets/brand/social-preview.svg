@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">All in Luna social preview</title>
+  <desc id="desc">A calm dark social preview showing independent task lanes and focused model routing.</desc>
+  <defs>
+    <linearGradient id="glow" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#67E8F9" stop-opacity="0.12"/>
+      <stop offset="0.55" stop-color="#7C9CFF" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#A78BFA" stop-opacity="0.10"/>
+    </linearGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="38"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="#0B1020"/>
+  <circle cx="1050" cy="80" r="220" fill="url(#glow)" filter="url(#blur)"/>
+  <circle cx="120" cy="560" r="180" fill="url(#glow)" filter="url(#blur)"/>
+
+  <g transform="translate(78 72)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M0 56 H38" stroke="#F8FAFC" stroke-width="9"/>
+    <path d="M38 56 C68 56 68 20 104 20 H142" stroke="#67E8F9" stroke-width="9"/>
+    <path d="M38 56 H142" stroke="#7C9CFF" stroke-width="9"/>
+    <path d="M38 56 C68 56 68 92 104 92 H142" stroke="#A78BFA" stroke-width="9"/>
+    <circle cx="38" cy="56" r="9" fill="#F8FAFC" stroke="none"/>
+  </g>
+
+  <text x="270" y="133" fill="#F8FAFC" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="52" font-weight="720" letter-spacing="-1.3">All in Luna</text>
+  <text x="82" y="248" fill="#F8FAFC" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="760" letter-spacing="-2">Stop running an entire project</text>
+  <text x="82" y="322" fill="#F8FAFC" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="760" letter-spacing="-2">inside one AI conversation.</text>
+  <text x="86" y="382" fill="#94A3B8" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="500">Independent top-level tasks · cleaner context · dependency-aware parallel work</text>
+
+  <g transform="translate(84 455)" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="0" y="0" width="294" height="86" rx="18" fill="#111827" stroke="#243047"/>
+    <circle cx="30" cy="30" r="7" fill="#67E8F9"/>
+    <text x="50" y="36" fill="#F8FAFC" font-size="20" font-weight="650">Backend</text>
+    <text x="50" y="62" fill="#94A3B8" font-size="16">running independently</text>
+
+    <rect x="318" y="0" width="294" height="86" rx="18" fill="#111827" stroke="#243047"/>
+    <circle cx="348" cy="30" r="7" fill="#7C9CFF"/>
+    <text x="368" y="36" fill="#F8FAFC" font-size="20" font-weight="650">Frontend</text>
+    <text x="368" y="62" fill="#94A3B8" font-size="16">own context</text>
+
+    <rect x="636" y="0" width="294" height="86" rx="18" fill="#111827" stroke="#243047"/>
+    <circle cx="666" cy="30" r="7" fill="#A78BFA"/>
+    <text x="686" y="36" fill="#F8FAFC" font-size="20" font-weight="650">Integration</text>
+    <text x="686" y="62" fill="#94A3B8" font-size="16">waits only on real deps</text>
+  </g>
+
+  <text x="86" y="592" fill="#67E8F9" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700">Parallel across tasks. Recursive inside tasks.</text>
+</svg>

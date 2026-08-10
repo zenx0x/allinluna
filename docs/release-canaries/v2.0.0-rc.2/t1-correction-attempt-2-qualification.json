@@ -1,6 +1,6 @@
 {
   "protocol": "desktop-universal-canary/v2",
-  "qualification": "T1 correction attempt 2",
+  "qualification_run": "T1 correction attempt 2",
   "classification": "PASS",
   "source_provenance": {
     "source_ref": "refs/remotes/origin/pr/2/merge",

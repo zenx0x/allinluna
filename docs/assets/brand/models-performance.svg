@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Models and performance routing</title>
+  <desc id="desc">All in Luna can reserve stronger reasoning for planning and verification, balanced resources for implementation, and efficient resources for mechanical work while keeping each task focused.</desc>
+  <defs>
+    <style>.bg{fill:#0B1020}.panel{fill:#111827;stroke:#243047;stroke-width:1.5}.text{fill:#F8FAFC;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.muted{fill:#94A3B8}.title{font-size:28px;font-weight:750}.head{font-size:19px;font-weight:700}.small{font-size:15px}.line{fill:none;stroke:#334155;stroke-width:2.5}</style>
+    <linearGradient id="strong" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#67E8F9"/><stop offset="1" stop-color="#7C9CFF"/></linearGradient>
+    <linearGradient id="balanced" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#7C9CFF"/><stop offset="1" stop-color="#A78BFA"/></linearGradient>
+  </defs>
+  <rect class="bg" width="1200" height="560" rx="28"/>
+  <text class="text title" x="60" y="60">Use strong models where they matter</text>
+  <text class="text small muted" x="60" y="89">Compute allocation + context allocation. Keep expensive reasoning focused on narrower, higher-value objectives.</text>
+
+  <rect class="panel" x="60" y="130" width="1080" height="332" rx="22"/>
+
+  <g>
+    <rect x="96" y="176" width="220" height="104" rx="18" fill="#102A32" stroke="#155E75"/>
+    <text class="text head" x="126" y="212">Planning</text>
+    <text class="text small muted" x="126" y="239">strong reasoning</text>
+    <rect x="126" y="252" width="128" height="7" rx="3.5" fill="url(#strong)"/>
+  </g>
+
+  <g>
+    <rect x="342" y="176" width="220" height="104" rx="18" fill="#17213B" stroke="#3730A3"/>
+    <text class="text head" x="372" y="212">Implementation</text>
+    <text class="text small muted" x="372" y="239">balanced</text>
+    <rect x="372" y="252" width="102" height="7" rx="3.5" fill="url(#balanced)"/>
+  </g>
+
+  <g>
+    <rect x="588" y="176" width="220" height="104" rx="18" fill="#151D2E" stroke="#334155"/>
+    <text class="text head" x="618" y="212">Mechanical work</text>
+    <text class="text small muted" x="618" y="239">fast / efficient</text>
+    <rect x="618" y="252" width="72" height="7" rx="3.5" fill="#64748B"/>
+  </g>
+
+  <g>
+    <rect x="834" y="176" width="270" height="104" rx="18" fill="#211A36" stroke="#6D28D9"/>
+    <text class="text head" x="864" y="212">Verification</text>
+    <text class="text small muted" x="864" y="239">strong / independent</text>
+    <rect x="864" y="252" width="142" height="7" rx="3.5" fill="url(#balanced)"/>
+  </g>
+
+  <path class="line" d="M206 280V330H969V280"/>
+  <path class="line" d="M452 280V330M698 280V330"/>
+
+  <rect x="298" y="330" width="580" height="92" rx="18" fill="#0F172A" stroke="#334155"/>
+  <text class="text head" x="330" y="365">Task-conditioned context</text>
+  <text class="text small muted" x="330" y="391">narrower objective · less unrelated tool noise · fewer cross-task switches</text>
+
+  <text class="text small" x="60" y="510">No model setup required by default. Explicit model or reasoning overrides still win when you want them.</text>
+</svg>

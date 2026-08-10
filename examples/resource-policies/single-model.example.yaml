@@ -1,0 +1,9 @@
+# Example only. Replace placeholders with one model/reasoning route you want
+# to request across the run. The host remains the authority for what actually ran.
+
+model_policy: explicit
+model: "${MODEL}"
+reasoning_policy: explicit
+reasoning: "${REASONING}"
+route_assurance: observe_if_exposed
+external_action_policy: ask

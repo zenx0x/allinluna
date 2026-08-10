@@ -2,96 +2,67 @@
 
 [English](README.en.md)
 
-All in Luna 是一个分层执行运行时：把用户目标编译为全局 Task Graph，由 Global Coordinator 释放 Task Lanes；每个 Lane 递归调度有边界的 WorkUnits，并以 typed contract、artifact、receipt 和 handoff 持续推进到结果。
+All in Luna 把“把这件事做成”变成一条可继续、可核验的执行路径。你给它一个目标、已有计划、进行中的 run，或 Research Routes 数据包；它会拆出彼此独立的顶层 Task，按依赖推进，并把实现、检查和交接证据保留下来。它适合需要跨多步工具操作、多个交付物，且不能把一句“已完成”当作结果的工作。
 
-## 用户入口
+## 为什么多一层 Top-level Task
 
-只有一个公开 Skill：`plugins/allinluna/skills/allinluna/SKILL.md`。用户可以直接提供：
+普通 subagent 很适合短小的局部工作，但它们通常只是同一对话中的临时工作者。All in Luna 先把一项结果组织为独立的顶层 Task Lanes：协调器掌握任务间依赖、权限和最终结果；每条 Lane 只拿到完成自己一段工作所需的范围和上下文。这样，一个 Task 的失败、等待或证据缺口不会悄悄变成另一个 Task 的“完成”。局部 worker 仍可使用，但它们不是产品入口，也不会取代顶层 Task。
 
-- idea / 一句话目标；
-- existing plan；
-- active run；
-- Research Routes route packet。
+## 60 秒开始
 
-Skill 会编译 `RunIntent` 与 `TaskContracts`，选择 Workflow Pack，调用 vNext runtime/CLI；用户不需要先学习内部 schema 或调度状态。
+1. 在 Codex Plugins 中选择 `plugins/allinluna/`，然后直接告诉 All in Luna 你的目标，例如“为服务增加经过测试的 health-check endpoint”。
+2. 如果从命令行使用，先安装本仓库，再创建并查看 run：
 
-从用户视角开始阅读：[快速开始](docs/user/quickstart.md)、[输入与旅程](docs/user/input-and-journeys.md)、[纯目标示例](docs/examples/plain-goal.md)。内部注册表和 launcher 只用于发现能力，不是产品入口。
+   ```bash
+   python -m pip install -e .
+   allinluna start --goal "Add a tested health-check endpoint"
+   allinluna status RUN_ID
+   ```
 
-## 执行模型
+3. 查看 `next-actions`，让宿主执行它明确要求的动作；随后运行 `allinluna drive RUN_ID` 继续流程。
 
-```text
-Conversation → Global Coordinator → Task Lanes → WorkUnits → tools/skills/plugins/MCP
-```
+你无需预先编写 TaskGraph、选择调度器，或指定模型。
 
-Coordinator 只维护跨 Lane 依赖、contract、资源与完成状态。Lane 拥有局部 WorkGraph、local scheduler、context slice、subagent receipts、局部综合和 handoff。子 WorkUnit 的 scope、authority、ownership、resource 只能收窄；跨 Lane 工作走 promotion request。
+## 一个真实的使用方式
 
-`TaskGraph` 是编译图与图校验的唯一权威；`CompiledRunGraph` 仅保留为 Pack 的稳定导入名。SQLite `Store` 只持有连接、迁移和事务边界，实体仓储、资源 claim、host dispatch/receipt、跨实体服务、观测与调度读模型分别由独立运行时模块承担，避免将领域职责重新聚回根 Store。
+“为服务增加经过测试的 health-check endpoint”是一个普通的软件交付目标。默认 `delivery` Pack 会把它编译为可追踪任务，直到 endpoint、目标测试和改动证据可被检查。先用 `allinluna start --goal "Add a tested health-check endpoint"` 创建 run，再用 `status` 和 `next-actions` 查看真实状态和下一步；编译或预览本身不表示交付完成。完整示例见[纯目标示例](docs/examples/plain-goal.md)。
+
+## 默认资源行为
+
+All in Luna 保持供应商中立：不指定模型时，资源依次由用户显式请求、Task/WorkUnit 覆盖、用户偏好、Pack 能力、部署/宿主以及当前会话默认值决定。它分别保存 `requested`、`resolved` 和宿主实际回传的 `actual`；没有遥测时，`actual` 保持未解析，而不会编造回退模型或执行记录。
 
 ## Workflow Packs
 
-- `delivery`：真实软件交付编译器，支持可配置 TaskGraph templates、contract expansion、done_when、handoff、promotion 与资源默认值。
-- `gsd`：可执行的 clarify → specify → decompose → implement → verify → integrate；支持动态 expansion、bounded lanes/work units 和失败恢复。
-- `research-routes-bridge`：路线中立地把 Claims、Evidence、unknowns、矛盾、failure regimes、HumanDecision 和 experiment authorization 编译为 RunIntent/TaskContracts；不会把研究输入伪装成实现授权或 canonical state。
+- `delivery`：默认的软件交付路径。
+- `gsd`：当你明确需要 clarify → specify → decompose → implement → verify → integrate 工作流时使用。
+- `research-routes-bridge`：保留 Claims、Evidence、未知项、矛盾与实验授权的研究路线；它不会把研究材料自动当成实施授权。
 
-Pack 只能经公开 Core API 访问 Store/Context/Artifact/Host；manifest、entrypoint、capability、permission 和版本兼容性会在 registry loader 中验证。
+## 安装
 
-## 资源与权限
+在 Codex 中安装 `plugins/allinluna/` 即可从对话开始。开发或自动化环境可使用：
 
-资源选择遵循固定优先级：用户显式请求 > Task/WorkUnit override > 用户偏好 > Pack capability > deployment/host > current session/host default。Core 不写死供应商或具体模型路由。requested、resolved、actual 始终分开记录：requested 与 resolved 描述路由；actual 只在宿主明确回传时记录，绝不从路由或任务正文推断。
-
-宿主资源路由遥测是可选的 adapter diagnostics。只有明确的 `actual host receipt` 能填充 actual；缺少模型、推理或 reroute 遥测时，`actual` 保持 `null`、`actual_state` 保持 `unresolved`；普通执行、handoff 和结果完成仍可继续。`codex_app__create_thread` 的 exact action 只有在 host route resolution 得到非空 model 后才冻结 `action_contract_hash`；route 未解析时只输出不可执行的 route-resolution action。`runtime.db` schema v8 持久化 requested/resolved/actual 三组资源值、outbox、receipt 和 recovery 状态。
-
-顶层 create target 只接受 project resolution receipt 产生的 `projectId + environment`；projectless Task 使用显式 `{"type":"projectless"}` target。没有 project identity 时先输出 `codex_app__list_projects` resolve-project action，绝不把 Task ID 当作 project identity。外部 top-level receipt 必须显式提供 `actual_tool`、`actual_capability` 和 `action_contract_hash`；只有运行时直接调用的可信 HostAdapter 可以签署这些观察字段。
-
-权限在动作边界 JIT 请求：credentials、push、deploy、publish、destructive work、live external mutation 默认不发生，只有到达动作并获得明确授权后才可继续。
-
-## CLI、状态与恢复
-
-```text
-allinluna start --goal "..."
-allinluna drive RUN_ID
-allinluna status RUN_ID
-allinluna next-actions RUN_ID
-allinluna ingest-receipt RUN_ID RECEIPT.json
-allinluna pause RUN_ID
-allinluna resume RUN_ID
-allinluna retry RUN_ID --task TASK_ID
-allinluna cancel RUN_ID --task TASK_ID
-allinluna reconcile RUN_ID
-allinluna set-policy RUN_ID POLICY.json
-allinluna lane start RUN_ID TASK_ID
-allinluna lane status RUN_ID TASK_ID
-allinluna lane tick RUN_ID TASK_ID
-allinluna lane drive RUN_ID TASK_ID
-allinluna lane ingest-receipt RUN_ID TASK_ID RECEIPT.json
-allinluna lane handoff RUN_ID TASK_ID
+```bash
+python -m pip install -e .
+allinluna --help
 ```
 
-`start` 默认持久化 ready Task、发出或 preview actions；没有绑定 HostAdapter 时返回 `ACTION_RELAY_REQUIRED`，保留 exact relay，不误报 `HOST_CAPABILITY_BLOCKED`。只有 capability discovery 确认 exact tool 不存在时才 block。`drive` 继续 Coordinator loop，`lane` 命令驱动独立 Task Lane。legacy plan/run import 通过下方 read-only API 完成；恢复依据 SQLite state/journal、真实 host receipt、lease、Git/workspace identity 和 snapshot validity 重算 ready actions；不可恢复的问题返回 blocker，并保留 immutable artifacts。Route assurance 通过 `observe_if_exposed`、`request_only` 或更严格策略表达，不能用缺失 actual 伪造成功。
-Host-side conformance 会同时校验 `requested`、`resolved`、`actual` 与 host `identity`，并检查 `create`、`read`、`wait`、`cancel`、`idempotency` 的完整性；缺失迹象会返回 `BLOCKED`。
+公开 Skill 位于 `plugins/allinluna/skills/allinluna/SKILL.md`；注册表仅用于发现它，不是普通用户必须经过的入口。
 
-Evidence checks 使用受超时约束的受控命令执行并将 stdout、stderr、超时和执行错误作为证据保存；任意 Python callable 不能被安全强制终止，因此不会作为 check runner 执行。
+## 权限与安全边界
 
-## Legacy import
+All in Luna 只在动作真正到达时请求权限。凭据、push、部署、发布、破坏性操作和外部 live mutation 默认不会发生；它们需要明确授权。宿主动作的观察证据也不会被猜测：关于 `identity`、`create`、`read`、`wait`、`cancel` 与 `idempotency` 的信息，以及 `requested`、`resolved`、`actual` 资源层，必须来自相应的真实记录。
 
-`LegacyPlanImportAPI`、`LegacyRunStateImportAPI`、`LegacyResourceTranslator` 都是 read-only parse/validate/translate API：旧 plan/run-state 不回写，resource profiles 转成 `ResourceEnvelope`，loss、unknown、warnings 和 model evidence 都显式返回。没有 actual receipt 时 model evidence 保持 unresolved。
+## 文档地图
 
-遇到 relay、项目解析、资源遥测或恢复问题时，先看[排障指南](docs/troubleshooting/common-issues.md)。
+- [快速开始](docs/user/quickstart.md)：插件与 CLI 的日常入口。
+- [输入与旅程](docs/user/input-and-journeys.md)：目标、计划、run 和 Research Routes 输入如何处理。
+- [纯目标示例](docs/examples/plain-goal.md)：一个可复制的 API/CLI 示例。
+- [排障](docs/troubleshooting/common-issues.md)：relay、资源、项目解析与恢复问题。
+- [公开表面与证据边界](docs/architecture/public-surface.md)：面向需要追溯性的架构说明。
+- [RC2 技术契约](docs/architecture/v2-rc2/)：Store、receipt、CLI 和一致性诊断等开发者细节。
 
-## 安装与示例
+## RC 状态
 
-在 Codex Plugins 中选择 `plugins/allinluna/`。Python 入口示例：
+All in Luna `2.0.0-rc.2` 是发布候选版本，当前 PR #2 保持 Draft，尚未是稳定发布。请把它用于评估和集成验证；只有远端 CI、完整运行时旅程、分发验证和真实宿主 canary 都通过后，才会具备转为 Ready 的资格。
 
-```python
-from allinluna_runtime.packs import SinglePublicSkillAPI
-
-compiled = SinglePublicSkillAPI().compile({
-    "goal": "Implement the requested software outcome",
-    "done_when": ["tests and changed-path evidence are available"],
-})
-print(compiled.task_graph.to_dict())
-```
-
-架构导读见[公开表面与证据边界](docs/architecture/public-surface.md)。RC2 冻结的产品、接口和验收契约位于 `docs/architecture/v2-rc2/`；该目录由契约冻结 lane 维护。
-
-Apache License 2.0，详见 `LICENSE`。
+Apache License 2.0，详见 [LICENSE](LICENSE)。

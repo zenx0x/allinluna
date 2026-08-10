@@ -2,6 +2,10 @@
 
 [English](README.en.md)
 
+<p align="center">
+  <img src="docs/assets/brand/all-in-luna-mark.svg" width="112" alt="All in Luna mark" />
+</p>
+
 > **别再把整个项目塞进一个 AI 对话里。**
 
 给 All in Luna 一个大目标。
@@ -11,6 +15,10 @@
 每个任务内部仍然可以继续调用自己的 subagent、工具、Skill 或 MCP。
 
 **任务之间并行，任务内部递归。**
+
+<p align="center">
+  <img src="docs/assets/brand/hero-topology.svg" alt="All in Luna task topology" />
+</p>
 
 ---
 
@@ -37,6 +45,10 @@
 - AI 说“完成了”，但结果未必真的完整。
 
 **All in Luna 的核心想法很简单：不要让一个 conversation 承担整个项目。**
+
+<p align="center">
+  <img src="docs/assets/brand/before-after.svg" alt="One giant context versus clear task lanes" />
+</p>
 
 ---
 
@@ -253,6 +265,10 @@ All in Luna 特别适合：
 
 # Models & performance
 
+<p align="center">
+  <img src="docs/assets/brand/models-performance.svg" alt="Models and performance routing" />
+</p>
+
 ## 不配置也可以
 
 大多数用户不需要配置模型。
@@ -275,6 +291,10 @@ Verification    → strong / independent
 ```
 
 > **把强推理留给真正需要强推理的地方。**
+
+更进一步，All in Luna 不只是分配计算资源，也把问题本身分得更干净：强模型可以面对更窄、更稳定的目标，减少无关上下文和跨任务切换带来的漂移空间。
+
+**Less unrelated context. Less task switching. Less room for drift.**
 
 常见的使用方式包括：
 
@@ -468,6 +488,7 @@ All in Luna 负责把复杂工作运行起来，不替用户私自扩大目标�
 - [Troubleshooting](docs/troubleshooting/common-issues.md)
 - [Public runtime surface](docs/architecture/public-surface.md)
 - [Architecture](docs/architecture/)
+- [Brand guide](docs/brand/BRAND.md)
 
 ---
 

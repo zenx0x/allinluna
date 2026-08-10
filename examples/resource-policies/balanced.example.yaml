@@ -1,0 +1,11 @@
+# Example only. This is not a Core default and does not name a vendor model.
+# Leave concrete routing to the current host/deployment policy.
+
+model_policy: auto
+reasoning_policy: auto
+route_assurance: observe_if_exposed
+external_action_policy: ask
+
+top_level_slots: auto
+total_subagent_slots: auto
+subagent_slots_per_lane: auto

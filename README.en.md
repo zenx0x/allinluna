@@ -2,67 +2,472 @@
 
 [简体中文](README.md)
 
-All in Luna turns “get this outcome done” into an execution path that can continue and be verified. Give it a goal, an existing plan, an active run, or a Research Routes packet; it separates the work into independent top-level Tasks, advances their dependencies, and retains evidence for implementation, checks, and handoffs. It is for work that spans tools and deliverables, where a claim of “done” is not enough.
+> **Stop running an entire project inside one AI conversation.**
 
-## Why add a Top-level Task layer?
+Give All in Luna one big goal.
 
-Ordinary subagents are excellent for small local work, but they are usually temporary workers inside one conversation. All in Luna first organizes an outcome into independent top-level Task Lanes: the Coordinator holds cross-task dependencies, permissions, and the final result, while each Lane receives only the scope and context needed for its part. A failure, wait, or evidence gap in one Task therefore cannot quietly become completion for another. Local workers are still useful, but they are not the product entry point and do not replace top-level Tasks.
+It turns the work into independent top-level tasks: **run what can run in parallel, wait only on real dependencies, keep each task's context separate, and bring the results back together.**
 
-## Start in 60 seconds
+Each task can still use its own subagents, tools, Skills, or MCPs.
 
-1. In Codex Plugins, choose `plugins/allinluna/`, then tell All in Luna your goal, for example: “Add a tested health-check endpoint.”
-2. For the command line, install this repository and create then inspect a run:
+**Parallel across tasks. Recursive inside tasks.**
 
-   ```bash
-   python -m pip install -e .
-   allinluna start --goal "Add a tested health-check endpoint"
-   allinluna status RUN_ID
-   ```
+---
 
-3. Review `next-actions`, let the host perform the explicitly requested action, then use `allinluna drive RUN_ID` to continue.
+## Why does this exist?
 
-You do not need to write a TaskGraph, select a scheduler, or choose a model first.
+Small AI coding tasks are easy.
 
-## One real example
+The hard part looks more like this:
 
-“Add a tested health-check endpoint” is an ordinary software-delivery goal. The default `delivery` Pack compiles it into traceable work until the endpoint, targeted tests, and changed-path evidence can be checked. Create the run with `allinluna start --goal "Add a tested health-check endpoint"`, then use `status` and `next-actions` to inspect its real state and next step; compilation or preview alone is not delivery completion. See the complete [plain-goal example](docs/examples/plain-goal.md).
+> “Refactor authentication end to end, including the backend, frontend, migration, tests, and documentation.”
 
-## Default resource behavior
+At first, everything is fine.
 
-All in Luna is vendor-neutral. When you do not name a model, resource choice follows explicit user request, Task/WorkUnit override, user preference, Pack capability, deployment/host, and the current session default. It retains `requested`, `resolved`, and host-reported `actual` separately. Without telemetry, `actual` stays unresolved; the runtime never invents a fallback model or execution record.
+Then the agent reads files, edits code, runs tests, starts subagents, handles failures, reads more files, and keeps pushing more execution detail back into the same conversation.
 
-## Workflow Packs
+After enough turns, familiar problems appear:
 
-- `delivery`: the default software-delivery path.
-- `gsd`: use it when you explicitly want clarify → specify → decompose → implement → verify → integrate.
-- `research-routes-bridge`: preserves Claims, Evidence, unknowns, contradictions, and experiment authorization for a research route; it does not turn research material into implementation authority.
+- the context keeps growing;
+- unrelated work starts contaminating other work;
+- earlier constraints become easier to forget;
+- one local blocker stalls the whole flow;
+- subagent results become harder to manage;
+- a new conversation has to reconstruct what really happened;
+- the agent says “done,” but the outcome may not actually be complete.
 
-## Installation
+**All in Luna starts from one simple idea: one conversation should not have to carry an entire project.**
 
-Install `plugins/allinluna/` in Codex to start from a conversation. For development or automation:
+---
+
+## One more layer above subagents
+
+A typical agent workflow looks like this:
+
+```text
+You
+ │
+ ▼
+Main Agent
+ ├─ subagent
+ ├─ subagent
+ └─ subagent
+```
+
+All in Luna adds a real **Top-level Task** layer above local workers:
+
+```text
+You
+ │
+ ▼
+All in Luna
+ │
+ ├─ Top-level Task A
+ │    ├─ local work
+ │    └─ subagents / tools / Skills
+ │
+ ├─ Top-level Task B
+ │    ├─ local work
+ │    └─ subagents / tools / MCPs
+ │
+ └─ Top-level Task C
+      └─ waits only when it actually depends on A
+```
+
+**A Top-level Task is not just another subagent.**
+
+It is an independent work domain with its own goal, context, dependencies, working state, local execution process, and result boundary.
+
+A subagent is a local worker a Task may use when that Task needs to split its own work further.
+
+> **All in Luna does not replace subagents. It gives them a better place to live.**
+
+---
+
+# What you get
+
+## 1. Real top-level tasks
+
+A large goal can become independent work domains instead of temporary chat branches.
+
+For example:
+
+```text
+Add billing to this app
+
+├─ Billing backend
+├─ Checkout UI
+├─ Database migration
+├─ Integration tests
+└─ Documentation
+```
+
+Each task can move independently, wait on dependencies, produce results, and keep its own working context.
+
+## 2. Parallel when possible
+
+Independent work does not need to queue behind unrelated work.
+
+```text
+Billing backend       ● running
+Checkout UI           ● running
+Documentation         ● running
+Database migration    ○ waiting for schema
+Integration tests     ○ waiting for backend
+```
+
+**One blocked task doesn't freeze unrelated work.**
+
+## 3. Separate working contexts
+
+Backend debugging does not need to share one giant context with frontend changes, test logs, documentation, and release work.
+
+Your main conversation should mostly see:
+
+```text
+✓ what is done
+● what is running
+○ what is waiting
+! what needs your decision
+```
+
+File reads, terminal output, test logs, diffs, and implementation detail can stay with the Task that produced them.
+
+**Your main conversation does not need to become the project's log file.**
+
+## 4. Recursive local workers
+
+A Top-level Task can still split into WorkUnits or use local subagents when it is complex on its own.
+
+```text
+Backend Task
+ ├─ API
+ ├─ database changes
+ ├─ tests
+ └─ migration checks
+```
+
+Local complexity stays local.
+
+**Parallel across tasks. Recursive inside tasks.**
+
+## 5. Resume instead of restarting
+
+All in Luna persists run state, task state, dependencies, and results.
+
+Long-running work does not have to remain attached to one ever-growing conversation.
+
+```text
+start
+→ work
+→ stop
+→ come back
+→ resume
+```
+
+Completed work does not have to be rediscovered from chat history.
+
+## 6. Verify before “done”
+
+An agent saying:
+
+> “Done.”
+
+is not the same as the task actually being complete.
+
+All in Luna can check tests, builds, changed files, artifacts, and declared outputs before accepting a task as complete.
+
+## 7. Bring your own workflow
+
+All in Luna is not one fixed workflow.
+
+Use the default delivery path for ordinary software work.
+
+Use **GSD** inside a Task when you want a more explicit development workflow.
+
+Connect **Research Routes** for research-oriented work.
+
+Tasks can also use other Skills, MCPs, tools, and host capabilities.
+
+**The Core runs complex work. It does not dictate how every task must think.**
+
+---
+
+# Example
+
+Suppose you say:
+
+> **“Refactor this application's authentication system, including backend, frontend, migration, and tests.”**
+
+All in Luna can organize it as:
+
+```text
+Authentication refactor
+
+├─ Task 1 — Auth backend
+│    ├─ session/token logic
+│    ├─ API
+│    └─ backend tests
+│
+├─ Task 2 — Frontend auth flow
+│    ├─ login
+│    ├─ logout
+│    └─ protected routes
+│
+├─ Task 3 — Migration
+│    └─ waits for auth contract
+│
+└─ Task 4 — Integration
+     └─ waits for backend + frontend
+```
+
+Task 1 and Task 2 can move at the same time.
+
+Task 1 can still use its own subagents if needed.
+
+Task 3 waits only for the result it actually depends on.
+
+You do not have to follow the complete implementation history of all four tasks in one conversation.
+
+---
+
+# When should I use it?
+
+All in Luna is a good fit for:
+
+- large features;
+- work spanning frontend / backend / tests / docs;
+- major refactors;
+- migrations;
+- several outcomes that can move independently;
+- long-running coding sessions;
+- work where one blocker should not stop the whole project;
+- tasks that need different tools, models, or workflows;
+- work you want to resume instead of reconstructing from chat history.
+
+If you are fixing one typo, explaining one function, changing one CSS rule, or doing another tiny linear task, using the current agent directly is usually faster.
+
+**All in Luna solves the organization problem of complex work. It does not make simple work complicated.**
+
+---
+
+# Models & performance
+
+## You do not have to configure anything
+
+Most users do not need to choose a model policy first.
+
+If you do not specify one, All in Luna uses resources available through the current environment, host, or deployment policy.
+
+It does not require every user to use one fixed model or provider.
+
+## You can take control when you want
+
+Different kinds of work do not always deserve the same amount of expensive reasoning.
+
+For example:
+
+```text
+Planning        → stronger reasoning
+Implementation  → balanced
+Mechanical work → fast / efficient
+Verification    → strong / independent
+```
+
+> **Spend strong reasoning where it matters, not everywhere.**
+
+Common ways to use the resource system include:
+
+- **Balanced** — sensible defaults for most projects;
+- **Quality first** — stronger reasoning for architecture, difficult debugging, risky refactors, and research;
+- **Efficient** — reserve stronger reasoning for decomposition, hard blockers, synthesis, and final verification;
+- **Single model** — keep the run on one explicitly selected model where possible.
+
+These are usage patterns, not model names hard-coded into the Core. Advanced users can still override concrete models and reasoning at Task or WorkUnit scope.
+
+See [Models & performance](docs/user/models-and-performance.md).
+
+---
+
+# Workflow Packs
+
+The All in Luna Core is responsible for:
+
+```text
+top-level tasks
+dependencies
+scheduling
+context
+results
+recovery
+```
+
+A Workflow Pack can define how an individual Task should work.
+
+### Delivery
+
+The default software-delivery path for features, bug fixes, refactors, migrations, and integrations.
+
+### GSD
+
+Use GSD when you want a more explicit development workflow:
+
+```text
+clarify
+→ specify
+→ decompose
+→ implement
+→ verify
+→ integrate
+```
+
+GSD and All in Luna operate at different layers.
+
+**GSD can run inside an All in Luna Top-level Task.**
+
+### Research Routes
+
+Preserves Claims, Evidence, unknowns, contradictions, experiments, and research route changes.
+
+Research judgment does not automatically become implementation authorization.
+
+---
+
+# How is it different?
+
+| | Subagents | GSD | All in Luna |
+|---|---:|---:|---:|
+| Split local work | ✓ | ✓ | ✓ |
+| Detailed development workflow | — | ✓ | Optional |
+| Independent top-level tasks | — | — | **✓** |
+| Top-level dependency scheduling | — | — | **✓** |
+| Separate context per top-level task | Limited | Phase-oriented | **✓** |
+| Local workers inside each task | ✓ | ✓ | **✓** |
+| Pluggable workflows | — | — | **✓** |
+| Persistent run / recovery | Depends | Depends | **✓** |
+
+The key difference is not who can create more agents.
+
+> **All in Luna makes the Top-level Task itself a first-class runtime object.**
+
+### What about Sol Advisor?
+
+Sol Advisor-style systems are closer to:
+
+```text
+Strong Primary Architect
+→ bounded implementation / review workers
+```
+
+All in Luna moves the orchestration boundary one level higher:
+
+```text
+Global Coordinator
+→ multiple persistent Top-level Tasks
+→ each Task has its own workflow and workers
+```
+
+They focus on different abstraction layers rather than being simple substitutes.
+
+---
+
+# Quickstart
+
+## Vibe coding
+
+After installing All in Luna, the simplest way to use it is just to say:
+
+```text
+Use All in Luna to finish the authentication refactor.
+Keep independent parts moving in parallel where possible.
+```
+
+That's it.
+
+You do not need to design a TaskGraph, choose a scheduler, create an agent hierarchy, or fill in a resource questionnaire first.
+
+## CLI
+
+When you want explicit control over a run:
 
 ```bash
 python -m pip install -e .
+
+allinluna start --goal "Finish the authentication refactor"
+allinluna status RUN_ID
+allinluna drive RUN_ID
+```
+
+See all commands:
+
+```bash
 allinluna --help
 ```
 
-The public Skill is `plugins/allinluna/skills/allinluna/SKILL.md`. The registry only makes it discoverable; it is not a required user entry point.
+Lane, direct-work, recovery, and diagnostic commands live in the advanced CLI documentation.
 
-## Permissions and safety boundaries
+---
 
-All in Luna asks for permissions only when an action is reached. Credentials, push, deployment, publication, destructive work, and external live mutation do not happen by default; they require explicit authorization. Host observations are not guessed: `identity`, `create`, `read`, `wait`, `cancel`, and `idempotency`, along with the `requested`, `resolved`, and `actual` resource layers, must come from the relevant real records.
+# Permissions
 
-## Documentation map
+Starting a run does not grant All in Luna every external permission.
 
-- [Quickstart](docs/user/quickstart.md): everyday plugin and CLI entry points.
-- [Inputs and journeys](docs/user/input-and-journeys.md): how goals, plans, runs, and Research Routes inputs are handled.
-- [Plain-goal example](docs/examples/plain-goal.md): a copyable API and CLI example.
-- [Troubleshooting](docs/troubleshooting/common-issues.md): relay, resource, project-resolution, and recovery help.
-- [Public surface and evidence boundaries](docs/architecture/public-surface.md): architecture for readers who need traceability.
-- [RC2 technical contracts](docs/architecture/v2-rc2/): developer detail for Store, receipts, CLI, and conformance diagnostics.
+Permissions matter only when the corresponding action is actually reached, including:
 
-## RC status
+- push;
+- merge;
+- deploy;
+- publish;
+- credentials;
+- destructive operations;
+- live external mutations.
 
-All in Luna `2.0.0-rc.2` is a release candidate; PR #2 remains Draft and this is not a stable release. Use it for evaluation and integration qualification. It can be considered Ready only after remote CI, full runtime journeys, distribution validation, and the real host canary all pass.
+Ordinary local exploration and task organization do not require a giant permission questionnaire up front.
 
-Apache License 2.0. See [LICENSE](LICENSE).
+---
+
+# Design philosophy
+
+**Keep the Core small.**  
+Top-level scheduling, context, protocols, and recovery belong in the Core. Specific workflows belong in Packs.
+
+**Protocols instead of management theater.**  
+Correctness should come from runtime contracts where possible, not from adding another layer of Reviewer / Auditor / Manager agents.
+
+**Keep local complexity local.**  
+A Task's tool noise and local workers should not pollute the whole project.
+
+**Stay model-neutral.**  
+The Core describes the capability it needs instead of forcing every user onto one model.
+
+**Leave room for the user.**  
+All in Luna runs complex work without silently expanding the user's goal.
+
+---
+
+# Documentation
+
+### Start here
+
+- [Quickstart](docs/user/quickstart.md)
+- [Inputs & journeys](docs/user/input-and-journeys.md)
+- [Models & performance](docs/user/models-and-performance.md)
+- [Example](docs/examples/plain-goal.md)
+
+### Go deeper
+
+- [Troubleshooting](docs/troubleshooting/common-issues.md)
+- [Public runtime surface](docs/architecture/public-surface.md)
+- [Architecture](docs/architecture/)
+
+---
+
+# Release
+
+See GitHub Releases and the Changelog for the current version, upgrade notes, and known limitations.
+
+---
+
+# License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

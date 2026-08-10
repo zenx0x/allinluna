@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping
 from ..domain import RunIntent
 from ..engine.coordinator import CoordinatorEngine
 from ..resource import ResourceBroker
+from ..resource_policy import NEUTRAL_RESOURCE_POLICY
 from ..store import Store
 from .base import CompiledRunGraph
 from .goal_compiler import GoalCompiler, RepositoryContextInspector, TaskDecomposer
@@ -36,6 +37,11 @@ EXACT_ACTION_RELAY_CONTRACT: Mapping[str, Any] = {
         "A top-level receipt must explicitly provide actual_tool, actual_capability, and action_contract_hash; never infer them from the requested action.",
     ),
 }
+
+# Public compilation starts from semantic capability and scheduling defaults.
+# A host/deployment resolver may add a concrete route later; the public entry
+# point must not smuggle a vendor route into an otherwise neutral goal.
+DEFAULT_RESOURCE_ENVELOPE: Mapping[str, Any] = dict(NEUTRAL_RESOURCE_POLICY)
 
 
 def _now() -> str:
@@ -90,7 +96,7 @@ class SinglePublicSkillAPI:
     """Public API for one Skill and all supported input forms."""
 
     id = "allinluna"
-    version = "2.0.0-rc.1"
+    version = "2.0.0-rc.2"
 
     def __init__(
         self,
@@ -190,16 +196,18 @@ class SinglePublicSkillAPI:
                     pack_config[key] = raw[key]
             pack_ref = {"id": str(pack_value), "version": "1.0.0", "config": pack_config}
         generated_id = "".join(char.lower() if char.isascii() and char.isalnum() else "-" for char in goal)[:32].strip("-")
+        resource_envelope = dict(DEFAULT_RESOURCE_ENVELOPE)
+        resource_envelope.update(dict(raw.get("resource_envelope", {}) or {}))
         return RunIntent(
             intent_id=str(raw.get("intent_id") or f"intent-{generated_id or 'goal'}").strip("-") or "intent-goal",
             goal=goal,
             done_when=tuple(str(item) for item in raw.get("done_when", ("the requested outcome is evidenced",))),
             repository=repository or {"mode": "projectless", "roots": (), "protected_paths": ()},
             authorization_intent=raw.get("authorization_intent", {"implementation_writes": True, "git_operations": False, "destructive_operations": False, "live_external_mutation": False, "publication": False}),
-            resource_envelope=raw.get("resource_envelope", {"top_level_slots": "auto", "total_subagent_slots": "auto", "subagent_slots_per_lane": "auto", "model_policy": "auto", "model": None, "reasoning_policy": "auto", "reasoning": None, "external_action_policy": "ask"}),
+            resource_envelope=resource_envelope,
             pack=pack_ref,
             constraints=tuple(str(item) for item in raw.get("constraints", ())),
         )
 
 
-__all__ = ["EXACT_ACTION_RELAY_CONTRACT", "GoalCompiler", "JITPermissionRouter", "PermissionIntent", "RepositoryContextInspector", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]
+__all__ = ["DEFAULT_RESOURCE_ENVELOPE", "EXACT_ACTION_RELAY_CONTRACT", "GoalCompiler", "JITPermissionRouter", "PermissionIntent", "RepositoryContextInspector", "SinglePublicSkillAPI", "SkillCompilation", "TaskDecomposer"]

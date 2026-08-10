@@ -1,0 +1,72 @@
+{
+  "protocol": "desktop-canary-actions/v2",
+  "qualification": "T1 correction attempt 2",
+  "source_provenance": {
+    "source_ref": "refs/remotes/origin/pr/2/merge",
+    "source_commit": "db4b8e78d9b53535056a40209bfe4107f3f2e0a4",
+    "source_tree": "60855b002c7830c21eaed9ab127f7e7d54d3f443",
+    "source_merge_ref": "2bdc3e80410ce63eb1bad353d0b90b744ad33940",
+    "wheel_sha256": "8eddfa6fd0a8070781601bf50d2e37907a2521df4788d4eda785fdc861d2c30f",
+    "installation": "clean-wheel"
+  },
+  "run_id": "run-t1-pr2-final-desktop-canary-20260810",
+  "runtime_db": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-final-20260810\\desktop-canary.db",
+  "cli_absolute_path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-final-20260810\\wheel-venv\\Scripts\\allinluna.exe",
+  "startup_contract": {
+    "tool": "codex_app__create_thread",
+    "adapter": "codex-app",
+    "host_id": "local",
+    "argument_keys": ["target", "prompt", "model", "thinking", "title"],
+    "prompt_includes_cli_absolute_path": true,
+    "target_type": "projectless",
+    "no_direct_work_executor_callback": true,
+    "native_recursion": "NOT_APPLICABLE"
+  },
+  "actions": [
+    {
+      "task_id": "run-t1-pr2-final-desktop-canary-20260810:task:producer",
+      "lane_attempt_id": "lane-attempt-a57507a0a6a0ddb8e0fa",
+      "action_id": "action-c869a7927c12ea88797d",
+      "dispatch_id": "lane-run-t1-pr2-final-desktop-canary-20260810:task:producer-attempt-1",
+      "idempotency_key": "intent:lane:8c74da2b79b69a69c65c",
+      "action_contract_hash": "c9bfe6ac43e5d83b7647f5ddd56a65728774015c74c551f55d233121411723ca",
+      "tool": "codex_app__create_thread",
+      "model": "gpt-5.6-luna",
+      "reasoning": "high",
+      "target": {
+        "type": "projectless",
+        "directoryName": "allinluna-task-run-t1-pr2-final-desktop-canary-20260810-task-pro"
+      },
+      "thread_id": "019feaf8-6ed1-7e80-bf8f-8a9c662b181a",
+      "receipt_id": "desktop-canary-t1-producer-019feaf86ed17e80bf8f8a9c662b181a"
+    },
+    {
+      "task_id": "run-t1-pr2-final-desktop-canary-20260810:task:consumer",
+      "lane_attempt_id": "lane-attempt-2cf52a6ce64042d20db9",
+      "action_id": "action-370223d2e65c9f04826f",
+      "dispatch_id": "lane-run-t1-pr2-final-desktop-canary-20260810:task:consumer-attempt-1",
+      "idempotency_key": "intent:lane:7f30cff26aa1fed60939",
+      "action_contract_hash": "34c31de300580bcbe2faa9106f8583d0059099e3157248ae6469a3a02d7b2916",
+      "tool": "codex_app__create_thread",
+      "model": "gpt-5.6-luna",
+      "reasoning": "high",
+      "target": {
+        "type": "projectless",
+        "directoryName": "allinluna-task-run-t1-pr2-final-desktop-canary-20260810-task-con"
+      },
+      "thread_id": "019feb00-47da-7571-9034-ff78bcb7a4fc",
+      "receipt_id": "desktop-canary-t1-consumer-019feb0047da75719034ff78bcb7a4fc"
+    }
+  ],
+  "public_relay_order": [
+    "lane next-actions",
+    "lane-direct-work/v1",
+    "bounded local work",
+    "direct-work-result/v1",
+    "lane ingest-direct-result",
+    "runtime EvidenceCollector work-handoff/v1",
+    "runtime evidence-backed lane-handoff/v1",
+    "producer export releases consumer",
+    "root completes"
+  ]
+}

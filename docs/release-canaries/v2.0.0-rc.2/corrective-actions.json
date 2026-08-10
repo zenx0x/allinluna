@@ -1,0 +1,29 @@
+{
+  "protocol": "desktop-canary-actions/v1",
+  "run_ref": "run://run-rc2-pr2-universal-desktop-final",
+  "runtime_db_ref": "runtime-db://C:/Users/ZENX0/AppData/Local/Temp/allinluna-t5-qualification-0e23c593e69a40488bc8a22058068469/universal-canary-final/runtime.db",
+  "actions": [
+    {
+      "task_id": "run-rc2-pr2-universal-desktop-final:task:producer",
+      "action_id": "action-5c9f97b9a6b2331048da",
+      "dispatch_id": "lane-run-rc2-pr2-universal-desktop-final:task:producer-attempt-1",
+      "idempotency_key": "intent:lane:96083b7dca5d1398b1cd",
+      "action_contract_hash": "d8cc96553156a04f729397d19afe491c3b7822672864d57fcc6ac1836e5a1174",
+      "tool": "codex_app__create_thread",
+      "argument_keys": ["target", "prompt", "model", "thinking", "title"],
+      "execution_class": "top_level_task",
+      "state": "reconciled"
+    },
+    {
+      "task_id": "run-rc2-pr2-universal-desktop-final:task:consumer",
+      "action_id": "action-0d5bf714fb3c27d4c980",
+      "dispatch_id": "lane-run-rc2-pr2-universal-desktop-final:task:consumer-attempt-1",
+      "idempotency_key": "intent:lane:6e0baffc773f9d0f6f9a",
+      "action_contract_hash": "27adccf3b76d4f2e00694c58c32f533b19d4af914874c09bb834f20390a00145",
+      "tool": "codex_app__create_thread",
+      "argument_keys": ["target", "prompt", "model", "thinking", "title"],
+      "execution_class": "top_level_task",
+      "state": "reconciled"
+    }
+  ]
+}

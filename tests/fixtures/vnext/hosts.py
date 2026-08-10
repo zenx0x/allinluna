@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import Correction, PromotionRequest
+from .trusted_checks import trusted_command_spec
 
 
 class HostLostError(RuntimeError):
@@ -598,18 +599,23 @@ class FakeDistributedCodexHost:
                     str(task.get("contract_id") or ""), int(task.get("contract_version", 1))
                 ) or {}
                 conditions = [str(item) for item in contract.get("done_when", ()) or ()]
+                verification_workspace = Path(
+                    self.workspace_path or bootstrap.workspace or Path.cwd()
+                )
                 checks = [
-                    {
-                        "name": condition,
-                        "command": [sys.executable, "-c", "print('distributed-child-check')"],
-                        "satisfies": [condition],
-                    }
-                    for condition in conditions
+                    trusted_command_spec(
+                        verification_workspace,
+                        identifier=f"distributed-{index}",
+                        command=[sys.executable, "-c", "print('distributed-child-check')"],
+                        satisfies=[condition],
+                    )
+                    for index, condition in enumerate(conditions, start=1)
                 ] or [
-                    {
-                        "name": "distributed child lane completed",
-                        "command": [sys.executable, "-c", "print('distributed-child-check')"],
-                    }
+                    trusted_command_spec(
+                        verification_workspace,
+                        identifier="distributed-child-lane-completed",
+                        command=[sys.executable, "-c", "print('distributed-child-check')"],
+                    )
                 ]
                 exports = []
                 for item in contract.get("exports", ()) or ():

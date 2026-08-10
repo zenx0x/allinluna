@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,6 +17,16 @@ from .adapters.host.codex_app_server import assemble_app_server_receipt
 from .packs.public_skill import SinglePublicSkillAPI
 from .resource import ResourceBroker
 from .store import Store
+
+
+def _runtime_version() -> str:
+    """Return the installed distribution version without requiring packaging."""
+
+    try:
+        return version("allinluna")
+    except PackageNotFoundError:
+        # Source checkouts intentionally remain runnable through PYTHONPATH.
+        return "2.0.0-rc.2"
 
 
 def _json(value: Any) -> str:
@@ -44,6 +55,7 @@ def _intent_id(explicit: str | None, goal: str) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="allinluna", description="All in Luna vNext runtime")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_runtime_version()}")
     parser.add_argument("--db", default="runtime.db", help="runtime.db path")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -92,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     lane_start.add_argument("run_id")
     lane_start.add_argument("task_id")
     lane_start.add_argument("--bootstrap", help="LaneBootstrapEnvelope JSON or path; defaults to the persisted top-level action")
-    for name in ("status", "tick", "drive", "handoff"):
+    for name in ("status", "tick", "drive", "handoff", "next-actions"):
         command = lane_sub.add_parser(name)
         command.add_argument("run_id")
         command.add_argument("task_id")
@@ -107,6 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
     lane_receipt.add_argument("run_id")
     lane_receipt.add_argument("task_id")
     lane_receipt.add_argument("receipt")
+    lane_direct_result = lane_sub.add_parser(
+        "ingest-direct-result",
+        help="ingest an external direct-work-result/v1 report",
+    )
+    lane_direct_result.add_argument("run_id")
+    lane_direct_result.add_argument("task_id")
+    lane_direct_result.add_argument("result")
 
     inspect = sub.add_parser("inspect")
     inspect_sub = inspect.add_subparsers(dest="inspect_kind", required=True)
@@ -236,8 +255,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result = lane_driver.tick(monitor=not args.no_monitor)
             elif args.lane_command == "drive":
                 result = lane_driver.drive(max_cycles=args.max_cycles, monitor=not args.no_monitor)
+            elif args.lane_command == "next-actions":
+                result = lane_driver.next_actions()
             elif args.lane_command == "ingest-receipt":
                 result = lane_driver.ingest_receipt(_load_json(args.receipt))
+            elif args.lane_command == "ingest-direct-result":
+                result = lane_driver.ingest_direct_result(_load_json(args.result))
             elif args.lane_command == "handoff":
                 if args.ingest:
                     lane_driver.ingest_handoff(_load_json(args.ingest))

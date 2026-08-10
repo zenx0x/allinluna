@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "release_status": "release-candidate",
+  "stable_release": false,
+  "products": {
+    "allinluna": {
+      "distribution_id": "all-in-luna",
+      "plugin_name": "allinluna",
+      "version": "2.0.0-rc.2",
+      "tag": "allinluna-v2.0.0-rc.2"
+    },
+    "research-routes": {
+      "distribution_id": "research-routes",
+      "plugin_name": "research-routes",
+      "version": "0.3.0-rc.2",
+      "tag": "research-routes-v0.3.0-rc.2"
+    }
+  },
+  "tag_policy": {
+    "format": "<plugin_name>-v<version>",
+    "owner": "T6",
+    "timing": "after merged main",
+    "create_or_publish": false
+  }
+}

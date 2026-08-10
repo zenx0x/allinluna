@@ -1,29 +1,39 @@
 #!/usr/bin/env python3
-"""Validate that both built plugins can be installed without overwriting each other."""
+"""Validate co-installation without duplicate public Skills or runtimes."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import tempfile
 from pathlib import Path
-import shutil
 
-from build_distributions import ROOT, build, read_json
-
-
-EXPECTED_VERSIONS = {"allinluna": "2.0.0-rc.1", "research-routes": "0.3.0-rc.1"}
+from build_distributions import ROOT, build, load_version_authority, read_json, resolved_specs
 
 
 def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
     errors: list[str] = []
+    manifest = read_json(root / "distributions" / "distribution-manifest.json")
+    try:
+        version_path, authority = load_version_authority(root, manifest)
+        specs = resolved_specs(root, manifest)
+    except Exception as exc:
+        return [f"invalid version/distribution authority: {exc}"]
+    expected_versions = {spec["plugin_name"]: spec["version"] for spec in specs}
+
     with tempfile.TemporaryDirectory(prefix="allinluna-install-") as temp:
         build_dir = Path(temp) / "build"
-        artifacts = build(root, build_dir) if dist is None else [dist / "all-in-luna", dist / "research-routes"]
+        artifacts = (
+            build(root, build_dir, profiles=["end-user"])
+            if dist is None
+            else [dist / "all-in-luna", dist / "research-routes"]
+        )
         install_root = Path(temp) / "plugins"
+        installed_roots: dict[str, Path] = {}
         snapshots: dict[str, bytes] = {}
         for artifact in artifacts:
-            marketplace_path = artifact / ".agents" / "plugins" / "marketplace.json"
+            marketplace_path = artifact / ".agents/plugins/marketplace.json"
             if not marketplace_path.is_file():
                 errors.append(f"missing marketplace manifest in {artifact}")
                 continue
@@ -36,64 +46,116 @@ def validate(root: Path = ROOT, dist: Path | None = None) -> list[str]:
             if not source_path.startswith("./"):
                 errors.append(f"marketplace source path must be relative: {source_path}")
                 continue
-            plugin_path = (artifact / source_path[2:]).resolve() / ".codex-plugin" / "plugin.json"
+            plugin_path = (artifact / source_path[2:]).resolve() / ".codex-plugin/plugin.json"
             if not plugin_path.is_file() or artifact.resolve() not in plugin_path.parents:
                 errors.append(f"marketplace plugin path escapes or is missing in {artifact}")
                 continue
             plugin = read_json(plugin_path)
             name = plugin.get("name")
-            if not name:
-                errors.append(f"plugin name missing in {artifact}")
-                continue
-            if name not in EXPECTED_VERSIONS:
+            if name not in expected_versions:
                 errors.append(f"unexpected plugin identity in {artifact}: {name}")
-            elif plugin.get("version") != EXPECTED_VERSIONS[name]:
-                errors.append(f"{name} plugin version is stale: {plugin.get('version')!r}")
+                continue
+            if plugin.get("version") != expected_versions[name]:
+                errors.append(f"{name} plugin version differs from release/versions.json")
             destination = install_root / name
             shutil.copytree(artifact, destination)
             installed_plugin_root = (destination / source_path[2:]).resolve()
-            if destination.resolve() not in installed_plugin_root.parents and installed_plugin_root != destination.resolve():
+            if (
+                destination.resolve() not in installed_plugin_root.parents
+                and installed_plugin_root != destination.resolve()
+            ):
                 errors.append(f"installed marketplace path escapes {destination}")
                 continue
+            installed_roots[name] = installed_plugin_root
             snapshots[name] = (installed_plugin_root / ".codex-plugin/plugin.json").read_bytes()
-        names = set(snapshots)
+
+        names = set(installed_roots)
         if names != {"allinluna", "research-routes"}:
             errors.append(f"co-installation names are {sorted(names)}")
-        if snapshots.get("allinluna") == snapshots.get("research-routes"):
+            return errors
+        if snapshots["allinluna"] == snapshots["research-routes"]:
             errors.append("co-installed plugin manifests must remain distinct")
-        for name in names:
-            marketplace = read_json(install_root / name / ".agents/plugins/marketplace.json")
-            source_path = marketplace["plugins"][0]["source"]["path"]
-            installed_plugin_root = install_root / name / source_path[2:]
-            if not (installed_plugin_root / "skills").is_dir():
-                errors.append(f"{name} has no installable skills directory")
-            skill = installed_plugin_root / "skills" / "allinluna" / "SKILL.md"
-            if not skill.is_file():
-                errors.append(f"{name} has no installed All in Luna Skill entrypoint")
-            elif name == "allinluna":
-                text = skill.read_text(encoding="utf-8")
-                installed_manifest = read_json(installed_plugin_root / ".codex-plugin/plugin.json")
-                if installed_manifest.get("version") != "2.0.0-rc.1":
-                    errors.append("installed All in Luna plugin version is not 2.0.0-rc.1")
-                if not all(needle in text for needle in ("not hard", "locked", "resource_receipt.requested")):
-                    errors.append("installed All in Luna Skill lacks configurable-resource receipt guidance")
-            if not (install_root / name / "canonical-files.json").is_file():
+
+        luna_root = installed_roots["allinluna"]
+        routes_root = installed_roots["research-routes"]
+        if not (luna_root / "skills/allinluna/SKILL.md").is_file():
+            errors.append("All in Luna public Skill is missing")
+        if not (luna_root / "runtime/allinluna_runtime").is_dir():
+            errors.append("All in Luna runtime is missing")
+        if not (routes_root / "skills/research-routes/SKILL.md").is_file():
+            errors.append("Research Routes public Skill is missing")
+        if not (routes_root / "runtime/research_routes_runtime").is_dir():
+            errors.append("Research Routes runtime is missing")
+        for forbidden in (
+            routes_root / "skills/allinluna",
+            routes_root / "runtime/allinluna_runtime",
+        ):
+            if forbidden.exists():
+                errors.append(f"Research Routes duplicates All in Luna at {forbidden}")
+
+        luna_skill = (luna_root / "skills/allinluna/SKILL.md").read_text(encoding="utf-8")
+        if not all(
+            needle in luna_skill
+            for needle in ("not hard", "locked", "resource_receipt.requested")
+        ):
+            errors.append(
+                "installed All in Luna Skill lacks configurable-resource receipt guidance"
+            )
+        routes_plugin = read_json(routes_root / ".codex-plugin/plugin.json")
+        dependencies = routes_plugin.get("dependencies", [])
+        if len(dependencies) != 1:
+            errors.append("Research Routes has no singular All in Luna dependency")
+        else:
+            dependency = dependencies[0]
+            bridge = dependency.get("bridge", {})
+            if dependency.get("plugin") != "allinluna":
+                errors.append(
+                    "Research Routes dependency does not resolve to installed All in Luna"
+                )
+            if dependency.get("version") != expected_versions["allinluna"]:
+                errors.append("Research Routes dependency version is stale")
+            if dependency.get("required") is not True:
+                errors.append("Research Routes All in Luna dependency must be required")
+            if (
+                bridge.get("protocol") != "research-routes-bridge/v1"
+                or bridge.get("visibility") != "private"
+            ):
+                errors.append("Research Routes private bridge metadata is invalid")
+
+        for name, plugin_root in installed_roots.items():
+            artifact_root = install_root / name
+            if (plugin_root / "tests").exists() or (plugin_root / "evals").exists():
+                errors.append(f"{name} end-user installation contains tests or evals")
+            if not (artifact_root / "canonical-files.json").is_file():
                 errors.append(f"{name} has no canonical source manifest")
-            artifact_manifest_path = install_root / name / "distribution-manifest.json"
+            artifact_manifest_path = artifact_root / "distribution-manifest.json"
             if not artifact_manifest_path.is_file():
                 errors.append(f"{name} has no distribution release manifest")
-            else:
-                artifact_manifest = read_json(artifact_manifest_path)
-                if artifact_manifest.get("version") != EXPECTED_VERSIONS.get(name):
-                    errors.append(f"{name} distribution manifest version is stale")
-                if artifact_manifest.get("release_status") != "release-candidate":
-                    errors.append(f"{name} distribution is not marked release-candidate")
-                if artifact_manifest.get("tag_owner") != "T6" or artifact_manifest.get("tag_timing") != "after merged main":
-                    errors.append(f"{name} distribution tag boundary is invalid")
-            if not (installed_plugin_root / "runtime" / "allinluna_runtime").is_dir():
-                errors.append(f"{name} has no canonical runtime")
-            if (installed_plugin_root / "shared").exists() or (installed_plugin_root / "runtime" / "shared").exists():
-                errors.append(f"{name} contains a forbidden duplicate shared runtime")
+                continue
+            artifact_manifest = read_json(artifact_manifest_path)
+            if artifact_manifest.get("artifact_profile") != "end-user":
+                errors.append(f"{name} installation is not an end-user artifact")
+            if artifact_manifest.get("public_artifact") is not True:
+                errors.append(f"{name} end-user artifact is not public")
+            if artifact_manifest.get("includes_debug_sources") is not False:
+                errors.append(f"{name} end-user artifact contains debug sources")
+            if artifact_manifest.get("version") != expected_versions[name]:
+                errors.append(f"{name} distribution manifest version is stale")
+            if artifact_manifest.get("release_status") != authority["release_status"]:
+                errors.append(f"{name} distribution is not marked release-candidate")
+            if (
+                artifact_manifest.get("tag_owner") != "T6"
+                or artifact_manifest.get("tag_timing") != "after merged main"
+            ):
+                errors.append(f"{name} distribution tag boundary is invalid")
+            if artifact_manifest.get("tag_creation_authorized") is not False:
+                errors.append(f"{name} artifact improperly authorizes tag creation")
+            installed_versions = artifact_root / "release/versions.json"
+            if (
+                not installed_versions.is_file()
+                or installed_versions.read_bytes() != version_path.read_bytes()
+            ):
+                errors.append(f"{name} installed version authority is missing or stale")
     return errors
 
 

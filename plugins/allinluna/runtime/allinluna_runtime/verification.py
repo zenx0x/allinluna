@@ -54,6 +54,11 @@ class VerificationSpec:
     artifact_ref: str | None = None
     assertion: str | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
+    source: str | None = None
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+    trust: Mapping[str, Any] = field(default_factory=dict)
+    approval: Mapping[str, Any] = field(default_factory=dict)
+    execution: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         identifier = str(self.id).strip()
@@ -100,6 +105,26 @@ class VerificationSpec:
         if not isinstance(self.details, Mapping):
             raise VerificationSpecError("verification details must be an object")
         object.__setattr__(self, "details", dict(self.details))
+        if self.source is not None:
+            source = str(self.source).strip()
+            if not source:
+                raise VerificationSpecError("verification source must be non-empty")
+            object.__setattr__(self, "source", source)
+        for field_name in ("provenance", "trust", "approval", "execution"):
+            value = getattr(self, field_name)
+            if value is None:
+                value = {}
+            if not isinstance(value, Mapping):
+                raise VerificationSpecError(f"verification {field_name} must be an object")
+            object.__setattr__(self, field_name, dict(value))
+        if self.timeout_seconds is None and self.execution.get("timeout_seconds") is not None:
+            try:
+                timeout = float(self.execution["timeout_seconds"])
+            except (TypeError, ValueError) as exc:
+                raise VerificationSpecError("verification execution timeout must be numeric") from exc
+            if not 0 < timeout <= 900:
+                raise VerificationSpecError("verification execution timeout must be between 0 and 900")
+            object.__setattr__(self, "timeout_seconds", timeout)
 
     @property
     def executable(self) -> bool:
@@ -121,6 +146,16 @@ class VerificationSpec:
             value["assertion"] = self.assertion
         if self.details:
             value["details"] = dict(self.details)
+        if self.source is not None:
+            value["source"] = self.source
+        if self.provenance:
+            value["provenance"] = dict(self.provenance)
+        if self.trust:
+            value["trust"] = dict(self.trust)
+        if self.approval:
+            value["approval"] = dict(self.approval)
+        if self.execution:
+            value["execution"] = dict(self.execution)
         return value
 
     @classmethod
@@ -142,6 +177,11 @@ class VerificationSpec:
             artifact_ref=data.get("artifact_ref") or data.get("ref"),
             assertion=data.get("assertion"),
             details=data.get("details", {}),
+            source=data.get("source"),
+            provenance=data.get("provenance", {}),
+            trust=data.get("trust", {}),
+            approval=data.get("approval", {}),
+            execution=data.get("execution", {}),
         )
 
 

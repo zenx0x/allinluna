@@ -20,6 +20,7 @@ from ..domain import (
     WorkGraph,
 )
 from ..verification import VerifierSpec
+from ..verification_planner import VerificationPlanner
 from .base import CompiledRunGraph, PackManifest, contract_for, dependency, task_for
 from .goal_compiler import Decomposition, OutcomeDomain, TaskDecomposer
 
@@ -75,10 +76,41 @@ class DeliveryPack:
         contracts: list[Contract] = []
         tasks: list[Task] = []
         work_graphs: dict[str, WorkGraph] = {}
+        planner = VerificationPlanner()
+        repository_context = dict(getattr(decomposition, "repository_context", {}) or {})
         for domain in domain_values:
             task_id = str(domain.id)
             outcome = str(domain.outcome)
             done_when = tuple(domain.done_when or run_intent.done_when)
+            if domain.verification_specs:
+                # Explicit caller-authored typed specs remain byte-for-byte
+                # stable at the contract boundary.  Their trust metadata is
+                # still enforced later by CheckRunner.
+                verification_plan = planner.plan(
+                    goal=outcome,
+                    repository_context=repository_context,
+                    outcome_domain=domain,
+                    ownership=domain.ownership,
+                    pack=self,
+                )
+                verification_specs_for_contract = tuple(domain.verification_specs)
+            else:
+                verification_plan = planner.plan(
+                    goal=outcome,
+                    repository_context=repository_context,
+                    outcome_domain=domain,
+                    ownership=domain.ownership,
+                    pack=self,
+                )
+                verification_specs_for_contract = verification_plan.specs
+            domain_metadata = dict(domain.metadata)
+            domain_metadata["verification_plan"] = verification_plan.to_dict()
+            domain = replace(
+                domain,
+                verification_specs=verification_specs_for_contract,
+                checks=tuple(spec.id for spec in verification_specs_for_contract),
+                metadata=domain_metadata,
+            )
             dependencies = tuple(
                 dependency(str(item), exports=domain.dependency_exports.get(str(item), ()))
                 for item in domain.dependencies
@@ -87,7 +119,7 @@ class DeliveryPack:
                 contract_id=f"contract-{run_intent.intent_id}-{task_id}",
                 outcome=outcome,
                 done_when=done_when or run_intent.done_when,
-                verification_specs=domain.verification_specs,
+                verification_specs=verification_specs_for_contract,
                 ownership=domain.ownership,
                 dependencies=dependencies,
                 exports=tuple({"name": str(item), "kind": "artifact", "version": 1, "description": f"Delivery artifact {item}"} for item in domain.exports),

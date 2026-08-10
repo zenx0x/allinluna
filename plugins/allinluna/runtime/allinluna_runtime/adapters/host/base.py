@@ -23,8 +23,8 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from ...core.protocol import ACTION_BRIDGE_PROTOCOL, DISPATCH_INTENT_PROTOCOL, HOST_RECEIPT_PROTOCOL
+from ...core.protocol import DIRECT_WORK_RESULT_PROTOCOL, LANE_DIRECT_WORK_PROTOCOL
 from ...resource_observation import ResourceObservation
-
 
 # Host adapters may leave a route unspecified and let the host choose its
 # current default.  Concrete model names belong in host/deployment policy,
@@ -35,6 +35,13 @@ TOP_LEVEL_TASK_EXECUTION_CLASS = "top_level_task"
 LOCAL_SUBAGENT_EXECUTION_CLASS = "local_subagent"
 DIRECT_EXECUTION_CLASS = "direct"
 TOP_LEVEL_CREATE_THREAD_TOOL = "codex_app__create_thread"
+LOCAL_DISPATCH_INTENT_PROTOCOL = "local-dispatch-intent/v1"
+WORK_HANDOFF_PROTOCOL = "work-handoff/v1"
+NATIVE_SUBAGENT_CAPABILITY = "native_subagent"
+NATIVE_PREFERRED = "native_preferred"
+NATIVE_REQUIRED = "native_required"
+DIRECT_ONLY = "direct_only"
+LOCAL_EXECUTION_MODES = frozenset({NATIVE_PREFERRED, NATIVE_REQUIRED, DIRECT_ONLY})
 
 
 def _text(value: Any) -> str | None:
@@ -43,6 +50,40 @@ def _text(value: Any) -> str | None:
 
 def _copy(value: Any) -> Any:
     return deepcopy(value)
+
+
+def _public_create_target(value: Any) -> Any:
+    """Normalize an internal project target to the Desktop public schema.
+
+    Project resolution retains path and branch identity for trust checks, but
+    the public ``create_thread`` contract accepts only a typed worktree plus
+    an optional ``startingState``.  Keeping this conversion at the exact
+    HostAction boundary lets internal planners continue to inspect the full
+    resolved identity without leaking unsupported fields into the host call.
+    """
+
+    if not isinstance(value, Mapping) or value.get("type") != "project":
+        return value
+    environment = value.get("environment")
+    if not isinstance(environment, Mapping) or environment.get("type") != "worktree":
+        return value
+    target_environment: dict[str, Any] = {"type": "worktree"}
+    starting_state = environment.get("startingState") or environment.get("starting_state")
+    if isinstance(starting_state, Mapping):
+        if starting_state.get("type") == "branch" and _text(starting_state.get("branchName")):
+            target_environment["startingState"] = {
+                "type": "branch",
+                "branchName": _text(starting_state.get("branchName")),
+            }
+    else:
+        branch = _text(environment.get("branch"))
+        if branch:
+            target_environment["startingState"] = {"type": "branch", "branchName": branch}
+    return {
+        "type": "project",
+        "projectId": value.get("projectId"),
+        "environment": target_environment,
+    }
 
 
 def _json_safe(value: Any) -> Any:
@@ -202,6 +243,7 @@ class HostCapabilities(_MappingRecord):
     receipt_provenance: str | None = None
     source: str | None = None
     is_real_codex_app: bool | None = None
+    logical_capabilities: Mapping[str, Any] = field(default_factory=dict)
     evidence: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -210,6 +252,41 @@ class HostCapabilities(_MappingRecord):
 
     def has_tool(self, tool: str) -> bool:
         return tool in self.tools
+
+    def logical_capability(self, name: str) -> dict[str, Any]:
+        """Return one normalized host-owned logical capability binding.
+
+        Physical tool names come only from discovery/configuration.  Core may
+        ask for ``native_subagent`` but never supplies a vendor opcode.
+        """
+
+        value = self.logical_capabilities.get(str(name), {})
+        if isinstance(value, bool):
+            value = {"available": value}
+        raw = dict(value) if isinstance(value, Mapping) else {}
+        physical = raw.get("physical_tools", raw.get("physicalTools", ()))
+        if isinstance(physical, str):
+            physical = (physical,)
+        if isinstance(physical, Mapping):
+            physical = tuple(
+                str(tool)
+                for tool, descriptor in physical.items()
+                if not isinstance(descriptor, Mapping) or descriptor.get("available", True)
+            )
+        tools = tuple(dict.fromkeys(str(item) for item in (physical or ()) if _text(item)))
+        preferred = _text(raw.get("preferred_tool", raw.get("preferredTool")))
+        if preferred and preferred not in tools:
+            tools = (preferred, *tools)
+        available = bool(raw.get("available", bool(tools))) and self.available
+        return {
+            "available": available,
+            "physical_tools": list(tools),
+            "preferred_tool": preferred or (tools[0] if tools else None),
+            "receipt_contract": _text(
+                raw.get("receipt_contract", raw.get("receiptContract"))
+            )
+            or HOST_RECEIPT_PROTOCOL,
+        }
 
     def _raw_dict(self) -> dict[str, Any]:
         return {
@@ -221,6 +298,7 @@ class HostCapabilities(_MappingRecord):
             "receipt_provenance": self.receipt_provenance,
             "source": self.source,
             "is_real_codex_app": self.is_real_codex_app,
+            "logical_capabilities": _copy(dict(self.logical_capabilities)),
             "evidence": _copy(self.evidence),
         }
 
@@ -246,17 +324,314 @@ class HostCapabilities(_MappingRecord):
             tools = [name for name, item in tools.items() if not isinstance(item, Mapping) or item.get("available", True)]
         if isinstance(tools, str):
             tools = [tools]
+        logical = raw.get(
+            "logical_capabilities",
+            raw.get("logicalCapabilities", capability_raw.get("logical_capabilities", {})),
+        )
+        logical = dict(logical) if isinstance(logical, Mapping) else {}
+        legacy_native = raw.get(
+            "native_subagent",
+            raw.get("nativeSubagent", capability_raw.get("native_subagent")),
+        )
+        if NATIVE_SUBAGENT_CAPABILITY not in logical and legacy_native is not None:
+            native_tools = raw.get(
+                "native_subagent_tools",
+                raw.get("nativeSubagentTools", capability_raw.get("native_subagent_tools", ())),
+            )
+            native_preferred = first_text(
+                raw, "native_subagent_tool", "nativeSubagentTool"
+            ) or first_text(capability_raw, "native_subagent_tool", "nativeSubagentTool")
+            logical[NATIVE_SUBAGENT_CAPABILITY] = {
+                "available": bool(legacy_native),
+                "physical_tools": native_tools,
+                "preferred_tool": native_preferred,
+                "receipt_contract": HOST_RECEIPT_PROTOCOL,
+            }
         return cls(
             host_id=first_text(raw, "host_id", "hostId") or default_host_id,
             host_kind=first_text(raw, "host_kind", "kind") or "unknown",
             available=bool(raw.get("available", True)),
             tools=tuple(sorted({str(item) for item in (tools or ()) if str(item).strip()})),
-            native_subagent=raw.get("native_subagent", raw.get("nativeSubagent", capability_raw.get("native_subagent"))),
+            native_subagent=legacy_native,
             receipt_provenance=first_text(raw, "receipt_provenance", "receiptProvenance") or first_text(capability_raw, "receipt_provenance", "receiptProvenance"),
             source=first_text(raw, "source") or first_text(capability_raw, "source"),
             is_real_codex_app=raw.get("is_real_codex_app", raw.get("isRealCodexApp", capability_raw.get("is_real_codex_app"))),
+            logical_capabilities=logical,
             evidence=_copy(raw),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalDispatchIntent(_MappingRecord):
+    """Logical Lane-local work request emitted before host resolution."""
+
+    work_unit_id: str
+    task_id: str
+    objective: str
+    idempotency_key: str
+    attempt_id: str | None = None
+    run_ref: str | None = None
+    parent_work_unit_id: str | None = None
+    logical_capability: str = NATIVE_SUBAGENT_CAPABILITY
+    execution_mode: str = NATIVE_PREFERRED
+    context_ref: str | None = None
+    scope: tuple[str, ...] = ()
+    authority: tuple[str, ...] = ()
+    ownership: tuple[str, ...] = ()
+    resource_envelope: Mapping[str, Any] = field(default_factory=dict)
+    checks: tuple[Any, ...] = ()
+    artifact_policy: Mapping[str, Any] = field(default_factory=dict)
+    return_contract: str = WORK_HANDOFF_PROTOCOL
+
+    def __post_init__(self) -> None:
+        for name in ("work_unit_id", "task_id", "objective", "idempotency_key"):
+            if not _text(getattr(self, name)):
+                raise ValueError(f"local dispatch intent requires {name}")
+        if self.execution_mode not in LOCAL_EXECUTION_MODES:
+            raise ValueError(f"unknown local execution_mode: {self.execution_mode!r}")
+        if self.return_contract != WORK_HANDOFF_PROTOCOL:
+            raise ValueError(f"local work must return {WORK_HANDOFF_PROTOCOL}")
+        object.__setattr__(self, "scope", tuple(map(str, self.scope)))
+        object.__setattr__(self, "authority", tuple(map(str, self.authority)))
+        object.__setattr__(self, "ownership", tuple(map(str, self.ownership)))
+        object.__setattr__(self, "checks", tuple(_copy(item) for item in self.checks))
+
+    def with_attempt(self, attempt_id: str) -> "LocalDispatchIntent":
+        return LocalDispatchIntent(
+            work_unit_id=self.work_unit_id,
+            task_id=self.task_id,
+            objective=self.objective,
+            idempotency_key=self.idempotency_key,
+            attempt_id=str(attempt_id),
+            run_ref=self.run_ref,
+            parent_work_unit_id=self.parent_work_unit_id,
+            logical_capability=self.logical_capability,
+            execution_mode=self.execution_mode,
+            context_ref=self.context_ref,
+            scope=self.scope,
+            authority=self.authority,
+            ownership=self.ownership,
+            resource_envelope=self.resource_envelope,
+            checks=self.checks,
+            artifact_policy=self.artifact_policy,
+            return_contract=self.return_contract,
+        )
+
+    def _raw_dict(self) -> dict[str, Any]:
+        return {
+            "protocol": LOCAL_DISPATCH_INTENT_PROTOCOL,
+            "execution_class": "local_work",
+            "run_ref": self.run_ref,
+            "task_id": self.task_id,
+            "task_ref": f"task://{self.task_id}",
+            "work_unit_id": self.work_unit_id,
+            "parent_work_unit_id": self.parent_work_unit_id,
+            "attempt_id": self.attempt_id,
+            "objective": self.objective,
+            "logical_capability": self.logical_capability,
+            "execution_mode": self.execution_mode,
+            "context_ref": self.context_ref,
+            "scope": list(self.scope),
+            "authority": list(self.authority),
+            "ownership": list(self.ownership),
+            "resource_envelope": _copy(dict(self.resource_envelope)),
+            "checks": [_copy(item) for item in self.checks],
+            "artifact_policy": _copy(dict(self.artifact_policy)),
+            "return_contract": self.return_contract,
+            "idempotency_key": self.idempotency_key,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "LocalDispatchIntent":
+        if isinstance(value, cls):
+            return value
+        raw = mapping_from(value)
+        return cls(
+            work_unit_id=str(raw.get("work_unit_id") or raw.get("workUnitId") or ""),
+            task_id=str(
+                raw.get("task_id")
+                or raw.get("taskId")
+                or str(raw.get("task_ref") or "").removeprefix("task://")
+            ),
+            objective=str(raw.get("objective") or ""),
+            idempotency_key=str(
+                raw.get("idempotency_key") or raw.get("idempotencyKey") or ""
+            ),
+            attempt_id=first_text(raw, "attempt_id", "attemptId"),
+            run_ref=first_text(raw, "run_ref", "runRef"),
+            parent_work_unit_id=first_text(
+                raw, "parent_work_unit_id", "parentWorkUnitId"
+            ),
+            logical_capability=first_text(
+                raw, "logical_capability", "logicalCapability"
+            )
+            or NATIVE_SUBAGENT_CAPABILITY,
+            execution_mode=first_text(raw, "execution_mode", "executionMode")
+            or NATIVE_PREFERRED,
+            context_ref=first_text(raw, "context_ref", "contextRef"),
+            scope=tuple(map(str, raw.get("scope") or ())),
+            authority=tuple(map(str, raw.get("authority") or ())),
+            ownership=tuple(map(str, raw.get("ownership") or ())),
+            resource_envelope=_copy(raw.get("resource_envelope") or {}),
+            checks=tuple(_copy(item) for item in (raw.get("checks") or ())),
+            artifact_policy=_copy(raw.get("artifact_policy") or {}),
+            return_contract=str(raw.get("return_contract") or WORK_HANDOFF_PROTOCOL),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LaneDirectExecutionPlan(_MappingRecord):
+    """Executable Lane-owned alternative to a resolved local HostAction."""
+
+    intent: LocalDispatchIntent
+    reason: str = "native-subagent-unavailable"
+
+    def _raw_dict(self) -> dict[str, Any]:
+        value = self.intent.to_dict()
+        plan = {
+            "protocol": LANE_DIRECT_WORK_PROTOCOL,
+            "execution_class": "lane_direct",
+            "run_ref": value["run_ref"],
+            "task_ref": value["task_ref"],
+            "task_id": value["task_id"],
+            "work_unit_id": value["work_unit_id"],
+            "parent_work_unit_id": value["parent_work_unit_id"],
+            "attempt_id": value["attempt_id"],
+            "objective": value["objective"],
+            "context_ref": value["context_ref"],
+            "scope": value["scope"],
+            "ownership": value["ownership"],
+            "authority": value["authority"],
+            "resource_envelope": value["resource_envelope"],
+            "checks": value["checks"],
+            "artifact_policy": value["artifact_policy"],
+            "return_contract": value["return_contract"],
+            "idempotency_key": value["idempotency_key"],
+            "logical_capability": value["logical_capability"],
+            "execution_mode": value["execution_mode"],
+            "reason": self.reason,
+        }
+        plan["plan_digest"] = "sha256:" + stable_digest(plan, length=64)
+        return plan
+
+    @classmethod
+    def from_value(cls, value: Any) -> "LaneDirectExecutionPlan":
+        if isinstance(value, cls):
+            return value
+        raw = mapping_from(value)
+        if raw.get("protocol") not in {None, LANE_DIRECT_WORK_PROTOCOL}:
+            raise ValueError("lane-direct plan must use lane-direct-work/v1")
+        plan = cls(
+            LocalDispatchIntent.from_value(raw),
+            reason=str(raw.get("reason") or "lane-direct-requested"),
+        )
+        supplied = raw.get("plan_digest")
+        if supplied is not None and str(supplied) != str(plan.to_dict()["plan_digest"]):
+            raise ValueError("lane-direct plan digest does not match its immutable plan")
+        return plan
+
+
+@dataclass(frozen=True, slots=True)
+class DirectWorkResult(_MappingRecord):
+    """An external report of direct work; it never proves completion itself."""
+
+    work_unit_id: str
+    attempt_id: str
+    idempotency_key: str
+    plan_digest: str
+    status: str = "reported"
+    summary: str = ""
+    changed_paths: tuple[str, ...] = ()
+    raw_outputs: tuple[Any, ...] = ()
+    artifacts: tuple[str, ...] = ()
+    exports: tuple[Mapping[str, Any], ...] = ()
+    blockers: tuple[Mapping[str, Any], ...] = ()
+    result_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("work_unit_id", "attempt_id", "idempotency_key", "plan_digest"):
+            if not _text(getattr(self, name)):
+                raise ValueError(f"direct work result requires {name}")
+        object.__setattr__(self, "changed_paths", tuple(map(str, self.changed_paths)))
+        object.__setattr__(self, "artifacts", tuple(map(str, self.artifacts)))
+        object.__setattr__(self, "raw_outputs", tuple(_copy(item) for item in self.raw_outputs))
+        normalized_exports: list[Mapping[str, Any]] = []
+        for item in self.exports:
+            if not isinstance(item, Mapping):
+                raise TypeError("direct work result exports must be mappings")
+            normalized_exports.append(_copy(dict(item)))
+        object.__setattr__(self, "exports", tuple(normalized_exports))
+        object.__setattr__(self, "blockers", tuple(_copy(item) for item in self.blockers))
+
+    def _material(self) -> dict[str, Any]:
+        return {
+            "protocol": DIRECT_WORK_RESULT_PROTOCOL,
+            "work_unit_id": self.work_unit_id,
+            "attempt_id": self.attempt_id,
+            "idempotency_key": self.idempotency_key,
+            "plan_digest": self.plan_digest,
+            "status": self.status,
+            "summary": self.summary,
+            "changed_paths": list(self.changed_paths),
+            "raw_outputs": [_copy(item) for item in self.raw_outputs],
+            "artifacts": list(self.artifacts),
+            "exports": [_copy(dict(item)) for item in self.exports],
+            "blockers": [dict(item) for item in self.blockers],
+        }
+
+    def _raw_dict(self) -> dict[str, Any]:
+        value = self._material()
+        value["result_digest"] = self.result_digest or "sha256:" + stable_digest(value, length=64)
+        return value
+
+    @property
+    def computed_result_digest(self) -> str:
+        return "sha256:" + stable_digest(self._material(), length=64)
+
+    @classmethod
+    def from_value(
+        cls,
+        value: Any,
+        *,
+        plan: "LaneDirectExecutionPlan | Mapping[str, Any] | None" = None,
+    ) -> "DirectWorkResult":
+        if isinstance(value, cls):
+            result = value
+        else:
+            raw = mapping_from(value)
+            if raw.get("protocol") not in {None, DIRECT_WORK_RESULT_PROTOCOL}:
+                raise ValueError("direct result must use direct-work-result/v1")
+            result = cls(
+                work_unit_id=str(raw.get("work_unit_id") or raw.get("workUnitId") or ""),
+                attempt_id=str(raw.get("attempt_id") or raw.get("attemptId") or ""),
+                idempotency_key=str(raw.get("idempotency_key") or raw.get("idempotencyKey") or ""),
+                plan_digest=str(raw.get("plan_digest") or raw.get("planDigest") or ""),
+                status=str(raw.get("status") or "reported"),
+                summary=str(raw.get("summary") or ""),
+                changed_paths=tuple(raw.get("changed_paths") or raw.get("changedPaths") or ()),
+                raw_outputs=tuple(raw.get("raw_outputs") or raw.get("rawOutputs") or ()),
+                artifacts=tuple(str(item) for item in (raw.get("artifacts") or ())),
+                exports=tuple(_copy(item) for item in (raw.get("exports") or ())),
+                blockers=tuple(item for item in (raw.get("blockers") or ()) if isinstance(item, Mapping)),
+                result_digest=str(raw.get("result_digest") or raw.get("resultDigest") or "") or None,
+            )
+        if plan is not None:
+            expected = LaneDirectExecutionPlan.from_value(plan).to_dict()
+            if result.plan_digest != expected["plan_digest"]:
+                raise ValueError("direct work result plan digest does not match the persisted plan")
+            intent = LocalDispatchIntent.from_value(expected)
+            for name, actual, expected_value in (
+                ("work_unit_id", result.work_unit_id, intent.work_unit_id),
+                ("attempt_id", result.attempt_id, intent.attempt_id),
+                ("idempotency_key", result.idempotency_key, intent.idempotency_key),
+            ):
+                if str(actual) != str(expected_value):
+                    raise ValueError(f"direct work result {name} does not match the persisted plan")
+        if result.result_digest is not None:
+            expected_digest = "sha256:" + stable_digest(result._material(), length=64)
+            if result.result_digest != expected_digest:
+                raise ValueError("direct work result digest does not match its immutable result")
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +658,7 @@ class HostAction(_MappingRecord):
     model: str | None = None
     reasoning: str | None = None
     execution_class: str | None = None
+    logical_capability: str | None = None
     tool_policy: Mapping[str, Any] = field(default_factory=dict)
     host_capability_required: str | None = None
     task_envelope_ref: str | None = None
@@ -338,7 +714,10 @@ class HostAction(_MappingRecord):
             if required != tool:
                 raise ValueError("top_level_task required capability must equal its exact tool")
             object.__setattr__(self, "host_capability_required", required)
-            arguments = self.arguments if isinstance(self.arguments, Mapping) else {}
+            arguments = dict(self.arguments) if isinstance(self.arguments, Mapping) else {}
+            if "target" in arguments:
+                arguments["target"] = _public_create_target(arguments["target"])
+                object.__setattr__(self, "arguments", arguments)
             missing = [
                 name for name in ("target", "prompt", "model", "title")
                 if name not in arguments
@@ -350,6 +729,27 @@ class HostAction(_MappingRecord):
                 )
             if not isinstance(arguments.get("model"), str) or not arguments["model"].strip():
                 raise ValueError("top_level_task model must be a non-empty host model identifier")
+        elif execution_class == LOCAL_SUBAGENT_EXECUTION_CLASS:
+            logical = _text(self.logical_capability) or (
+                NATIVE_SUBAGENT_CAPABILITY if self.kind == "spawn-subagent" else None
+            )
+            if not logical:
+                raise ValueError("local_subagent actions require a logical_capability")
+            object.__setattr__(self, "logical_capability", logical)
+            if tool is None:
+                raise ValueError("local_subagent actions require an adapter-resolved physical tool")
+            normalized_policy.update(
+                {
+                    "exact_after_resolution": True,
+                    "on_unavailable": "block",
+                }
+            )
+            if normalized_policy["exact_tool"] != tool or normalized_policy["substitutions"]:
+                raise ValueError("resolved local_subagent actions forbid tool substitutions")
+            required = _text(self.host_capability_required) or tool
+            if required != tool:
+                raise ValueError("resolved local_subagent capability must equal its physical tool")
+            object.__setattr__(self, "host_capability_required", required)
         object.__setattr__(self, "tool_policy", normalized_policy)
 
         task_envelope_ref = _text(self.task_envelope_ref)
@@ -391,6 +791,7 @@ class HostAction(_MappingRecord):
             "model": self.model,
             "reasoning": self.reasoning,
             "execution_class": self.execution_class,
+            "logical_capability": self.logical_capability,
             "tool_policy": _copy(dict(self.tool_policy)),
             "host_capability_required": self.host_capability_required,
             "task_envelope_ref": self.task_envelope_ref,
@@ -435,6 +836,7 @@ class HostAction(_MappingRecord):
             reasoning=first_text(raw, "reasoning", "thinking")
             or first_text(arguments, "reasoning", "thinking"),
             execution_class=first_text(raw, "execution_class", "executionClass"),
+            logical_capability=first_text(raw, "logical_capability", "logicalCapability"),
             tool_policy=_copy(raw.get("tool_policy", raw.get("toolPolicy", {}))),
             host_capability_required=first_text(raw, "host_capability_required", "hostCapabilityRequired"),
             task_envelope_ref=first_text(raw, "task_envelope_ref", "taskEnvelopeRef"),
@@ -781,10 +1183,21 @@ __all__ = [
     "ACTION_BRIDGE_PROTOCOL",
     "DIRECT_EXECUTION_CLASS",
     "DISPATCH_INTENT_PROTOCOL",
+    "DIRECT_WORK_RESULT_PROTOCOL",
     "DispatchIntent",
     "HOST_RECEIPT_PROTOCOL",
     "DEFAULT_MODEL",
     "DEFAULT_REASONING",
+    "DIRECT_ONLY",
+    "LANE_DIRECT_WORK_PROTOCOL",
+    "LaneDirectExecutionPlan",
+    "DirectWorkResult",
+    "LOCAL_DISPATCH_INTENT_PROTOCOL",
+    "LOCAL_EXECUTION_MODES",
+    "LocalDispatchIntent",
+    "NATIVE_PREFERRED",
+    "NATIVE_REQUIRED",
+    "NATIVE_SUBAGENT_CAPABILITY",
     "HostAction",
     "HostActionError",
     "HostAdapter",
@@ -798,6 +1211,7 @@ __all__ = [
     "LOCAL_SUBAGENT_EXECUTION_CLASS",
     "TOP_LEVEL_CREATE_THREAD_TOOL",
     "TOP_LEVEL_TASK_EXECUTION_CLASS",
+    "WORK_HANDOFF_PROTOCOL",
     "action_contract_digest",
     "action_contract_material",
     "as_host_action",

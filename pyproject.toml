@@ -1,10 +1,27 @@
 [project]
 name = "allinluna"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 description = "Complete, resource-aware agent development workflows for Codex"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "zenx0x" }]
+
+[project.scripts]
+allinluna = "allinluna_runtime.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "plugins/allinluna/runtime"}
+
+[tool.setuptools.packages.find]
+where = ["plugins/allinluna/runtime"]
+include = ["allinluna_runtime*"]
+
+[tool.setuptools.package-data]
+allinluna_runtime = ["schemas/*.json", "PROVENANCE.json"]
 
 [project.urls]
 Homepage = "https://github.com/zenx0x/allinluna"

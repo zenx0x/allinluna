@@ -1,0 +1,25 @@
+{
+  "protocol": "action-bridge/v1",
+  "source": "runtime-db",
+  "runtime_db": ".allinluna/rc2-desktop-canary-20260806.db",
+  "action_id": "action-197c4ae4d73d894cbaee",
+  "kind": "create-top-level-task",
+  "tool": "codex_app__create_thread",
+  "dispatch_id": "lane-run-desktop-canary-v2-rc2:task:deliver-attempt-1",
+  "task_id": "run-desktop-canary-v2-rc2:task:deliver",
+  "idempotency_key": "intent:lane:053bfa860189def493e9",
+  "execution_class": "top_level_task",
+  "host_capability_required": "codex_app__create_thread",
+  "action_contract_hash": "50b03fc7bec0146336d620c969449d66775ebfad7a3b51636707ab3f04a35801",
+  "arguments": {
+    "target": {
+      "type": "projectless",
+      "directoryName": "allinluna-task-run-desktop-canary-v2-rc2-task-deliver"
+    },
+    "model": "gpt-5.3-codex-spark",
+    "thinking": "high",
+    "title": "All in Luna lane run-desktop-canary-v2-rc2:task:deliver",
+    "prompt_source": "runtime-db://outbox/action-197c4ae4d73d894cbaee/arguments.prompt"
+  },
+  "raw_action_ref": "runtime-db://outbox/action-197c4ae4d73d894cbaee"
+}

@@ -1,0 +1,34 @@
+{
+  "protocol": "host-receipt/v1",
+  "receipt_id": "desktop-canary-receipt-<DESKTOP_RECEIPT_ID>",
+  "dispatch_key": "<ACTION_IDEMPOTENCY_KEY>",
+  "action_id": "<ACTION_ID>",
+  "dispatch_id": "<ACTION_DISPATCH_ID>",
+  "task_id": "<TASK_ID>",
+  "thread_id": "<REAL_DESKTOP_THREAD_ID>",
+  "client_thread_id": null,
+  "status": "active",
+  "source": "codex_app",
+  "host_id": "<REAL_DESKTOP_HOST_ID>",
+  "actual": true,
+  "actual_tool": "codex_app__create_thread",
+  "actual_capability": "codex_app__create_thread",
+  "action_contract_hash": "<EMITTED_ACTION_CONTRACT_HASH>",
+  "resource_receipt": {
+    "requested": {
+      "model": "gpt-5.3-codex-spark",
+      "reasoning": "high"
+    },
+    "resolved": {
+      "model": "<RESOLVED_MODEL_OR_NULL>",
+      "reasoning": "<RESOLVED_REASONING_OR_NULL>"
+    },
+    "actual": null,
+    "actual_state": "unresolved",
+    "evidence_source": null,
+    "observed_at": null
+  },
+  "payload": {
+    "desktop_export_ref": "<RAW_DESKTOP_EXPORT_REFERENCE>"
+  }
+}

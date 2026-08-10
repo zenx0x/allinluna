@@ -1,0 +1,45 @@
+{
+  "protocol": "desktop-canary-acceptance/v1",
+  "artifact": {
+    "wheel": "dist/allinluna-2.0.0rc2-py3-none-any.whl",
+    "wheel_sha256": "b501de43555e13f0e73623d95a5dacbf36990c1aef941875e051138dec6a4293",
+    "source_commit": "f58aa56a9568036e71b42ffa5fa6884aed17a7c8"
+  },
+  "runtime_db": ".allinluna/rc2-desktop-canary-20260806.db",
+  "raw_action": {
+    "ref": "desktop-action.json",
+    "runtime_ref": "runtime-db://outbox/action-197c4ae4d73d894cbaee",
+    "action_id": "action-197c4ae4d73d894cbaee",
+    "action_contract_hash": "50b03fc7bec0146336d620c969449d66775ebfad7a3b51636707ab3f04a35801",
+    "tool": "codex_app__create_thread"
+  },
+  "exported_desktop_result": {
+    "ref": "desktop-result.json",
+    "thread_id": "019fd5b5-6c35-7171-811f-04f90cec5c1e",
+    "host_id": "local",
+    "turn_status": "completed",
+    "thread_status": "idle"
+  },
+  "filled_receipt": {
+    "ref": "desktop-receipt.json",
+    "receipt_id": "desktop-canary-receipt-019fd5b56c3571711811f04f90cec5c1e",
+    "status": "active",
+    "actual": true,
+    "actual_tool": "codex_app__create_thread",
+    "actual_capability": "codex_app__create_thread"
+  },
+  "observed_status": {
+    "run_status": "active",
+    "task_status": "active",
+    "receipt_ref": "receipt://host/desktop-canary-receipt-019fd5b56c3571711811f04f90cec5c1e",
+    "actual_model_state": "unresolved",
+    "route_assurance_state": "unresolved",
+    "child_lane_handoff_status": "blocked",
+    "child_blocker": "lane-local native_subagent.spawn required an unavailable HostAdapter"
+  },
+  "qualification": "blocked",
+  "qualification_reason": "The exact real Desktop top-level relay and receipt succeeded, but the child Lane could not close its local WorkUnit without a native_subagent HostAdapter; no PASS is claimed.",
+  "historical": true,
+  "superseded_by": "corrective-qualification.json",
+  "supersession_note": "The historical receipt and database remain unchanged. A fresh corrective qualification proves native_preferred lane-direct completion instead."
+}

@@ -1,6 +1,6 @@
 {
   "name": "allinluna",
-  "version": "2.0.0-rc.1",
+  "version": "2.0.0-rc.2",
   "description": "A layered execution runtime that compiles goals into Coordinators, Task Lanes, WorkUnits, and typed handoffs.",
   "author": {
     "name": "zenx0x",
@@ -27,9 +27,9 @@
     "capabilities": ["Interactive", "Read", "Write"],
     "websiteURL": "https://github.com/zenx0x/allinluna",
     "defaultPrompt": [
-      "Highest priority: treat every HostAction.tool as an exact opcode. Invoke it only with HostAction.arguments; never translate, approximate, or substitute it. A top_level_task never falls back to a subagent, current-thread, or direct execution. If no HostAdapter is bound, return ACTION_RELAY_REQUIRED; only capability discovery that confirms the exact tool is absent may return HOST_CAPABILITY_BLOCKED. Ingest the raw receipt, tick again, and preserve explicit actual_tool, actual_capability, and action_contract_hash.",
+      "Highest priority: a logical LocalDispatchIntent is not yet a HostAction. Resolve it through the HostAdapter to an exact physical HostAction or a lane-direct-work/v1 plan. After resolution, treat HostAction.tool as an exact opcode and invoke it only with frozen arguments; never translate or substitute it. A top_level_task never falls back to a subagent, current-thread, or direct execution. Ingest raw receipts and preserve actual_tool, actual_capability, and action_contract_hash. Lane-direct completion requires a real verified work-handoff/v1.",
       "Use All in Luna to compile this goal, existing plan, active run, or route packet into a RunIntent and TaskGraph, then execute it through the vNext runtime.",
-      "Choose only the allowed deployment envelope from the Run, Task, or WorkUnit resource envelope: Luna-class models with medium/high/xhigh by default and max only for critical work, plus gpt-5.3-codex-spark outside Luna; preserve requested, resolved, and actual host receipt evidence separately."
+      "Resolve resources in this order: explicit user request, Task/WorkUnit override, user preference, Pack capability, deployment/host capability, then the current session or host default; preserve requested, resolved, and actual host receipt evidence separately."
     ]
   }
 }

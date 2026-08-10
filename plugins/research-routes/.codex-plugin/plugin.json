@@ -1,6 +1,6 @@
 {
   "name": "research-routes",
-  "version": "0.3.0-rc.1",
+  "version": "0.3.0-rc.2",
   "description": "Evidence-backed, route-neutral research planning, exploration, and execution with explicit Claims, Evidence, failure polarity, recovery, lifecycle, and human-controlled promotion boundaries.",
   "author": {
     "name": "zenx0x",
@@ -28,6 +28,19 @@
     "store_access": "core-api-only",
     "external_action_policy": "deny"
   },
+  "dependencies": [
+    {
+      "plugin": "allinluna",
+      "version": "2.0.0-rc.2",
+      "required": true,
+      "purpose": "Coordinator execution and the research-routes-bridge Workflow Pack",
+      "bridge": {
+        "protocol": "research-routes-bridge/v1",
+        "entrypoint": "allinluna_runtime.packs:SinglePublicSkillAPI",
+        "visibility": "private"
+      }
+    }
+  ],
   "interface": {
     "displayName": "Research Routes",
     "shortDescription": "Compare evidence-backed routes and explore reversibly",

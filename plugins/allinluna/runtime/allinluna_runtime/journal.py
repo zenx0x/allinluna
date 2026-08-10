@@ -1336,8 +1336,15 @@ class SignalJournal:
     def _store_transaction_active(self) -> bool:
         for name in ("_transaction_depth", "transaction_depth", "_tx_depth", "_depth"):
             value = getattr(self.store, name, None)
-            if isinstance(value, int) and value > 0:
-                return True
+            if isinstance(value, int):
+                # Store transaction depth is thread-local.  Once a Store
+                # exposes it, it is authoritative even when zero: the shared
+                # SQLite connection may report ``in_transaction`` because a
+                # *different* thread currently owns the outer transaction.
+                # Treating that connection-wide flag as this thread's state
+                # would bypass Store.transaction() and allow concurrent use of
+                # one cursor/transaction.
+                return value > 0
         for name in ("_transaction_active", "transaction_active", "in_transaction"):
             value = getattr(self.store, name, None)
             if isinstance(value, bool) and value:

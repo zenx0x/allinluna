@@ -1,16 +1,21 @@
 {
-  "schema_version": "1.0",
-  "source_plugin": "plugins/allinluna",
-  "release": {
-    "status": "release-candidate",
-    "stable_release": false,
-    "rc_tag_namespace": "<product>/<version>",
-    "tag_owner": "T6",
-    "tag_timing": "after merged main"
-  },
-  "canonical_paths": [
-    "plugins/allinluna/runtime/allinluna_runtime",
-    "plugins/allinluna/skills/allinluna",
+  "schema_version": "2.0",
+  "version_authority": "release/versions.json",
+  "artifact_profiles": [
+    {
+      "id": "end-user",
+      "suffix": "",
+      "public": true,
+      "include_debug_sources": false
+    },
+    {
+      "id": "source-debug",
+      "suffix": "-source-debug",
+      "public": false,
+      "include_debug_sources": true
+    }
+  ],
+  "debug_source_paths": [
     "tests",
     "evals"
   ],
@@ -26,18 +31,32 @@
   "distributions": [
     {
       "id": "all-in-luna",
+      "version_key": "allinluna",
       "plugin_name": "allinluna",
       "display_name": "All in Luna",
-      "version": "2.0.0-rc.1",
-      "rc_tag": "allinluna/2.0.0-rc.1",
+      "source_plugin": "plugins/allinluna",
+      "canonical_paths": [
+        "plugins/allinluna/runtime/allinluna_runtime",
+        "plugins/allinluna/skills/allinluna"
+      ],
+      "user_docs": [
+        "docs/user",
+        "docs/examples",
+        "docs/troubleshooting"
+      ],
       "overlay": "distributions/overlays/all-in-luna"
     },
     {
       "id": "research-routes",
+      "version_key": "research-routes",
       "plugin_name": "research-routes",
       "display_name": "Research Routes",
-      "version": "0.3.0-rc.1",
-      "rc_tag": "research-routes/0.3.0-rc.1",
+      "source_plugin": "plugins/research-routes",
+      "canonical_paths": [
+        "plugins/research-routes/runtime/research_routes_runtime",
+        "plugins/research-routes/skills"
+      ],
+      "user_docs": [],
       "overlay": "distributions/overlays/research-routes"
     }
   ]

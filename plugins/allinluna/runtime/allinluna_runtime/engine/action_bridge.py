@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from collections import deque
-from copy import deepcopy
-from datetime import datetime, timezone
 import json
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
-from ..adapters.host.base import HostAction, HostReceipt, stable_digest
+from ..adapters.host.base import (
+    LOCAL_SUBAGENT_EXECUTION_CLASS,
+    HostAction,
+    HostReceipt,
+    LaneDirectExecutionPlan,
+    LocalDispatchIntent,
+    stable_digest,
+)
 from ..resource import ResourceBroker
 
 
@@ -66,6 +72,22 @@ class ActionBridge:
             return self.resource_broker.refresh_host_capabilities(self.host)
         except (AttributeError, TypeError, ValueError):
             return None
+
+    def resolve_local(
+        self, intent: LocalDispatchIntent | Mapping[str, Any]
+    ) -> HostAction | LaneDirectExecutionPlan:
+        """Ask the bound host adapter to resolve one logical local request."""
+
+        value = LocalDispatchIntent.from_value(intent)
+        if self.host is None:
+            raise RuntimeError("local dispatch resolution requires a bound host adapter")
+        resolve = getattr(self.host, "resolve_local", None)
+        if not callable(resolve):
+            raise TypeError("bound host adapter does not resolve logical local capabilities")
+        result = resolve(value)
+        if not isinstance(result, (HostAction, LaneDirectExecutionPlan)):
+            raise TypeError("local resolution must return HostAction or LaneDirectExecutionPlan")
+        return result
 
     def _existing_dispatch(self, key: str) -> dict[str, Any] | None:
         return self.store._fetchone("SELECT * FROM host_receipts WHERE dispatch_key = ?", (key,))
@@ -331,11 +353,8 @@ class ActionBridge:
                 receipt = HostReceipt.from_value(
                     projection["receipt"], action=value, default_source=self.adapter
                 )
-                return self._record_top_level_blocker(
-                    value,
-                    code="HOST_PROTOCOL_VIOLATION",
-                    reason=str(projection["protocol_violation"]),
-                    receipt=receipt,
+                return self._record_protocol_blocker(
+                    value, str(projection["protocol_violation"]), receipt
                 )
             self._receipts[value.idempotency_key] = HostReceipt.from_value(
                 projection["receipt"], action=value, default_source=self.adapter
@@ -528,7 +547,44 @@ class ActionBridge:
             "dispatch_intent_preserved": True,
         }
 
+    def _record_protocol_blocker(
+        self, action: HostAction, reason: str, receipt: HostReceipt | None = None
+    ) -> dict[str, Any]:
+        if self._is_top_level_action(action):
+            return self._record_top_level_blocker(
+                action,
+                code="HOST_PROTOCOL_VIOLATION",
+                reason=reason,
+                receipt=receipt,
+            )
+        return {
+            "status": "HOST_PROTOCOL_VIOLATION",
+            "blocker": {
+                "code": "HOST_PROTOCOL_VIOLATION",
+                "message": reason,
+                "owner_scope": str(action.payload.get("work_unit_id") or action.task_id or "local-work"),
+                "recoverable": True,
+            },
+            "action": action.to_dict(),
+            "receipt": receipt.to_dict() if receipt is not None else None,
+            "dispatch_intent_preserved": True,
+        }
+
     def _top_level_protocol_violation(self, action: HostAction, receipt: HostReceipt) -> str | None:
+        if action.execution_class == LOCAL_SUBAGENT_EXECUTION_CLASS and receipt.is_active_identity:
+            if receipt.actual_tool != action.tool:
+                return (
+                    f"receipt actual_tool {receipt.actual_tool!r} does not match resolved exact "
+                    f"local tool {action.tool!r}"
+                )
+            if receipt.actual_capability != action.logical_capability:
+                return (
+                    f"receipt actual_capability {receipt.actual_capability!r} does not match "
+                    f"logical capability {action.logical_capability!r}"
+                )
+            if receipt.action_contract_hash != action.action_contract_hash:
+                return "receipt action_contract_hash does not match the resolved local action"
+            return None
         if not self._is_top_level_action(action) or not receipt.is_active_identity:
             return None
         if receipt.actual_tool != action.tool:
@@ -544,6 +600,17 @@ class ActionBridge:
 
     def _invoke(self, action: HostAction) -> Any:
         if self.host is None:
+            return None
+        if action.execution_class == LOCAL_SUBAGENT_EXECUTION_CLASS:
+            invoke_resolved = getattr(self.host, "invoke_resolved", None)
+            if callable(invoke_resolved):
+                return invoke_resolved(action)
+            invoke_tool = getattr(self.host, "invoke_tool", None)
+            if callable(invoke_tool):
+                return invoke_tool(action.tool, dict(action.arguments))
+            invoke = getattr(self.host, "invoke", None)
+            if callable(invoke):
+                return invoke(action.tool, dict(action.arguments))
             return None
         kind = action.kind
         if kind == "create-top-level-task":
@@ -566,11 +633,6 @@ class ActionBridge:
                 return invoke("codex_app__list_projects", {})
             return None
         if kind == "resolve-resource-route":
-            return None
-        if kind == "spawn-subagent":
-            method = getattr(self.host, "spawn", None)
-            if callable(method):
-                return method(action.payload.get("work_unit_envelope", action.payload))
             return None
         if kind in {"wait", "wait-for-top-level-tasks", "wait-subagents"}:
             method = getattr(self.host, "wait_tasks", None) or getattr(self.host, "wait", None)
@@ -673,12 +735,7 @@ class ActionBridge:
             )
         violation = self._top_level_protocol_violation(action, normalized)
         if violation is not None:
-            return self._record_top_level_blocker(
-                action,
-                code="HOST_PROTOCOL_VIOLATION",
-                reason=violation,
-                receipt=normalized,
-            )
+            return self._record_protocol_blocker(action, violation, normalized)
         result = self.store.ingest_receipt(
             normalized.to_dict()
             | {
@@ -811,12 +868,7 @@ class ActionBridge:
             )
         violation = self._top_level_protocol_violation(value, normalized)
         if violation is not None:
-            return self._record_top_level_blocker(
-                value,
-                code="HOST_PROTOCOL_VIOLATION",
-                reason=violation,
-                receipt=normalized,
-            )
+            return self._record_protocol_blocker(value, violation, normalized)
         return self.ingest_receipt(normalized, action=value, trusted=True)
 
     def create(self, action: Any) -> Any:

@@ -9,7 +9,11 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -19,17 +23,29 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - name: Install test runner
-        run: python -m pip install --disable-pip-version-check pytest
+      - name: Install candidate package and test requirements
+        run: python -m pip install --disable-pip-version-check -e . pytest build
+      - name: Build candidate wheel and source distribution
+        run: python -m build
       - name: Run full pytest suite
+        env:
+          ALLINLUNA_WHEEL: ${{ github.workspace }}/dist/allinluna-2.0.0rc2-py3-none-any.whl
         run: python -m pytest tests -q
       - name: Run vNext suite validator
+        if: runner.os == 'Linux'
         run: python scripts/validate_vnext_tests.py --run --performance --json
       - name: Validate plugin repository
+        if: runner.os == 'Linux'
         run: python scripts/validate_repository.py
       - name: Validate Core Slim ownership
+        if: runner.os == 'Linux'
         run: python scripts/validate_core_slim.py
       - name: Validate distribution parity and provenance
+        if: runner.os == 'Linux'
         run: python scripts/validate_distributions.py
       - name: Validate installed plugin Skills
+        if: runner.os == 'Linux'
         run: python scripts/validate_installations.py
+      - name: Validate product experience
+        if: runner.os == 'Linux'
+        run: python scripts/validate_product_experience.py

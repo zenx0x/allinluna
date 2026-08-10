@@ -13,6 +13,7 @@ from allinluna_runtime.engine.lane import LaneEngine
 from allinluna_runtime.handoff import HandoffProcessor, HandoffVerificationError
 from allinluna_runtime.packs.public_skill import SinglePublicSkillAPI
 from allinluna_runtime.store import Store
+from tests.fixtures.vnext.trusted_checks import trusted_command_spec
 
 
 def _request(intent_id: str) -> dict[str, object]:
@@ -57,7 +58,14 @@ def test_evidence_collector_exposes_pack_profiles_and_real_check_receipt(tmp_pat
             profile="projectless-analysis",
         ).collect(
             store.get_task("task-collector") or {},
-            checks=[{"id": "evidence-check", "kind": "command", "command": [sys.executable, "-c", "print('ok')"], "satisfies": ["the evidence check passes"]}],
+                checks=[
+                    trusted_command_spec(
+                        tmp_path,
+                        identifier="evidence-check",
+                        command=[sys.executable, "-c", "print('ok')"],
+                        satisfies=["the evidence check passes"],
+                    )
+                ],
         )
         assert evidence["verified"] is True
         assert evidence["collector"] == "allinluna.evidence-collector/v1"
@@ -76,10 +84,15 @@ def test_check_timeout_is_explicit_failure_evidence_not_a_hanging_or_passing_che
             store, artifact_store=artifacts, check_runner=CheckRunner(artifacts), profile="projectless-analysis"
         ).collect(
             store.get_task("task-timeout") or {},
-            checks=[{
-                "id": "quick-check", "kind": "command", "command": [sys.executable, "-c", "import time; time.sleep(1)"],
-                "timeout_seconds": 0.02, "satisfies": ["quick check"],
-            }],
+            checks=[
+                trusted_command_spec(
+                    tmp_path,
+                    identifier="quick-check",
+                    command=[sys.executable, "-c", "import time; time.sleep(1)"],
+                    satisfies=["quick check"],
+                    timeout_seconds=0.02,
+                )
+            ],
         )
     receipt = evidence["checks"][0]
     assert receipt["status"] == "timeout"

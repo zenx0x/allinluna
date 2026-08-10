@@ -414,6 +414,10 @@ def target_for_task(state: Mapping[str, Any], task_id: str | None = None) -> dic
     environment = dict(resolved.get("environment") or {})
     if not environment or not _string(environment, "type"):
         return None
+    if environment.get("type") != "worktree":
+        return None
+    # Keep the resolved path/branch identity available to internal planning;
+    # HostAction performs the final public create_thread schema normalization.
     return {"type": "project", "projectId": resolved["projectId"], "environment": environment}
 
 

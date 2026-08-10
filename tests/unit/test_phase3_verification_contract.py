@@ -11,6 +11,7 @@ from allinluna_runtime.packs.gsd import GSDPack
 from allinluna_runtime.packs.public_skill import SinglePublicSkillAPI
 from allinluna_runtime.store import Store
 from allinluna_runtime.verification import VerificationSpec
+from tests.fixtures.vnext.trusted_checks import trusted_command_spec
 
 
 def _store_task(store: Store, *, specs: list[dict] | None = None) -> dict:
@@ -35,13 +36,13 @@ def _store_task(store: Store, *, specs: list[dict] | None = None) -> dict:
 
 
 def test_contract_command_spec_is_persisted_and_not_replaced_by_done_when(tmp_path):
-    spec = {
-        "id": "unit-tests",
-        "kind": "command",
-        "command": [sys.executable, "-c", "print('verified')"],
-        "timeout_seconds": 10,
-        "satisfies": ["semantic outcome is complete"],
-    }
+    spec = trusted_command_spec(
+        tmp_path,
+        identifier="unit-tests",
+        command=[sys.executable, "-c", "print('verified')"],
+        satisfies=["semantic outcome is complete"],
+        timeout_seconds=10,
+    )
     with Store(tmp_path / "runtime.db") as store:
         task = _store_task(store, specs=[spec])
         contract = store.get_contract("contract-verification") or {}

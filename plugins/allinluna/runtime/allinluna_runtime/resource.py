@@ -186,6 +186,9 @@ class ResourceBroker:
     ) -> ResourceObservation:
         resolution = self.resolve_policy(request, operation=operation)
         raw_actual = _mapping(actual_receipt)
+        nested_actual = raw_actual.get("resource_receipt")
+        if isinstance(nested_actual, Mapping):
+            raw_actual = dict(nested_actual)
         return ResourceObservation(
             resolution.requested,
             resolution.resolved,
@@ -212,7 +215,24 @@ class ResourceBroker:
             identity = next((raw.get(name) for name in identity_names if raw.get(name) is not None), None)
             if identity is None or not str(identity).strip():
                 continue
-            prepared.append((str(identity).strip(), self._receipt(raw.get("resource_envelope"), operation=operation)))
+            request = raw.get("resource_envelope")
+            if request is None:
+                # Direct capability/resource fields are useful to host-neutral
+                # callers that do not materialize a Task or WorkUnit envelope
+                # first.  Identity and scheduler-only fields never become
+                # part of the policy request.
+                request = {
+                    key: raw[key]
+                    for key in (
+                        "model", "reasoning", "thinking", "model_policy",
+                        "reasoning_policy", "capability_class", "route_assurance",
+                        "external_action_policy", "capability_routes",
+                    )
+                    if key in raw
+                }
+                if not request:
+                    request = None
+            prepared.append((str(identity).strip(), self._receipt(request, operation=operation)))
         return prepared
 
     @staticmethod
@@ -281,10 +301,22 @@ class ResourceBroker:
 
     def observe_receipt(self, receipt: Any) -> ResourceObservation:
         raw = _mapping(receipt)
-        if isinstance(raw.get("resource_receipt"), Mapping):
-            return ResourceObservation.from_value(raw["resource_receipt"])
-        resolution = self.resolve_policy(raw.get("requested"), operation=raw.get("operation"))
-        return ResourceObservation.from_value(raw, requested=resolution.requested, resolved=resolution.resolved)
+        candidate = raw.get("resource_receipt") if isinstance(raw.get("resource_receipt"), Mapping) else raw
+        operation = raw.get("operation")
+        if operation is None and isinstance(candidate, Mapping):
+            operation = candidate.get("operation")
+        resolution = self.resolve_policy(
+            candidate.get("requested") if isinstance(candidate, Mapping) else None,
+            operation=operation,
+        )
+        # The policy resolution is the verification baseline.  Nested
+        # requested/resolved values from an untrusted receipt are never
+        # allowed to redefine it.
+        return ResourceObservation.from_value(
+            candidate,
+            requested=resolution.requested,
+            resolved=resolution.resolved,
+        )
 
     @staticmethod
     def is_external_action(action: Any) -> bool:

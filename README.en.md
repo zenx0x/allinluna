@@ -1,88 +1,68 @@
-# All in Luna 2.0.0-rc.1
+# All in Luna
 
 [简体中文](README.md)
 
-All in Luna is a layered execution runtime. It compiles a user outcome into a global Task Graph, releases independent Task Lanes through a Global Coordinator, and lets each Lane recursively schedule bounded WorkUnits until typed contracts, artifacts, receipts, and handoffs support the result.
+All in Luna turns “get this outcome done” into an execution path that can continue and be verified. Give it a goal, an existing plan, an active run, or a Research Routes packet; it separates the work into independent top-level Tasks, advances their dependencies, and retains evidence for implementation, checks, and handoffs. It is for work that spans tools and deliverables, where a claim of “done” is not enough.
 
-## User entry
+## Why add a Top-level Task layer?
 
-There is one public Skill: `plugins/allinluna/skills/allinluna/SKILL.md`. It accepts:
+Ordinary subagents are excellent for small local work, but they are usually temporary workers inside one conversation. All in Luna first organizes an outcome into independent top-level Task Lanes: the Coordinator holds cross-task dependencies, permissions, and the final result, while each Lane receives only the scope and context needed for its part. A failure, wait, or evidence gap in one Task therefore cannot quietly become completion for another. Local workers are still useful, but they are not the product entry point and do not replace top-level Tasks.
 
-- an idea or one-sentence goal;
-- an existing plan;
-- an active run;
-- a Research Routes packet.
+## Start in 60 seconds
 
-The Skill compiles `RunIntent` and `TaskContracts`, selects a Workflow Pack, and calls the vNext runtime/CLI. Users do not need to learn internal schemas or scheduler state first.
+1. In Codex Plugins, choose `plugins/allinluna/`, then tell All in Luna your goal, for example: “Add a tested health-check endpoint.”
+2. For the command line, install this repository and create then inspect a run:
 
-## Execution model
+   ```bash
+   python -m pip install -e .
+   allinluna start --goal "Add a tested health-check endpoint"
+   allinluna status RUN_ID
+   ```
 
-```text
-Conversation → Global Coordinator → Task Lanes → WorkUnits → tools/skills/plugins/MCP
-```
+3. Review `next-actions`, let the host perform the explicitly requested action, then use `allinluna drive RUN_ID` to continue.
 
-The Coordinator owns cross-Lane dependencies, contracts, resource allocation, and root completion. A Lane owns its local WorkGraph, local scheduler, context slice, subagent receipts, synthesis, and handoff. A child WorkUnit can only narrow scope, authority, ownership, and resources; cross-Lane work uses a promotion request.
+You do not need to write a TaskGraph, select a scheduler, or choose a model first.
+
+## One real example
+
+“Add a tested health-check endpoint” is an ordinary software-delivery goal. The default `delivery` Pack compiles it into traceable work until the endpoint, targeted tests, and changed-path evidence can be checked. Create the run with `allinluna start --goal "Add a tested health-check endpoint"`, then use `status` and `next-actions` to inspect its real state and next step; compilation or preview alone is not delivery completion. See the complete [plain-goal example](docs/examples/plain-goal.md).
+
+## Default resource behavior
+
+All in Luna is vendor-neutral. When you do not name a model, resource choice follows explicit user request, Task/WorkUnit override, user preference, Pack capability, deployment/host, and the current session default. It retains `requested`, `resolved`, and host-reported `actual` separately. Without telemetry, `actual` stays unresolved; the runtime never invents a fallback model or execution record.
 
 ## Workflow Packs
 
-- `delivery`: a real software-delivery compiler with configurable TaskGraph templates, contract expansion, done-when conditions, handoff, promotion, and resource defaults.
-- `gsd`: an executable clarify → specify → decompose → implement → verify → integrate workflow with dynamic expansion, bounded lanes/work units, and failure recovery.
-- `research-routes-bridge`: a route-neutral bridge for Claims, Evidence, unknowns, contradictions, failure regimes, HumanDecision, and experiment authorization. It never turns research input into implementation authorization or canonical state.
+- `delivery`: the default software-delivery path.
+- `gsd`: use it when you explicitly want clarify → specify → decompose → implement → verify → integrate.
+- `research-routes-bridge`: preserves Claims, Evidence, unknowns, contradictions, and experiment authorization for a research route; it does not turn research material into implementation authority.
 
-Packs use Store, Context, Artifact, Host, and Capability only through public Core APIs. The registry loader validates manifests, entrypoints, capabilities, permissions, and version compatibility.
+## Installation
 
-## Resources and permissions
+Install `plugins/allinluna/` in Codex to start from a conversation. For development or automation:
 
-Model and reasoning choices come from the Run resource policy and may be overridden by a narrower Task or WorkUnit policy. This RC allows Luna-class models, normally at medium/high/xhigh reasoning with max reserved for critical work, plus `gpt-5.3-codex-spark` outside Luna. Core does not hardcode a concrete model route. Keep requested, resolved, and actual evidence separate. Requested and resolved describe routing; actual is recorded only from explicit host evidence and is never inferred from either route or task prose.
-
-Host resource-route telemetry is optional adapter diagnostics. If model, reasoning, or reroute telemetry is unavailable, `actual` remains `null` and `actual_state` remains `unresolved`; ordinary execution, handoff, and result completion continue normally. An exact `codex_app__create_thread` action is frozen only after host route resolution supplies a non-empty model; an unresolved route emits a non-executable resolution action. `runtime.db` schema v8 persists requested/resolved/actual resource values, outbox, receipts, and recovery state.
-
-Top-level create targets accept `projectId + environment` only from a project-resolution receipt; a projectless Task uses an explicit `{"type":"projectless"}` target. When project identity is absent, the runtime emits a `codex_app__list_projects` resolve-project action first and never substitutes the Task ID for project identity. External top-level receipts must explicitly provide `actual_tool`, `actual_capability`, and `action_contract_hash`; only a trusted HostAdapter called directly by the runtime may sign those observed fields.
-
-Permissions are requested JIT at the action boundary. Credentials, push, deploy, publish, destructive work, and live external mutation do not happen by default; they proceed only after explicit authorization at the reached action.
-
-## CLI, status, and recovery
-
-```text
-allinluna start --goal "..."
-allinluna drive RUN_ID
-allinluna status RUN_ID
-allinluna next-actions RUN_ID
-allinluna ingest-receipt RUN_ID RECEIPT.json
-allinluna pause RUN_ID
-allinluna resume RUN_ID
-allinluna retry RUN_ID --task TASK_ID
-allinluna cancel RUN_ID --task TASK_ID
-allinluna reconcile RUN_ID
-allinluna set-policy RUN_ID POLICY.json
-allinluna lane start RUN_ID TASK_ID
-allinluna lane status RUN_ID TASK_ID
-allinluna lane tick RUN_ID TASK_ID
-allinluna lane drive RUN_ID TASK_ID
-allinluna lane ingest-receipt RUN_ID TASK_ID RECEIPT.json
-allinluna lane handoff RUN_ID TASK_ID
+```bash
+python -m pip install -e .
+allinluna --help
 ```
 
-`start` defaults to persisting ready Tasks and emitting or previewing actions. With no HostAdapter bound it returns `ACTION_RELAY_REQUIRED`, preserves the exact relay, and does not mislabel the state as `HOST_CAPABILITY_BLOCKED`. Blocking is allowed only after capability discovery confirms the exact tool is absent. `drive` continues the Coordinator loop and `lane` commands drive an independent Task Lane. Legacy plan/run import is exposed through the read-only API below. Recovery uses SQLite state/journal, real host receipts, leases, Git/workspace identity, and snapshot validity to recompute ready actions; route assurance is expressed through `observe_if_exposed`, `request_only`, or stricter policy rather than fabricated actual evidence. Unrecoverable conditions return a blocker while immutable artifacts are retained.
-Host-conformance diagnostics verify `requested`, `resolved`, and `actual` resource layers alongside host `identity`.
-Neutral action checks require coherent `create`, `read`, `wait`, `cancel`, and `idempotency` traces for tool and policy changes; missing traces return `BLOCKED`.
+The public Skill is `plugins/allinluna/skills/allinluna/SKILL.md`. The registry only makes it discoverable; it is not a required user entry point.
 
-## Legacy import
+## Permissions and safety boundaries
 
-`LegacyPlanImportAPI`, `LegacyRunStateImportAPI`, and `LegacyResourceTranslator` are read-only parse/validate/translate APIs. Legacy plans and run snapshots are never written back; resource profiles become `ResourceEnvelope` values, and losses, unknowns, warnings, and model evidence are explicit. Without an actual receipt, model evidence remains unresolved.
+All in Luna asks for permissions only when an action is reached. Credentials, push, deployment, publication, destructive work, and external live mutation do not happen by default; they require explicit authorization. Host observations are not guessed: `identity`, `create`, `read`, `wait`, `cancel`, and `idempotency`, along with the `requested`, `resolved`, and `actual` resource layers, must come from the relevant real records.
 
-## Install and example
+## Documentation map
 
-Choose `plugins/allinluna/` in Codex Plugins. Python entry example:
+- [Quickstart](docs/user/quickstart.md): everyday plugin and CLI entry points.
+- [Inputs and journeys](docs/user/input-and-journeys.md): how goals, plans, runs, and Research Routes inputs are handled.
+- [Plain-goal example](docs/examples/plain-goal.md): a copyable API and CLI example.
+- [Troubleshooting](docs/troubleshooting/common-issues.md): relay, resource, project-resolution, and recovery help.
+- [Public surface and evidence boundaries](docs/architecture/public-surface.md): architecture for readers who need traceability.
+- [RC2 technical contracts](docs/architecture/v2-rc2/): developer detail for Store, receipts, CLI, and conformance diagnostics.
 
-```python
-from allinluna_runtime.packs import SinglePublicSkillAPI
+## RC status
 
-compiled = SinglePublicSkillAPI().compile({
-    "goal": "Implement the requested software outcome",
-    "done_when": ["tests and changed-path evidence are available"],
-})
-print(compiled.task_graph.to_dict())
-```
+All in Luna `2.0.0-rc.2` is a release candidate; PR #2 remains Draft and this is not a stable release. Use it for evaluation and integration qualification. It can be considered Ready only after remote CI, full runtime journeys, distribution validation, and the real host canary all pass.
 
-Apache License 2.0. See `LICENSE`.
+Apache License 2.0. See [LICENSE](LICENSE).

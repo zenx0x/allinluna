@@ -1,0 +1,66 @@
+{
+  "protocol": "desktop-canary-receipts/v2",
+  "qualification": "T1 correction attempt 2",
+  "source_provenance": {
+    "source_commit": "db4b8e78d9b53535056a40209bfe4107f3f2e0a4",
+    "source_tree": "60855b002c7830c21eaed9ab127f7e7d54d3f443",
+    "source_merge_ref": "2bdc3e80410ce63eb1bad353d0b90b744ad33940",
+    "wheel_sha256": "8eddfa6fd0a8070781601bf50d2e37907a2521df4788d4eda785fdc861d2c30f",
+    "installation": "clean-wheel"
+  },
+  "receipts": [
+    {
+      "receipt_id": "desktop-canary-t1-producer-019feaf86ed17e80bf8f8a9c662b181a",
+      "task_id": "run-t1-pr2-final-desktop-canary-20260810:task:producer",
+      "lane_attempt_id": "lane-attempt-a57507a0a6a0ddb8e0fa",
+      "action_id": "action-c869a7927c12ea88797d",
+      "dispatch_key": "intent:lane:8c74da2b79b69a69c65c",
+      "thread_id": "019feaf8-6ed1-7e80-bf8f-8a9c662b181a",
+      "host_id": "local",
+      "status": "active",
+      "actual": true,
+      "actual_tool": "codex_app__create_thread",
+      "actual_capability": "codex_app__create_thread",
+      "action_contract_hash": "c9bfe6ac43e5d83b7647f5ddd56a65728774015c74c551f55d233121411723ca",
+      "resource_receipt_state": "unresolved"
+    },
+    {
+      "receipt_id": "desktop-canary-t1-consumer-019feb0047da75719034ff78bcb7a4fc",
+      "task_id": "run-t1-pr2-final-desktop-canary-20260810:task:consumer",
+      "lane_attempt_id": "lane-attempt-2cf52a6ce64042d20db9",
+      "action_id": "action-370223d2e65c9f04826f",
+      "dispatch_key": "intent:lane:7f30cff26aa1fed60939",
+      "thread_id": "019feb00-47da-7571-9034-ff78bcb7a4fc",
+      "host_id": "local",
+      "status": "active",
+      "actual": true,
+      "actual_tool": "codex_app__create_thread",
+      "actual_capability": "codex_app__create_thread",
+      "action_contract_hash": "34c31de300580bcbe2faa9106f8583d0059099e3157248ae6469a3a02d7b2916",
+      "resource_receipt_state": "unresolved"
+    }
+  ],
+  "wait_read_receipts": [
+    {
+      "task_id": "run-t1-pr2-final-desktop-canary-20260810:task:producer",
+      "thread_id": "019feaf8-6ed1-7e80-bf8f-8a9c662b181a",
+      "wait_final_cursor": "367b7bc3-2c1f-4625-8a91-fcccfcb1492f:23",
+      "wait_terminal_status": "completed",
+      "read_turn_id": "019feaf8-7109-77a0-970c-e596c1ed9aab",
+      "read_turn_status": "completed",
+      "read_page_next_cursor": null,
+      "read_thread_status": "idle"
+    },
+    {
+      "task_id": "run-t1-pr2-final-desktop-canary-20260810:task:consumer",
+      "thread_id": "019feb00-47da-7571-9034-ff78bcb7a4fc",
+      "wait_final_cursor": "39b1e655-7b66-4a71-afb4-4221ee62f277:47",
+      "wait_terminal_status": "completed",
+      "read_turn_id": "019feb00-4a1d-7101-880b-97b4b0370c52",
+      "read_turn_status": "completed",
+      "read_page_next_cursor": null,
+      "read_thread_status": "idle"
+    }
+  ],
+  "desktop_receipt_note": "The actual Desktop capability was invoked for both fresh top-level lanes. Model/resource receipt state remained unresolved in the host payload; this does not replace the actual codex_app__create_thread receipt or the observed completed child turn."
+}

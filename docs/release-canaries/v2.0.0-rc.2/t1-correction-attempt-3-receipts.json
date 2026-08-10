@@ -1,0 +1,112 @@
+{
+  "protocol": "desktop-canary-receipts/v3",
+  "qualification": "T1 correction attempt 3",
+  "classification": "PASS",
+  "source_provenance": {
+    "merge_commit": "605a395cb320f4eb73c98499909ea4f61a3256ab",
+    "merge_tree": "508033c434827c5c22073ff91bae8ba653d69024",
+    "pr_head": "6836c9c85591e458a46d98fdecf27bd9e888a997",
+    "wheel_sha256": "41f336bb86daccb2bd64347354c76e0ca36ba85b23566ae9b760e61cf040f4d0",
+    "installation_root": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\wheel-venv"
+  },
+  "top_level_task": {
+    "thread_id": "019feb38-b288-7a23-a7e6-3295ff061384",
+    "turn_id": "019feb38-b705-7e50-bfcb-007d6feae4a4",
+    "delegating_thread_id": "019fe9d4-b316-73f0-beb0-7de6ea066031"
+  },
+  "host_receipts": [
+    {
+      "protocol": "host-receipt/v1",
+      "receipt_id": "desktop-canary-t1a3-producer-019feb5dcd1f72e2b7ab0140e1ec10f8",
+      "task_id": "run-t1a3:task:producer",
+      "lane_attempt_id": "lane-attempt-08b2ce5824188287c1c9",
+      "action_id": "action-23246a5ea98872461a46",
+      "dispatch_id": "lane-run-t1a3:task:producer-attempt-1",
+      "dispatch_key": "intent:lane:c3694712645defbd9547",
+      "action_contract_hash": "02ca13c758ceca278341b9bc17885fda54efc819bad4df5f2ae5b9cdafedfcd4",
+      "thread_id": "019feb5d-cd1f-72e2-b7ab-0140e1ec10f8",
+      "host_id": "local",
+      "status": "active",
+      "actual": true,
+      "actual_tool": "codex_app__create_thread",
+      "actual_capability": "codex_app__create_thread",
+      "desktop_export_ref": "codex-app://local/019feb5d-cd1f-72e2-b7ab-0140e1ec10f8",
+      "requested_model": "gpt-5.6-sol",
+      "requested_reasoning": "xhigh",
+      "resolved_model": "gpt-5.6-sol",
+      "resolved_reasoning": "xhigh",
+      "actual_model_state": "unresolved"
+    },
+    {
+      "protocol": "host-receipt/v1",
+      "receipt_id": "desktop-canary-t1a3-consumer-019feb6a566574f2aedd5c0006cb5e1b",
+      "task_id": "run-t1a3:task:consumer",
+      "lane_attempt_id": "lane-attempt-158cfbc6b7b5115921ad",
+      "action_id": "action-c833d127ea0c15e77337",
+      "dispatch_id": "lane-run-t1a3:task:consumer-attempt-1",
+      "dispatch_key": "intent:lane:78ae4a989574a9e4ef97",
+      "action_contract_hash": "4cb391d113b605c67df54b95d4563badcf4835a967ca5054e51b7049b8760a92",
+      "thread_id": "019feb6a-5665-74f2-aedd-5c0006cb5e1b",
+      "host_id": "local",
+      "status": "active",
+      "actual": true,
+      "actual_tool": "codex_app__create_thread",
+      "actual_capability": "codex_app__create_thread",
+      "desktop_export_ref": "codex-app://local/019feb6a-5665-74f2-aedd-5c0006cb5e1b",
+      "requested_model": "gpt-5.6-sol",
+      "requested_reasoning": "xhigh",
+      "resolved_model": "gpt-5.6-sol",
+      "resolved_reasoning": "xhigh",
+      "actual_model_state": "unresolved"
+    }
+  ],
+  "wait_read_receipts": [
+    {
+      "task_id": "run-t1a3:task:producer",
+      "thread_id": "019feb5d-cd1f-72e2-b7ab-0140e1ec10f8",
+      "turn_id": "019feb5d-d066-72a3-bbc5-fa1b1be8ddb5",
+      "duration_ms": 591634,
+      "wait_cursors": [
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:9",
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:15",
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:16",
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:22",
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:25",
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:29",
+        "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:30"
+      ],
+      "wait_final_cursor": "ffa6f817-5bb2-4fdd-9bd7-25bd33b1c348:30",
+      "wait_terminal_status": "completed",
+      "read_turn_status": "completed",
+      "read_thread_status": "idle",
+      "read_page_next_cursor": null,
+      "read_page_has_more": false,
+      "read_max_output_chars_per_item": 20000
+    },
+    {
+      "task_id": "run-t1a3:task:consumer",
+      "thread_id": "019feb6a-5665-74f2-aedd-5c0006cb5e1b",
+      "turn_id": "019feb6a-5895-72d2-acbd-abfa40b6dde5",
+      "duration_ms": 460736,
+      "wait_cursors": [
+        "df90de9f-3201-4869-89d2-4d5a047735f6:8",
+        "df90de9f-3201-4869-89d2-4d5a047735f6:19",
+        "df90de9f-3201-4869-89d2-4d5a047735f6:23",
+        "df90de9f-3201-4869-89d2-4d5a047735f6:25",
+        "df90de9f-3201-4869-89d2-4d5a047735f6:28",
+        "df90de9f-3201-4869-89d2-4d5a047735f6:29"
+      ],
+      "wait_final_cursor": "df90de9f-3201-4869-89d2-4d5a047735f6:29",
+      "wait_terminal_status": "completed",
+      "read_turn_status": "completed",
+      "read_thread_status": "idle",
+      "read_page_next_cursor": null,
+      "read_page_has_more": false,
+      "read_max_output_chars_per_item": 20000
+    }
+  ],
+  "limitations": [
+    "Host actual model and reasoning telemetry were not exposed; requested and resolved gpt-5.6-sol/xhigh are persisted while actual_model_state remains unresolved.",
+    "Desktop read output is bounded to 20000 characters per item; complete strict child relay reports are retained at the exact external paths recorded in qualification evidence."
+  ]
+}

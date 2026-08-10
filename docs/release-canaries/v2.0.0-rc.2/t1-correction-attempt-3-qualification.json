@@ -1,0 +1,271 @@
+{
+  "protocol": "desktop-universal-canary/v3",
+  "qualification_run": "T1 correction attempt 3",
+  "classification": "PASS",
+  "source_provenance": {
+    "checkout": "C:\\Users\\ZENX0\\.codex\\worktrees\\141e\\allinluna",
+    "source_ref": "refs/remotes/origin/pr/2/merge",
+    "merge_commit": "605a395cb320f4eb73c98499909ea4f61a3256ab",
+    "merge_tree": "508033c434827c5c22073ff91bae8ba653d69024",
+    "merge_parent_1": "87b6c817ca8800b73224438c3ab7eddf5126dda8",
+    "merge_parent_2": "6836c9c85591e458a46d98fdecf27bd9e888a997",
+    "pr_head": "6836c9c85591e458a46d98fdecf27bd9e888a997",
+    "second_parent_is_pr_head": true,
+    "detached_head": true,
+    "wheel": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-20260810\\build-dist\\allinluna-2.0.0rc2-py3-none-any.whl",
+    "wheel_sha256": "41f336bb86daccb2bd64347354c76e0ca36ba85b23566ae9b760e61cf040f4d0",
+    "wheel_bytes": 337509,
+    "clean_venv": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\wheel-venv",
+    "python_absolute_path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\wheel-venv\\Scripts\\python.exe",
+    "cli_absolute_path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\wheel-venv\\Scripts\\allinluna.exe",
+    "installed_version": "2.0.0rc2"
+  },
+  "runtime": {
+    "run_id": "run-t1a3",
+    "runtime_db": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\desktop-canary.db",
+    "artifact_root": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\artifacts",
+    "lane_workspace": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\lane-workspace",
+    "repository_mode": "projectless",
+    "top_level_task_order": [
+      "producer",
+      "consumer"
+    ],
+    "work_unit_attempt_count": {
+      "producer": 1,
+      "consumer": 1
+    }
+  },
+  "producer": {
+    "task_id": "run-t1a3:task:producer",
+    "thread_id": "019feb5d-cd1f-72e2-b7ab-0140e1ec10f8",
+    "turn_id": "019feb5d-d066-72a3-bbc5-fa1b1be8ddb5",
+    "lane_attempt_id": "lane-attempt-08b2ce5824188287c1c9",
+    "next_actions": {
+      "status": "LANE_DIRECT_EXECUTION_REQUIRED",
+      "protocol": "lane-direct-work/v1",
+      "outbox_id": "outbox-b9e361c475e845e6986929278696a153",
+      "work_unit_id": "run-t1a3:task:producer:work:producer-root",
+      "attempt_id": "work-attempt-aa81af8cb68449bc89089afd69f1264f",
+      "idempotency_key": "intent:work-unit:086da64a336a154fb234",
+      "plan_digest": "sha256:b3eb5f8fb6d1f67858d56921ae123b1c965f5b3af1774895e7d6dfd233061f98",
+      "execution_class": "lane_direct",
+      "execution_mode": "native_preferred",
+      "reason": "native-subagent-unavailable",
+      "native_actions": []
+    },
+    "direct_work_result": {
+      "protocol": "direct-work-result/v1",
+      "status": "completed",
+      "work_unit_id": "run-t1a3:task:producer:work:producer-root",
+      "attempt_id": "work-attempt-aa81af8cb68449bc89089afd69f1264f",
+      "idempotency_key": "intent:work-unit:086da64a336a154fb234",
+      "plan_digest": "sha256:b3eb5f8fb6d1f67858d56921ae123b1c965f5b3af1774895e7d6dfd233061f98",
+      "result_digest": "sha256:a36ee5074fec6f8e8730920de2ee5531ca6a2c4c49d4b4423d22f728d24674cb",
+      "changed_paths": [],
+      "raw_outputs": [
+        {
+          "operation": "desktop-t1a3-bounded-local-work",
+          "ok": true
+        }
+      ],
+      "typed_exports": [
+        {
+          "name": "ProducerArtifact",
+          "artifact_ref": "artifact://sha256:e1da4542ed9cc341ce768e464588c26035bd9168d5a9a161eba389287ed07e42",
+          "version": 1
+        }
+      ],
+      "path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\producer-direct-result.json"
+    },
+    "artifact_store": {
+      "artifact_ref": "artifact://sha256:e1da4542ed9cc341ce768e464588c26035bd9168d5a9a161eba389287ed07e42",
+      "payload": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\artifacts\\e1da4542ed9cc341ce768e464588c26035bd9168d5a9a161eba389287ed07e42",
+      "verify_after_reopen": true,
+      "artifacts_table_record_exists": true
+    },
+    "work_handoff": {
+      "protocol": "work-handoff/v1",
+      "status": "completed",
+      "handoff_id": "work-handoff-65d6c508536084cf15c0",
+      "plan_digest": "sha256:b3eb5f8fb6d1f67858d56921ae123b1c965f5b3af1774895e7d6dfd233061f98",
+      "result_digest": "sha256:a36ee5074fec6f8e8730920de2ee5531ca6a2c4c49d4b4423d22f728d24674cb",
+      "evidence_digest": "sha256:c4762b2971ff79c0159accc83290bcacc5be64167c419c3e1994b7a8e4592a50",
+      "evidence_profile": "projectless-analysis",
+      "evidence_verified": true,
+      "workspace_valid": true,
+      "execution_mode": "lane_direct",
+      "execution_source": "lane-direct-external",
+      "subagent_created": false,
+      "check": {
+        "name": "producer-check",
+        "receipt_id": "check-receipt-7f99720ba2c8eaf3ea91856f3592cfec2a4283d3b408a3cf442a74a0e48371a4",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    },
+    "child_cli_lane_handoff": {
+      "protocol": "lane-handoff/v1",
+      "status": "completed",
+      "handoff_id": "handoff-8ba94c6febfa4c05",
+      "evidence": null
+    },
+    "coordinator_accepted_lane_handoff": {
+      "protocol": "lane-handoff/v1",
+      "status": "completed",
+      "handoff_id": "handoff-4f2068a170fd41c0",
+      "evidence_verified": true,
+      "evidence_digest": "sha256:bdb6a253f0e7cd96337006210392d7daf0ebfeb77251a1e1988e9821b63e4f8e",
+      "typed_export_in_evidence": "ProducerArtifact",
+      "path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\producer-coordinator-lane-handoff.json"
+    },
+    "final_task_state": "completed"
+  },
+  "consumer": {
+    "task_id": "run-t1a3:task:consumer",
+    "thread_id": "019feb6a-5665-74f2-aedd-5c0006cb5e1b",
+    "turn_id": "019feb6a-5895-72d2-acbd-abfa40b6dde5",
+    "lane_attempt_id": "lane-attempt-158cfbc6b7b5115921ad",
+    "dependency_release": {
+      "name": "ProducerArtifact",
+      "artifact_ref": "artifact://sha256:e1da4542ed9cc341ce768e464588c26035bd9168d5a9a161eba389287ed07e42",
+      "source_handoff_id": "handoff-4f2068a170fd41c0",
+      "verified_at": "2026-08-10T11:23:35.613732Z",
+      "artifact_verified": true,
+      "released_before_consumer": true
+    },
+    "next_actions": {
+      "status": "LANE_DIRECT_EXECUTION_REQUIRED",
+      "protocol": "lane-direct-work/v1",
+      "outbox_id": "outbox-d04bed79a0124382845230eb5c32b3e4",
+      "work_unit_id": "run-t1a3:task:consumer:work:consumer-root",
+      "attempt_id": "work-attempt-5331e087928a4497a184972393d14937",
+      "idempotency_key": "intent:work-unit:2e2a312403dc10b0d343",
+      "plan_digest": "sha256:acda3f29839ef9c71fe1c997d6d0515b6b457ac1e78c5fa20562d74f1baa6ecf",
+      "execution_class": "lane_direct",
+      "execution_mode": "native_preferred",
+      "reason": "native-subagent-unavailable",
+      "native_actions": []
+    },
+    "direct_work_result": {
+      "protocol": "direct-work-result/v1",
+      "status": "completed",
+      "work_unit_id": "run-t1a3:task:consumer:work:consumer-root",
+      "attempt_id": "work-attempt-5331e087928a4497a184972393d14937",
+      "idempotency_key": "intent:work-unit:2e2a312403dc10b0d343",
+      "plan_digest": "sha256:acda3f29839ef9c71fe1c997d6d0515b6b457ac1e78c5fa20562d74f1baa6ecf",
+      "result_digest": "sha256:feedd47373caeefdf87216ee6830fde00c91c13aca50ee9310663afcdeed8da0",
+      "changed_paths": [],
+      "raw_outputs": [
+        {
+          "operation": "desktop-t1a3-consumer-bounded-local-work",
+          "ok": true,
+          "producer_artifact_ref": "artifact://sha256:e1da4542ed9cc341ce768e464588c26035bd9168d5a9a161eba389287ed07e42"
+        }
+      ],
+      "typed_exports": [
+        {
+          "name": "ConsumerArtifact",
+          "artifact_ref": "artifact://sha256:a7b47812ac3902dfb885f9bd87e9d7308d88a4ef91ded08bbbaa5a8900c6daed",
+          "version": 1
+        }
+      ],
+      "path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\consumer-direct-result.json"
+    },
+    "artifact_store": {
+      "artifact_ref": "artifact://sha256:a7b47812ac3902dfb885f9bd87e9d7308d88a4ef91ded08bbbaa5a8900c6daed",
+      "payload": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\artifacts\\a7b47812ac3902dfb885f9bd87e9d7308d88a4ef91ded08bbbaa5a8900c6daed",
+      "verify_after_reopen": true,
+      "artifacts_table_record_exists": true,
+      "linked_task": "run-t1a3:task:consumer",
+      "linked_work_unit": "run-t1a3:task:consumer:work:consumer-root"
+    },
+    "work_handoff": {
+      "protocol": "work-handoff/v1",
+      "status": "completed",
+      "handoff_id": "work-handoff-aa9ccf09d7ef7363950c",
+      "plan_digest": "sha256:acda3f29839ef9c71fe1c997d6d0515b6b457ac1e78c5fa20562d74f1baa6ecf",
+      "result_digest": "sha256:feedd47373caeefdf87216ee6830fde00c91c13aca50ee9310663afcdeed8da0",
+      "evidence_digest": "sha256:de7aa8a8b5f2c0d0fe4c8e9ecb3f185a719701c4c3b20e7c81423f6da928601f",
+      "evidence_profile": "projectless-analysis",
+      "evidence_verified": true,
+      "workspace_valid": true,
+      "execution_mode": "lane_direct",
+      "execution_source": "lane-direct-external",
+      "subagent_created": false,
+      "check": {
+        "name": "consumer-check",
+        "receipt_id": "check-receipt-42e12d3a60482ce1f4b36ed89400ca4cf02d504d4b3446c9c4b34cb1c91262bd",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    },
+    "child_cli_lane_handoff": {
+      "protocol": "lane-handoff/v1",
+      "status": "completed",
+      "handoff_id": "handoff-1a98ef55edfc4c51",
+      "evidence": null
+    },
+    "coordinator_accepted_lane_handoff": {
+      "protocol": "lane-handoff/v1",
+      "status": "completed",
+      "handoff_id": "handoff-d53f7f6b140e42f1",
+      "evidence_verified": true,
+      "evidence_digest": "sha256:e027557df5e1510f0e647fd2811d8b02ea97092576bb3e5d32c5e001651069a5",
+      "typed_export_in_evidence": "ConsumerArtifact",
+      "path": "C:\\Users\\ZENX0\\AppData\\Local\\Temp\\allinluna-t1-pr2-attempt-3-sol-final-20260810\\consumer-coordinator-lane-handoff.json"
+    },
+    "command_exit_statuses": {
+      "lane_next_actions": 0,
+      "artifact_put_and_verify": 0,
+      "lane_ingest_direct_result": 0,
+      "consumer_check": 0,
+      "lane_handoff": 0,
+      "coordinator_ingest": 0
+    },
+    "final_task_state": "completed"
+  },
+  "final_state": {
+    "producer_task": "completed",
+    "producer_work_unit": "completed",
+    "consumer_task": "completed",
+    "consumer_work_unit": "completed",
+    "run": "completed",
+    "root_status": "completed",
+    "consumer_export_source_handoff_id": "handoff-d53f7f6b140e42f1",
+    "consumer_export_verified_at": "2026-08-10T11:32:13.953188Z",
+    "signals": {
+      "producer_task_completed": 11,
+      "consumer_task_completed": 20,
+      "run_completed": 21
+    }
+  },
+  "relay_invariants": {
+    "direct_work_executor_callback_used": false,
+    "callback_used": false,
+    "native_recursive": "NOT_APPLICABLE",
+    "native_recursion_used": false,
+    "subagent_created": false,
+    "repository_files_changed_by_canary": false,
+    "runtime_code_changed_in_qualification": false,
+    "all_lane_direct_results_used_typed_exports": true,
+    "all_work_handoffs_independently_verified": true,
+    "all_coordinator_accepted_lane_handoffs_evidence_verified": true,
+    "producer_desktop_task_count": 1,
+    "consumer_desktop_task_count": 1,
+    "producer_work_attempt_count": 1,
+    "consumer_work_attempt_count": 1
+  },
+  "diagnostics": {
+    "accepted_run_fail_closed_diagnostics": [],
+    "runtime_retries": 0,
+    "recovery_branches": 0,
+    "history_rewritten": false,
+    "note": "run-t1a3 is the only accepted canary; no earlier diagnostic or alternative run is promoted by this evidence. Existing historical records remain unchanged."
+  },
+  "limitations": [
+    "The public installed CLI lane handoff is a completed neutral envelope with evidence=null; coordinator acceptance used a separate installed-wheel EvidenceCollector handoff with evidence_verified=true.",
+    "Host actual model and reasoning telemetry were not exposed under observe_if_exposed; requested and resolved routing is gpt-5.6-sol/xhigh and actual_model_state remains unresolved.",
+    "Desktop read output is bounded to 20000 characters per item; complete strict relay reports remain at the exact external paths recorded here."
+  ],
+  "qualification": "PASS"
+}

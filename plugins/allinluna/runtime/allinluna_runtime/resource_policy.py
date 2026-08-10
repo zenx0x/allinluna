@@ -21,6 +21,22 @@ from .resource_observation import ResourceObservation
 CAPABILITY_CLASSES = tuple(item.value for item in CapabilityClass)
 ROUTE_ASSURANCE_MODES = tuple(item.value for item in RouteAssuranceMode)
 _ASSURANCE_RANK = {item.value: index for index, item in enumerate(RouteAssuranceMode)}
+RESOURCE_POLICY_MODES = ("auto", "explicit")
+
+# This is the only default policy the public/Core layer needs to know.  It
+# describes the required semantic capability and leaves concrete routing to a
+# deployment or host policy.  Keeping the value here prevents each entry
+# point from growing its own vendor-shaped default.
+NEUTRAL_RESOURCE_POLICY = {
+    "top_level_slots": "auto",
+    "total_subagent_slots": "auto",
+    "subagent_slots_per_lane": "auto",
+    "model_policy": "auto",
+    "reasoning_policy": "auto",
+    "capability_class": CapabilityClass.LANE_SYNTHESIS.value,
+    "route_assurance": RouteAssuranceMode.OBSERVE_IF_EXPOSED.value,
+    "external_action_policy": "ask",
+}
 
 _OPERATION_CAPABILITIES = {
     "create-top-level-task": CapabilityClass.LANE_SYNTHESIS.value,
@@ -105,12 +121,14 @@ def _routes(value: Any) -> dict[str, dict[str, str]]:
             continue
         for capability_class, route in candidate.items():
             key = str(capability_class).strip()
-            if key in CAPABILITY_CLASSES:
+            # Earlier policy sources have precedence, while later sources may
+            # contribute classes that were not present in the first source.
+            # This makes layered host/deployment configuration composable
+            # without allowing a lower-priority source to replace a route.
+            if key in CAPABILITY_CLASSES and key not in result:
                 normalized = _route(route)
                 if normalized:
                     result[key] = normalized
-        if result:
-            break
     return result
 
 
@@ -132,6 +150,13 @@ def _assurance(value: Any, *, fallback: str = RouteAssuranceMode.OBSERVE_IF_EXPO
     candidate = _text(raw.get("route_assurance", raw.get("routeAssurance"))) or fallback
     if candidate not in ROUTE_ASSURANCE_MODES:
         raise ResourcePolicyError(f"unknown route_assurance: {candidate!r}")
+    return candidate
+
+
+def _policy_mode(value: Any, *, fallback: str = "auto") -> str:
+    candidate = _text(value) or fallback
+    if candidate not in RESOURCE_POLICY_MODES:
+        raise ResourcePolicyError(f"unknown resource policy mode: {candidate!r}")
     return candidate
 
 
@@ -165,6 +190,7 @@ class CapabilityProfile:
             tools = [tools]
         tool_list = sorted({str(item).strip() for item in (tools or ()) if str(item).strip()})
         tool_catalog_digest = _text(raw.get("tool_catalog_digest", raw.get("toolCatalogDigest"))) or _digest(tool_list)
+        routes = _routes(raw)
         fingerprint = _text(raw.get("host_fingerprint", raw.get("hostFingerprint")))
         if fingerprint is None:
             fingerprint = _digest(
@@ -174,9 +200,11 @@ class CapabilityProfile:
                     "host_version": host_version,
                     "plugin_version": plugin_version,
                     "tool_catalog_digest": tool_catalog_digest,
+                    # A routing change is a capability change even when the
+                    # host exposes the same tool names and versions.
+                    "capability_routes": routes,
                 }
             )
-        routes = _routes(raw)
         capabilities = dict(raw)
         capabilities["tools"] = tool_list
         if routes:
@@ -366,8 +394,14 @@ class ResourcePolicyResolver:
         configured = self._configured_routes().get(capability_class, {})
         root_route = _route(self.envelope)
         request_route = _route(raw)
-        model_policy = _text(raw.get("model_policy")) or _text(self.envelope.get("model_policy")) or "auto"
-        reasoning_policy = _text(raw.get("reasoning_policy")) or _text(self.envelope.get("reasoning_policy")) or "auto"
+        model_policy = _policy_mode(
+            raw.get("model_policy"),
+            fallback=_text(self.envelope.get("model_policy")) or "auto",
+        )
+        reasoning_policy = _policy_mode(
+            raw.get("reasoning_policy"),
+            fallback=_text(self.envelope.get("reasoning_policy")) or "auto",
+        )
         resolved: dict[str, Any] = {
             "capability_class": capability_class,
             "route_assurance": assurance,
@@ -413,9 +447,9 @@ class ResourcePolicyResolver:
         rerouted = bool(requested_route and resolved_route and requested_route != resolved_route)
         if selected_mode == RouteAssuranceMode.REQUEST_ONLY.value:
             return RouteAssurance(selected_mode, "satisfied", False)
+        if selected_mode == RouteAssuranceMode.HARD_LOCK.value and rerouted:
+            return RouteAssurance(selected_mode, "blocked", True, "hard_lock forbids a requested/resolved route change")
         if observation.actual_state == "resolved":
-            if selected_mode == RouteAssuranceMode.HARD_LOCK.value and rerouted:
-                return RouteAssurance(selected_mode, "blocked", True, "hard_lock forbids a requested/resolved route change")
             return RouteAssurance(selected_mode, "observed", False)
         if selected_mode == RouteAssuranceMode.OBSERVE_IF_EXPOSED.value:
             return RouteAssurance(selected_mode, "unresolved", False, "host resource telemetry was not exposed")
@@ -424,6 +458,8 @@ class ResourcePolicyResolver:
 
 __all__ = [
     "CAPABILITY_CLASSES",
+    "NEUTRAL_RESOURCE_POLICY",
+    "RESOURCE_POLICY_MODES",
     "ROUTE_ASSURANCE_MODES",
     "CapabilityProfile",
     "ResourcePolicyError",

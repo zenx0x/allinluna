@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "protocol": "product-journey-matrix/v1",
+  "status": "frozen",
+  "public_entry": "plugins/allinluna/skills/allinluna/SKILL.md",
+  "journeys": [
+    {
+      "id": "plain-goal-to-inspectable-run",
+      "input": "goal",
+      "test": "test_plain_goal_enters_through_public_api_and_persists_typed_state",
+      "assertions": [
+        "SinglePublicSkillAPI.start creates a run without requiring an internal registry entry",
+        "run, Task, Contract, WorkGraph, and preview action identities remain inspectable",
+        "an action is not treated as completion"
+      ],
+      "evidence": ["run_ref", "task_id", "contract_id", "work_unit_id", "action_id", "status"]
+    },
+    {
+      "id": "existing-plan-read-only-import",
+      "input": "existing_plan",
+      "test": "test_existing_plan_import_is_read_only_and_typed",
+      "assertions": [
+        "the source plan remains byte-equivalent after import",
+        "the result is a typed vNext graph",
+        "compatibility loss is reported instead of silently writing back"
+      ],
+      "evidence": ["input_kind", "source_digest", "task_graph", "legacy_writeback"]
+    },
+    {
+      "id": "active-run-recovery-read-only",
+      "input": "active_run",
+      "test": "test_active_run_recovery_preserves_source_and_maps_status",
+      "assertions": [
+        "the active-run snapshot is treated as a projection",
+        "running maps to active without mutating the source",
+        "the recovered graph remains typed"
+      ],
+      "evidence": ["input_kind", "mapped_status", "source_digest", "task_graph"]
+    },
+    {
+      "id": "research-route-boundary",
+      "input": "research_route",
+      "test": "test_research_route_preserves_epistemic_boundaries",
+      "assertions": [
+        "Claims, Evidence, unknowns, HumanDecision, and experiment authorization remain distinct",
+        "the compiled route is route-neutral",
+        "research input cannot imply implementation writes or canonical state"
+      ],
+      "evidence": ["input_kind", "route_neutral", "pack_config", "authorization_intent"]
+    },
+    {
+      "id": "project-aware-exact-dispatch",
+      "input": "goal with project resolution receipt",
+      "test": "test_project_resolution_precedes_exact_public_dispatch",
+      "assertions": [
+        "project identity is resolved before create-thread construction",
+        "the target contains projectId and environment",
+        "Task ID is never used as project ID and the exact create-thread tool is retained"
+      ],
+      "evidence": ["project_resolution_receipt", "target", "tool", "action_contract_hash"]
+    },
+    {
+      "id": "no-host-exact-relay",
+      "input": "goal without a bound host adapter",
+      "test": "test_no_host_preserves_exact_relay_without_claiming_completion",
+      "assertions": [
+        "the exact host action is preserved for relay",
+        "ACTION_RELAY_REQUIRED is distinct from missing-capability blocking",
+        "the run is not completed by an unobserved action"
+      ],
+      "evidence": ["status", "action.tool", "action.arguments", "receipt.status"]
+    },
+    {
+      "id": "recovery-to-work-and-lane-handoff",
+      "input": "interrupted public runtime flow",
+      "test": "test_recovery_retains_identity_and_closes_with_artifact_referenced_handoffs",
+      "assertions": [
+        "restart does not duplicate dispatch",
+        "work-handoff/v1 precedes lane-handoff/v1",
+        "completed handoffs carry independently verified artifact and workspace evidence"
+      ],
+      "evidence": ["restart_duplicate_dispatches", "work_unit_handoffs", "verified_lane_handoffs", "exports", "protected_unchanged"]
+    },
+    {
+      "id": "plain-goal-full-runtime-completion",
+      "input": "plain goal with an explicit trusted repository check",
+      "test": "test_plain_goal_full_runtime_reaches_completed",
+      "assertions": [
+        "SinglePublicSkillAPI persists the run and CoordinatorDriver dispatches a real top-level Lane",
+        "native_preferred resolves to lane-direct when nested capability is absent",
+        "WorkHandoff and independently collected evidence precede LaneHandoff and root completion"
+      ],
+      "evidence": ["run_status", "lane-direct-work/v1", "work-handoff/v1", "evidence-bundle/v1", "lane-handoff/v1"]
+    },
+    {
+      "id": "two-lane-export-dependency-completion",
+      "input": "two top-level Tasks with an exports_available dependency",
+      "test": "test_two_lane_export_dependency_releases_and_completes",
+      "assertions": [
+        "only Lane A is initially ready",
+        "Lane A exports an independently verified artifact before Lane B is released",
+        "Lane B and the root Run complete"
+      ],
+      "evidence": ["initial_task_ids", "ProducerArtifact", "created_task_ids", "task_states", "run_status"]
+    },
+    {
+      "id": "native-capability-policy",
+      "input": "host without an advertised nested native capability",
+      "test": "test_native_capability_policy_is_conditional_and_fail_closed",
+      "assertions": [
+        "native_preferred completes by lane-direct execution",
+        "native_required never invokes the direct executor",
+        "native_required reports HOST_CAPABILITY_BLOCKED truthfully"
+      ],
+      "evidence": ["execution_mode", "direct_plans", "lane-blocked", "HOST_CAPABILITY_BLOCKED"]
+    }
+  ]
+}

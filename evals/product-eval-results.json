@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "protocol": "product-eval-results/v1",
+  "status": "ready",
+  "matrix": "evals/product-journey-matrix.json",
+  "runner": "scripts/validate_product_experience.py --run",
+  "required_journeys": 10,
+  "result_semantics": {
+    "pass": "the journey assertion was exercised and supported by evidence",
+    "fail": "the journey assertion was exercised and contradicted by evidence",
+    "unknown": "required evidence was unavailable",
+    "blocked": "an owner or capability boundary prevented execution"
+  },
+  "results": [
+    {"journey_id": "plain-goal-to-inspectable-run", "status": "pass"},
+    {"journey_id": "existing-plan-read-only-import", "status": "pass"},
+    {"journey_id": "active-run-recovery-read-only", "status": "pass"},
+    {"journey_id": "research-route-boundary", "status": "pass"},
+    {"journey_id": "project-aware-exact-dispatch", "status": "pass"},
+    {"journey_id": "no-host-exact-relay", "status": "pass"},
+    {"journey_id": "recovery-to-work-and-lane-handoff", "status": "pass"},
+    {"journey_id": "plain-goal-full-runtime-completion", "status": "pass"},
+    {"journey_id": "two-lane-export-dependency-completion", "status": "pass"},
+    {"journey_id": "native-capability-policy", "status": "pass"}
+  ]
+}

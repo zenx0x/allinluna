@@ -1,0 +1,27 @@
+# Example only. Replace placeholders with routes available in your host/deployment.
+# Reserve stronger reasoning for planning, hard debugging, and verification.
+
+model_policy: auto
+reasoning_policy: auto
+route_assurance: observe_if_exposed
+external_action_policy: ask
+
+capability_routes:
+  planning.semantic:
+    model: "${STRONG_MODEL}"
+    reasoning: "${HIGH_REASONING}"
+  lane.synthesis:
+    model: "${BALANCED_MODEL}"
+    reasoning: "${BALANCED_REASONING}"
+  work.mechanical:
+    model: "${FAST_MODEL}"
+    reasoning: "${FAST_REASONING}"
+  work.implementation:
+    model: "${FAST_MODEL}"
+    reasoning: "${BALANCED_REASONING}"
+  work.deep-debug:
+    model: "${STRONG_MODEL}"
+    reasoning: "${HIGH_REASONING}"
+  verify.independent:
+    model: "${VERIFY_MODEL}"
+    reasoning: "${HIGH_REASONING}"

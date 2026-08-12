@@ -1,6 +1,6 @@
 # All in Luna
 
-[简体中文](README.md)
+[简体中文](README.zh-CN.md)
 
 <p align="center">
   <img src="docs/assets/brand/all-in-luna-mark.svg" width="112" alt="All in Luna mark" />

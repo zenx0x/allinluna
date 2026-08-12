@@ -1,20 +1,20 @@
 # All in Luna
 
-[English](README.en.md)
+[简体中文](README.zh-CN.md)
 
 <p align="center">
   <img src="docs/assets/brand/all-in-luna-mark.svg" width="112" alt="All in Luna mark" />
 </p>
 
-> **别再把整个项目塞进一个 AI 对话里。**
+> **Stop running an entire project inside one AI conversation.**
 
-给 All in Luna 一个大目标。
+Give All in Luna one big goal.
 
-它会把工作拆成几个真正独立的顶层任务：**能并行的同时推进，有依赖的自动等待，每个任务维护自己的上下文，最后再把结果汇总回来。**
+It turns the work into independent top-level tasks: **run what can run in parallel, wait only on real dependencies, keep each task's context separate, and bring the results back together.**
 
-每个任务内部仍然可以继续调用自己的 subagent、工具、Skill 或 MCP。
+Each task can still use its own subagents, tools, Skills, or MCPs.
 
-**任务之间并行，任务内部递归。**
+**Parallel across tasks. Recursive inside tasks.**
 
 <p align="center">
   <img src="docs/assets/brand/hero-topology.svg" alt="All in Luna task topology" />
@@ -22,29 +22,29 @@
 
 ---
 
-## 为什么需要它？
+## Why does this exist?
 
-让 AI 做一个小修改很简单。
+Small AI coding tasks are easy.
 
-真正麻烦的是这种任务：
+The hard part looks more like this:
 
-> “把 Authentication 完整重构掉，包括后端、前端、迁移、测试和文档。”
+> “Refactor authentication end to end, including the backend, frontend, migration, tests, and documentation.”
 
-一开始通常都很好。
+At first, everything is fine.
 
-然后 AI 开始读文件、改代码、跑测试、调用 subagent、处理失败、重新读文件，再把越来越多的执行细节塞回同一个 conversation。
+Then the agent reads files, edits code, runs tests, starts subagents, handles failures, reads more files, and keeps pushing more execution detail back into the same conversation.
 
-几十轮之后，常见的问题开始出现：
+After enough turns, familiar problems appear:
 
-- 上下文越来越长；
-- 不同工作互相污染；
-- 前面的约束逐渐被遗忘；
-- 一个局部 blocker 卡住整个流程；
-- subagent 的结果很难继续管理；
-- 换个会话以后，不知道之前真正做到哪里；
-- AI 说“完成了”，但结果未必真的完整。
+- the context keeps growing;
+- unrelated work starts contaminating other work;
+- earlier constraints become easier to forget;
+- one local blocker stalls the whole flow;
+- subagent results become harder to manage;
+- a new conversation has to reconstruct what really happened;
+- the agent says “done,” but the outcome may not actually be complete.
 
-**All in Luna 的核心想法很简单：不要让一个 conversation 承担整个项目。**
+**All in Luna starts from one simple idea: one conversation should not have to carry an entire project.**
 
 <p align="center">
   <img src="docs/assets/brand/before-after.svg" alt="One giant context versus clear task lanes" />
@@ -54,7 +54,7 @@
 
 ## One more layer above subagents
 
-普通 agent 工作流通常是：
+A typical agent workflow looks like this:
 
 ```text
 You
@@ -66,7 +66,7 @@ Main Agent
  └─ subagent
 ```
 
-All in Luna 在 subagent 上面增加了一层真正的 **Top-level Task**：
+All in Luna adds a real **Top-level Task** layer above local workers:
 
 ```text
 You
@@ -86,13 +86,13 @@ All in Luna
       └─ waits only when it actually depends on A
 ```
 
-**Top-level Task 不是另一个 subagent。**
+**A Top-level Task is not just another subagent.**
 
-它是一块独立的工作域，拥有自己的目标、上下文、依赖、工作状态、局部执行过程和结果边界。
+It is an independent work domain with its own goal, context, dependencies, working state, local execution process, and result boundary.
 
-subagent 则是某个 Task 内部需要进一步拆分工作时使用的局部 worker。
+A subagent is a local worker a Task may use when that Task needs to split its own work further.
 
-> **All in Luna 不替代 subagent，而是给 subagent 一个正确的层级。**
+> **All in Luna does not replace subagents. It gives them a better place to live.**
 
 ---
 
@@ -100,9 +100,9 @@ subagent 则是某个 Task 内部需要进一步拆分工作时使用的局部 w
 
 ## 1. Real top-level tasks
 
-一个复杂目标可以被拆成真正独立的工作域，而不是一组临时聊天分支。
+A large goal can become independent work domains instead of temporary chat branches.
 
-例如：
+For example:
 
 ```text
 Add billing to this app
@@ -114,11 +114,11 @@ Add billing to this app
 └─ Documentation
 ```
 
-每个任务可以独立推进、等待依赖、产生结果，并拥有自己的工作上下文。
+Each task can move independently, wait on dependencies, produce results, and keep its own working context.
 
 ## 2. Parallel when possible
 
-没有依赖的工作不需要排队。
+Independent work does not need to queue behind unrelated work.
 
 ```text
 Billing backend       ● running
@@ -132,9 +132,9 @@ Integration tests     ○ waiting for backend
 
 ## 3. Separate working contexts
 
-后端调试不需要和前端修改、测试日志、文档和发布工作全部挤在同一个上下文里。
+Backend debugging does not need to share one giant context with frontend changes, test logs, documentation, and release work.
 
-主对话应该主要看到：
+Your main conversation should mostly see:
 
 ```text
 ✓ what is done
@@ -143,13 +143,13 @@ Integration tests     ○ waiting for backend
 ! what needs your decision
 ```
 
-文件读取、终端输出、测试日志、diff 和大量实现细节可以留在产生它们的 Task 内部。
+File reads, terminal output, test logs, diffs, and implementation detail can stay with the Task that produced them.
 
-**你的主对话不需要成为整个项目的日志文件。**
+**Your main conversation does not need to become the project's log file.**
 
 ## 4. Recursive local workers
 
-一个 Top-level Task 如果自己仍然很复杂，可以继续拆成 WorkUnits 或调用 subagents。
+A Top-level Task can still split into WorkUnits or use local subagents when it is complex on its own.
 
 ```text
 Backend Task
@@ -159,15 +159,15 @@ Backend Task
  └─ migration checks
 ```
 
-局部复杂度留在局部。
+Local complexity stays local.
 
 **Parallel across tasks. Recursive inside tasks.**
 
 ## 5. Resume instead of restarting
 
-All in Luna 会保存运行状态、任务状态、依赖和结果。
+All in Luna persists run state, task state, dependencies, and results.
 
-复杂工作不必永远依附于某一个越来越长的 conversation。
+Long-running work does not have to remain attached to one ever-growing conversation.
 
 ```text
 start
@@ -177,41 +177,41 @@ start
 → resume
 ```
 
-已经完成的事情不需要再靠聊天记忆重新猜一遍。
+Completed work does not have to be rediscovered from chat history.
 
 ## 6. Verify before “done”
 
-Agent 说：
+An agent saying:
 
 > “Done.”
 
-并不代表任务真的完成。
+is not the same as the task actually being complete.
 
-All in Luna 可以根据实际工作检查测试、构建结果、文件变化、artifacts 和声明的输出，再决定任务是否应该被接受为完成。
+All in Luna can check tests, builds, changed files, artifacts, and declared outputs before accepting a task as complete.
 
 ## 7. Bring your own workflow
 
-All in Luna 不是一条固定 workflow。
+All in Luna is not one fixed workflow.
 
-默认可以直接完成普通 delivery 工作。
+Use the default delivery path for ordinary software work.
 
-需要更详细的软件开发流程时，可以在某个 Task 中使用 **GSD**。
+Use **GSD** inside a Task when you want a more explicit development workflow.
 
-科研工作可以连接 **Research Routes**。
+Connect **Research Routes** for research-oriented work.
 
-Task 也可以继续使用其他 Skill、MCP、工具或宿主能力。
+Tasks can also use other Skills, MCPs, tools, and host capabilities.
 
-**Core 负责运行复杂工作，而不是规定所有工作应该怎么思考。**
+**The Core runs complex work. It does not dictate how every task must think.**
 
 ---
 
 # Example
 
-假设你说：
+Suppose you say:
 
-> **“把这个应用的 Authentication 系统完整重构掉，包括后端、前端、迁移和测试。”**
+> **“Refactor this application's authentication system, including backend, frontend, migration, and tests.”**
 
-All in Luna 可以把它组织成：
+All in Luna can organize it as:
 
 ```text
 Authentication refactor
@@ -233,33 +233,33 @@ Authentication refactor
      └─ waits for backend + frontend
 ```
 
-Task 1 和 Task 2 可以同时推进。
+Task 1 and Task 2 can move at the same time.
 
-Task 1 如果仍然复杂，可以继续使用自己的 subagent。
+Task 1 can still use its own subagents if needed.
 
-Task 3 只等待它真正需要的结果。
+Task 3 waits only for the result it actually depends on.
 
-而你不需要在主 conversation 里同时追踪四条工作的全部实现细节。
+You do not have to follow the complete implementation history of all four tasks in one conversation.
 
 ---
 
 # When should I use it?
 
-All in Luna 特别适合：
+All in Luna is a good fit for:
 
-- 大型 feature；
-- 跨 frontend / backend / tests / docs 的工作；
-- 大型 refactor；
-- migration；
-- 多个可以独立推进的结果；
-- 长时间运行的 coding session；
-- 一个 blocker 不应该停止整个项目；
-- 不同任务需要不同工具、模型或 workflow；
-- 希望后续可以恢复，而不是依赖聊天历史。
+- large features;
+- work spanning frontend / backend / tests / docs;
+- major refactors;
+- migrations;
+- several outcomes that can move independently;
+- long-running coding sessions;
+- work where one blocker should not stop the whole project;
+- tasks that need different tools, models, or workflows;
+- work you want to resume instead of reconstructing from chat history.
 
-如果只是改一个 typo、解释一个函数、调整一处 CSS 或完成一个很小的线性任务，直接使用当前 Agent 通常更快。
+If you are fixing one typo, explaining one function, changing one CSS rule, or doing another tiny linear task, using the current agent directly is usually faster.
 
-**All in Luna 解决的是复杂工作的组织问题，不是让简单工作变复杂。**
+**All in Luna solves the organization problem of complex work. It does not make simple work complicated.**
 
 ---
 
@@ -269,19 +269,19 @@ All in Luna 特别适合：
   <img src="docs/assets/brand/models-performance.svg" alt="Models and performance routing" />
 </p>
 
-## 不配置也可以
+## You do not have to configure anything
 
-大多数用户不需要配置模型。
+Most users do not need to choose a model policy first.
 
-如果你没有指定，All in Luna 会使用当前环境、宿主或部署策略能够提供的资源。
+If you do not specify one, All in Luna uses resources available through the current environment, host, or deployment policy.
 
-它不要求所有用户使用某个固定模型或厂商。
+It does not require every user to use one fixed model or provider.
 
-## 想控制也可以
+## You can take control when you want
 
-不同类型的工作，不一定值得使用同样昂贵的推理资源。
+Different kinds of work do not always deserve the same amount of expensive reasoning.
 
-例如：
+For example:
 
 ```text
 Planning        → stronger reasoning
@@ -290,28 +290,28 @@ Mechanical work → fast / efficient
 Verification    → strong / independent
 ```
 
-> **把强推理留给真正需要强推理的地方。**
+> **Spend strong reasoning where it matters, not everywhere.**
 
-更进一步，All in Luna 不只是分配计算资源，也把问题本身分得更干净：强模型可以面对更窄、更稳定的目标，减少无关上下文和跨任务切换带来的漂移空间。
+All in Luna also separates the problem itself. Strong models can work on narrower, more stable objectives with less unrelated context and fewer cross-task switches.
 
 **Less unrelated context. Less task switching. Less room for drift.**
 
-常见的使用方式包括：
+Common ways to use the resource system include:
 
-- **Balanced**：适合绝大多数项目，让当前环境按任务角色使用合理资源；
-- **Quality first**：大型架构改动、困难 debugging、高风险重构和研究任务；
-- **Efficient**：强推理主要留给顶层分解、困难 blocker、综合和最终验证；
-- **Single model**：希望整个 run 尽量使用当前选择的同一个模型。
+- **Balanced** — sensible defaults for most projects;
+- **Quality first** — stronger reasoning for architecture, difficult debugging, risky refactors, and research;
+- **Efficient** — reserve stronger reasoning for decomposition, hard blockers, synthesis, and final verification;
+- **Single model** — keep the run on one explicitly selected model where possible.
 
-这些是资源策略的使用模式，而不是 Core 写死的模型列表。高级用户仍然可以覆盖具体 Task 或 WorkUnit 使用的模型与 reasoning。
+These are usage patterns, not model names hard-coded into the Core. Advanced users can still override concrete models and reasoning at Task or WorkUnit scope.
 
-详见 [Models & performance](docs/user/models-and-performance.md)。
+See [Models & performance](docs/user/models-and-performance.md).
 
 ---
 
 # Workflow Packs
 
-All in Luna 的 Core 负责：
+The All in Luna Core is responsible for:
 
 ```text
 top-level tasks
@@ -322,17 +322,15 @@ results
 recovery
 ```
 
-一个 Task 内具体采用什么工作方法，则可以交给不同的 Workflow Pack。
+A Workflow Pack can define how an individual Task should work.
 
 ### Delivery
 
-默认的软件交付路径。
-
-适合 feature、bug fix、refactor、migration 和 integration。
+The default software-delivery path for features, bug fixes, refactors, migrations, and integrations.
 
 ### GSD
 
-需要更完整的软件开发流程时，可以使用：
+Use GSD when you want a more explicit development workflow:
 
 ```text
 clarify
@@ -343,15 +341,15 @@ clarify
 → integrate
 ```
 
-GSD 和 All in Luna 工作在不同层级。
+GSD and All in Luna operate at different layers.
 
-**GSD 可以运行在某个 All in Luna Top-level Task 内部。**
+**GSD can run inside an All in Luna Top-level Task.**
 
 ### Research Routes
 
-用于保留 Claims、Evidence、unknowns、contradictions、experiments 和 research route changes。
+Preserves Claims, Evidence, unknowns, contradictions, experiments, and research route changes.
 
-研究判断不会自动变成 implementation authorization。
+Research judgment does not automatically become implementation authorization.
 
 ---
 
@@ -368,20 +366,20 @@ GSD 和 All in Luna 工作在不同层级。
 | Pluggable workflows | — | — | **✓** |
 | Persistent run / recovery | Depends | Depends | **✓** |
 
-核心区别不是谁能创建更多 Agent。
+The key difference is not who can create more agents.
 
-> **All in Luna 把 Top-level Task 本身变成运行时的一等对象。**
+> **All in Luna makes the Top-level Task itself a first-class runtime object.**
 
 ### What about Sol Advisor?
 
-Sol Advisor 风格更接近：
+Sol Advisor-style systems are closer to:
 
 ```text
 Strong Primary Architect
 → bounded implementation / review workers
 ```
 
-All in Luna 把 orchestration boundary 再往上一层：
+All in Luna moves the orchestration boundary one level higher:
 
 ```text
 Global Coordinator
@@ -389,7 +387,7 @@ Global Coordinator
 → each Task has its own workflow and workers
 ```
 
-两者关注的是不同抽象层，而不是简单的替代关系。
+They focus on different abstraction layers rather than being simple substitutes.
 
 ---
 
@@ -397,27 +395,20 @@ Global Coordinator
 
 ## Vibe coding
 
-安装 All in Luna 后，最简单的使用方式就是直接说：
+After installing All in Luna, the simplest way to use it is just to say:
 
 ```text
 Use All in Luna to finish the authentication refactor.
 Keep independent parts moving in parallel where possible.
 ```
 
-或者：
+That's it.
 
-```text
-用 All in Luna 完整完成这个项目。
-能独立推进的部分尽量并行。
-```
-
-就这样。
-
-你不需要先写 TaskGraph、选择 scheduler、设计 agent hierarchy 或填写资源问卷。
+You do not need to design a TaskGraph, choose a scheduler, create an agent hierarchy, or fill in a resource questionnaire first.
 
 ## CLI
 
-需要显式查看和控制 run 时：
+When you want explicit control over a run:
 
 ```bash
 python -m pip install -e .
@@ -427,50 +418,50 @@ allinluna status RUN_ID
 allinluna drive RUN_ID
 ```
 
-查看全部命令：
+See all commands:
 
 ```bash
 allinluna --help
 ```
 
-Lane、direct-work、recovery 和诊断命令放在高级 CLI 文档中。
+Lane, direct-work, recovery, and diagnostic commands live in the advanced CLI documentation.
 
 ---
 
 # Permissions
 
-启动一个 run 不代表 All in Luna 自动获得所有外部权限。
+Starting a run does not grant All in Luna every external permission.
 
-只有真正执行到相应动作时，才需要处理：
+Permissions matter only when the corresponding action is actually reached, including:
 
-- push；
-- merge；
-- deploy；
-- publish；
-- credentials；
-- destructive operations；
-- live external mutations。
+- push;
+- merge;
+- deploy;
+- publish;
+- credentials;
+- destructive operations;
+- live external mutations.
 
-普通本地探索和任务组织不需要先填写一个巨大的权限问卷。
+Ordinary local exploration and task organization do not require a giant permission questionnaire up front.
 
 ---
 
 # Design philosophy
 
 **Keep the Core small.**  
-顶层调度、上下文、协议和恢复属于 Core；具体 workflow 属于 Pack。
+Top-level scheduling, context, protocols, and recovery belong in the Core. Specific workflows belong in Packs.
 
 **Protocols instead of management theater.**  
-正确性应该尽量由运行时合同保证，而不是再创造一层 Reviewer / Auditor / Manager Agent。
+Correctness should come from runtime contracts where possible, not from adding another layer of Reviewer / Auditor / Manager agents.
 
 **Keep local complexity local.**  
-一个 Task 的工具噪声和局部 worker 不应该污染整个项目。
+A Task's tool noise and local workers should not pollute the whole project.
 
 **Stay model-neutral.**  
-Core 描述需要什么能力，而不是规定所有用户必须使用什么模型。
+The Core describes the capability it needs instead of forcing every user onto one model.
 
 **Leave room for the user.**  
-All in Luna 负责把复杂工作运行起来，不替用户私自扩大目标。
+All in Luna runs complex work without silently expanding the user's goal.
 
 ---
 
@@ -494,7 +485,7 @@ All in Luna 负责把复杂工作运行起来，不替用户私自扩大目标�
 
 # Release
 
-查看 GitHub Releases 和 Changelog 获取当前版本、升级说明和已知限制。
+See GitHub Releases and the Changelog for the current version, upgrade notes, and known limitations.
 
 ---
 

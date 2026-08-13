@@ -51,10 +51,17 @@ def test_allinflash_profile_contains_the_exact_plugin_and_runtime_command(tmp_pa
     patch = next(content for path, content in files.items() if path.name == "cordis.patch.yml")
 
     assert package["dependencies"]["@zenx0x/allinflash"].startswith("file:")
-    assert package["dsh"]["profile"]["bundles"] == ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]
-    assert "- insert:" in patch
-    assert "name: '@zenx0x/allinflash'" in patch
+    assert package["dsh"]["profile"]["bundles"] == [
+        "@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@zenx0x/allinflash"
+    ]
+    assert "- id: allinflash" in patch
     assert "commandArgs: ['run', 'allinluna', '--adapter', 'deepseek-harness']" in patch
+
+
+def test_deepseek_harness_plugin_is_a_dsh_bundle() -> None:
+    package = json.loads((PLUGIN / "package.json").read_text(encoding="utf-8"))
+
+    assert package["dsh"]["bundle"]["patch"] == "./cordis.patch.yml"
 
 
 def test_deepseek_harness_top_level_action_keeps_its_exact_opcode() -> None:

@@ -35,6 +35,10 @@ TOP_LEVEL_TASK_EXECUTION_CLASS = "top_level_task"
 LOCAL_SUBAGENT_EXECUTION_CLASS = "local_subagent"
 DIRECT_EXECUTION_CLASS = "direct"
 TOP_LEVEL_CREATE_THREAD_TOOL = "codex_app__create_thread"
+DEEPSEEK_HARNESS_CREATE_TASK_TOOL = "allinflash__create_top_level_task"
+TOP_LEVEL_CREATE_TOOLS = frozenset(
+    {TOP_LEVEL_CREATE_THREAD_TOOL, DEEPSEEK_HARNESS_CREATE_TASK_TOOL}
+)
 LOCAL_DISPATCH_INTENT_PROTOCOL = "local-dispatch-intent/v1"
 WORK_HANDOFF_PROTOCOL = "work-handoff/v1"
 NATIVE_SUBAGENT_CAPABILITY = "native_subagent"
@@ -639,9 +643,9 @@ class HostAction(_MappingRecord):
     """An action/intention sent to a host or Action Bridge.
 
     ``tool`` is an execution opcode, not a hint.  In particular, a
-    ``top_level_task`` must remain a ``codex_app__create_thread`` action until
-    it is either receipted or explicitly blocked.  It may never be translated
-    into a local subagent or direct/current-thread execution.
+    ``top_level_task`` must remain its selected host's exact creation opcode
+    until it is either receipted or explicitly blocked.  It may never be
+    translated into a local subagent or direct/current-thread execution.
     """
 
     action_id: str
@@ -704,8 +708,8 @@ class HostAction(_MappingRecord):
         if execution_class == TOP_LEVEL_TASK_EXECUTION_CLASS:
             if self.kind != "create-top-level-task":
                 raise ValueError("top_level_task actions must use kind=create-top-level-task")
-            if tool != TOP_LEVEL_CREATE_THREAD_TOOL:
-                raise ValueError("top_level_task actions must use codex_app__create_thread exactly")
+            if tool not in TOP_LEVEL_CREATE_TOOLS:
+                raise ValueError("top_level_task actions must use a registered exact creation tool")
             if normalized_policy["exact_tool"] != tool or normalized_policy["substitutions"]:
                 raise ValueError("top_level_task actions forbid tool substitutions")
             if normalized_policy["on_unavailable"] != "block":
@@ -1210,6 +1214,8 @@ __all__ = [
     "HostUnavailableError",
     "LOCAL_SUBAGENT_EXECUTION_CLASS",
     "TOP_LEVEL_CREATE_THREAD_TOOL",
+    "DEEPSEEK_HARNESS_CREATE_TASK_TOOL",
+    "TOP_LEVEL_CREATE_TOOLS",
     "TOP_LEVEL_TASK_EXECUTION_CLASS",
     "WORK_HANDOFF_PROTOCOL",
     "action_contract_digest",

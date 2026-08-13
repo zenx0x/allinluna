@@ -57,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="allinluna", description="All in Luna vNext runtime")
     parser.add_argument("--version", action="version", version=f"%(prog)s {_runtime_version()}")
     parser.add_argument("--db", default="runtime.db", help="runtime.db path")
+    parser.add_argument(
+        "--adapter",
+        choices=("codex-app", "deepseek-harness"),
+        default="codex-app",
+        help="host adapter whose exact top-level opcode the scheduler emits",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     start = sub.add_parser("start")
@@ -195,7 +201,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         run = store.get_run(getattr(args, "run_id", ""))
         resource_policy = dict((run or {}).get("policy") or {})
-    engine = CoordinatorEngine(store, resource_broker=ResourceBroker(resource_policy))
+    engine = CoordinatorEngine(
+        store,
+        resource_broker=ResourceBroker(resource_policy),
+        adapter=args.adapter,
+    )
     try:
         if args.command == "start":
             graph = _load_json(args.task_graph) if args.task_graph else None

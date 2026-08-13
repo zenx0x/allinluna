@@ -14,7 +14,12 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..resource import ResourceBroker, SlotAllocation
 from ..store import LeaseConflictError
-from ..adapters.host.base import HostAction, stable_digest
+from ..adapters.host.base import (
+    DEEPSEEK_HARNESS_CREATE_TASK_TOOL,
+    TOP_LEVEL_CREATE_THREAD_TOOL,
+    HostAction,
+    stable_digest,
+)
 from ..adapters.host.codex_app import (
     dispatch_identity,
     LEGACY_DEFAULT_RESOURCE_POLICY,
@@ -595,10 +600,15 @@ class GlobalScheduler:
         }
         if resolved_reasoning:
             arguments["thinking"] = resolved_reasoning
+        top_level_tool = (
+            DEEPSEEK_HARNESS_CREATE_TASK_TOOL
+            if self.adapter == "deepseek-harness"
+            else TOP_LEVEL_CREATE_THREAD_TOOL
+        )
         return HostAction(
             action_id=f"action-{stable_digest({'task': task_id, 'dispatch': dispatch_id})}",
             kind="create-top-level-task",
-            tool="codex_app__create_thread",
+            tool=top_level_tool,
             arguments=arguments,
             idempotency_key=key,
             task_id=task_id,
@@ -608,11 +618,11 @@ class GlobalScheduler:
             reasoning=resolved_reasoning,
             execution_class="top_level_task",
             tool_policy={
-                "exact_tool": "codex_app__create_thread",
+                "exact_tool": top_level_tool,
                 "substitutions": [],
                 "on_unavailable": "block",
             },
-            host_capability_required="codex_app__create_thread",
+            host_capability_required=top_level_tool,
             task_envelope_ref=task_envelope_ref,
             identity=identity,
             payload={

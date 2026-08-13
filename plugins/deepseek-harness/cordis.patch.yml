@@ -6,7 +6,9 @@
       config:
         # Point to the installed All in Luna command.  For this repository:
         command: uv
-        commandArgs: ['run', 'allinluna']
+        commandArgs: ['run', 'allinluna', '--adapter', 'deepseek-harness']
         # db: 'D:/AgentSkills/allinluna/runtime.db'
         cwd: 'D:/AgentSkills/allinluna'
         timeoutMs: 30000
+        model: deepseek-v4-flash
+        subagentProvider: spawn

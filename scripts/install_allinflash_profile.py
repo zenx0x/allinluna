@@ -22,7 +22,7 @@ def profile_files(*, profile_dir: Path, allinluna_root: Path) -> dict[Path, str]
     # survives a stale checked-in virtualenv and is also the command verified
     # by the repository's development workflow.
     command = "uv"
-    command_args = ["run", "allinluna"]
+    command_args = ["run", "allinluna", "--adapter", "deepseek-harness"]
     package = {
         "name": "dsh-profile-allinflash",
         "private": True,
@@ -43,6 +43,8 @@ def profile_files(*, profile_dir: Path, allinluna_root: Path) -> dict[Path, str]
                 "db": (allinluna_root / "runtime.db").as_posix(),
                 "cwd": allinluna_root.as_posix(),
                 "timeoutMs": 30000,
+                "model": "deepseek-v4-flash",
+                "subagentProvider": "spawn",
             },
         },
     ]
@@ -55,10 +57,12 @@ def profile_files(*, profile_dir: Path, allinluna_root: Path) -> dict[Path, str]
             "      name: '@zenx0x/allinflash'\n"
             "      config:\n"
             f"        command: '{command}'\n"
-            "        commandArgs: ['run', 'allinluna']\n"
+            "        commandArgs: ['run', 'allinluna', '--adapter', 'deepseek-harness']\n"
             f"        db: '{(allinluna_root / 'runtime.db').as_posix()}'\n"
             f"        cwd: '{allinluna_root.as_posix()}'\n"
             "        timeoutMs: 30000\n"
+            "        model: deepseek-v4-flash\n"
+            "        subagentProvider: spawn\n"
         ),
         profile_dir / "pnpm-workspace.yaml": "packages:\n  - .\nnodeLinker: hoisted\nautoInstallPeers: false\n",
     }

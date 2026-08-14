@@ -1,10 +1,21 @@
 [project]
 name = "allinluna"
-version = "2.0.0-rc.2"
-description = "Complete, resource-aware agent development workflows for Codex"
+version = "2.0.0-rc.3"
+description = "Durable, resource-aware multi-agent orchestration for Codex and DeepSeek Harness"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [{ name = "zenx0x" }]
+keywords = ["agents", "codex", "deepseek-harness", "multi-agent", "orchestration", "workflow"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
 
 [project.scripts]
 allinluna = "allinluna_runtime.cli:main"
@@ -27,6 +38,7 @@ allinluna_runtime = ["schemas/*.json", "PROVENANCE.json"]
 Homepage = "https://github.com/zenx0x/allinluna"
 Repository = "https://github.com/zenx0x/allinluna"
 Issues = "https://github.com/zenx0x/allinluna/issues"
+Documentation = "https://github.com/zenx0x/allinluna#readme"
 
 [tool.ruff]
 line-length = 100

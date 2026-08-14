@@ -141,8 +141,8 @@ class DistributionTests(unittest.TestCase):
             self.assertTrue((research / "plugins/research-routes/.codex-plugin/plugin.json").is_file())
 
     def test_host_conformance_markers_in_distribution_readmes(self) -> None:
-        source_readmes = {
-            "allinluna": ((ROOT / "README.md").read_text(encoding="utf-8"), (ROOT / "README.en.md").read_text(encoding="utf-8")),
+        source_contracts = {
+            "allinluna": ((ROOT / "docs/host-conformance.md").read_text(encoding="utf-8"),),
             "research-routes": (
                 (ROOT / "distributions/overlays/research-routes/README.md").read_text(encoding="utf-8"),
                 (ROOT / "distributions/overlays/research-routes/README.en.md").read_text(encoding="utf-8"),
@@ -153,17 +153,17 @@ class DistributionTests(unittest.TestCase):
             "resolved",
             "actual",
         )
-        for distribution, readmes in source_readmes.items():
-            for readme in readmes:
+        for distribution, contracts in source_contracts.items():
+            for contract in contracts:
                 for marker in required_markers:
-                    self.assertIn(marker, readme, f"{distribution} README lost host-conformance marker {marker}")
+                    self.assertIn(marker, contract, f"{distribution} lost host-conformance marker {marker}")
             for marker in ("identity", "create", "read", "wait", "cancel", "idempotency"):
-                self.assertTrue(any(marker in readme for readme in readmes), f"{distribution} README lacks host-conformance marker {marker}")
-        for readme in source_readmes["research-routes"]:
+                self.assertTrue(any(marker in contract for contract in contracts), f"{distribution} lacks host-conformance marker {marker}")
+        for readme in source_contracts["research-routes"]:
             for marker in ("PASS", "BLOCKED"):
                 self.assertIn(marker, readme, "research-routes README lost host-conformance marker")
-        self.assertIn("identity", source_readmes["allinluna"][0].lower())
-        self.assertIn("identity", source_readmes["research-routes"][1].lower())
+        self.assertIn("identity", source_contracts["allinluna"][0].lower())
+        self.assertIn("identity", source_contracts["research-routes"][1].lower())
 
     def test_short_entries_route_deep_policy_on_demand(self) -> None:
         entry = (ROOT / "plugins/allinluna/skills/allinluna/SKILL.md").read_text(encoding="utf-8")
@@ -173,20 +173,28 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual({path.name for path in (ROOT / "plugins/allinluna/skills").iterdir() if path.is_dir()}, {"allinluna"})
 
     def test_both_distributions_publish_host_conformance_promises(self) -> None:
-        readmes = (
-            ROOT / "README.md",
-            ROOT / "README.en.md",
-            ROOT / "distributions/overlays/research-routes/README.md",
-            ROOT / "distributions/overlays/research-routes/README.en.md",
-        )
-        for path in readmes:
-            content = path.read_text(encoding="utf-8")
-            for marker in ("requested", "resolved", "actual", "identity", "create", "read", "wait", "cancel", "idempotency"):
-                self.assertIn(marker, content, f"{path} lost user-flow marker {marker}")
-        for path in readmes[2:]:
-            content = path.read_text(encoding="utf-8")
-            for marker in ("PASS", "BLOCKED"):
-                self.assertIn(marker, content, f"{path} lost conformance marker {marker}")
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            subprocess.run(
+                [sys.executable, "scripts/build_distributions.py", "--output", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            contracts = (
+                output / "all-in-luna/docs/host-conformance.md",
+                output / "research-routes/README.md",
+                output / "research-routes/README.en.md",
+            )
+            for path in contracts:
+                content = path.read_text(encoding="utf-8")
+                for marker in ("requested", "resolved", "actual", "identity", "create", "read", "wait", "cancel", "idempotency"):
+                    self.assertIn(marker, content, f"{path} lost host-conformance marker {marker}")
+            for path in contracts[1:]:
+                content = path.read_text(encoding="utf-8")
+                for marker in ("PASS", "BLOCKED"):
+                    self.assertIn(marker, content, f"{path} lost conformance marker {marker}")
 
     def test_standalone_marketplace_manifest_matches_each_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

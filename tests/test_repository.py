@@ -11,11 +11,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryContractTests(unittest.TestCase):
-    def test_chinese_is_default_and_top_level_topology_is_explicit(self) -> None:
+    def test_english_is_default_and_top_level_topology_is_explicit(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("# All in Luna", readme)
-        self.assertIn("plugins/allinluna/skills/allinluna/SKILL.md", readme)
+        self.assertIn("[简体中文](README.zh-CN.md)", readme)
+        self.assertIn("Top-level Task", readme)
+        self.assertIn("docs/host-conformance.md", readme)
+        self.assertTrue((ROOT / "README.zh-CN.md").is_file())
         self.assertTrue((ROOT / "README.en.md").is_file())
+        self.assertEqual(
+            (ROOT / "README.md").read_bytes(),
+            (ROOT / "README.en.md").read_bytes(),
+        )
 
         skill_root = ROOT / "plugins" / "allinluna" / "skills"
         self.assertEqual(

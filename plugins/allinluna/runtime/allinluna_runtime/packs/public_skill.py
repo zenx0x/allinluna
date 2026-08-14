@@ -96,7 +96,7 @@ class SinglePublicSkillAPI:
     """Public API for one Skill and all supported input forms."""
 
     id = "allinluna"
-    version = "2.0.0-rc.2"
+    version = "2.0.0-rc.3"
 
     def __init__(
         self,

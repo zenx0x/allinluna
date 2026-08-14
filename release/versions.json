@@ -6,14 +6,20 @@
     "allinluna": {
       "distribution_id": "all-in-luna",
       "plugin_name": "allinluna",
-      "version": "2.0.0-rc.2",
-      "tag": "allinluna-v2.0.0-rc.2"
+      "version": "2.0.0-rc.3",
+      "tag": "allinluna-v2.0.0-rc.3"
+    },
+    "allinflash": {
+      "distribution_id": "all-in-flash",
+      "plugin_name": "allinflash",
+      "version": "0.2.0",
+      "tag": "allinflash-v0.2.0"
     },
     "research-routes": {
       "distribution_id": "research-routes",
       "plugin_name": "research-routes",
-      "version": "0.3.0-rc.2",
-      "tag": "research-routes-v0.3.0-rc.2"
+      "version": "0.3.0-rc.3",
+      "tag": "research-routes-v0.3.0-rc.3"
     }
   },
   "tag_policy": {

@@ -411,7 +411,7 @@ You do not need to design a TaskGraph, choose a scheduler, create an agent hiera
 When you want explicit control over a run:
 
 ```bash
-python -m pip install -e .
+python -m pip install "allinluna==2.0.0rc3"
 
 allinluna start --goal "Finish the authentication refactor"
 allinluna status RUN_ID
@@ -426,6 +426,8 @@ allinluna --help
 
 Lane, direct-work, recovery, and diagnostic commands live in the advanced CLI documentation.
 
+For repository development, replace the release install with `python -m pip install -e .`.
+
 ---
 
 ## DeepSeek Harness / All in Flash
@@ -437,6 +439,13 @@ contract.
 
 - npm package: [`@zenx0x/allinflash`](https://www.npmjs.com/package/@zenx0x/allinflash)
 - Integration guide: [`plugins/deepseek-harness/README.md`](plugins/deepseek-harness/README.md)
+
+After installing the All in Luna CLI, initialize a dedicated DSH profile in one command:
+
+```bash
+npx @zenx0x/allinflash@0.2.0 init --profile allinflash
+dsh --profile allinflash
+```
 
 GitHub search terms: `deepseek-harness`, `dsh`, `dsh-plugin`, `allinflash`,
 `multi-agent-orchestration`.
@@ -491,6 +500,7 @@ All in Luna runs complex work without silently expanding the user's goal.
 
 ### Go deeper
 
+- [Host conformance](docs/host-conformance.md)
 - [Troubleshooting](docs/troubleshooting/common-issues.md)
 - [Public runtime surface](docs/architecture/public-surface.md)
 - [Architecture](docs/architecture/)

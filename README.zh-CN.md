@@ -437,6 +437,21 @@ Lane、direct-work、recovery 和诊断命令放在高级 CLI 文档中。
 
 ---
 
+## DeepSeek Harness / All in Flash
+
+**All in Flash** 是 All in Luna 面向
+[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的 bundle。
+它会把冻结的 All in Luna 顶层任务动作转换为可持久化的 DSH lane child，同时保留精确的
+动作与回执合同。
+
+- npm 包：[`@zenx0x/allinflash`](https://www.npmjs.com/package/@zenx0x/allinflash)
+- 集成说明：[`plugins/deepseek-harness/README.md`](plugins/deepseek-harness/README.md)
+
+GitHub 搜索关键词：`deepseek-harness`、`dsh`、`dsh-plugin`、`allinflash`、
+`multi-agent-orchestration`。
+
+---
+
 # Permissions
 
 启动一个 run 不代表 All in Luna 自动获得所有外部权限。

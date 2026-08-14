@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -160,7 +161,8 @@ def test_cli_deepseek_harness_adapter_emits_the_allinflash_opcode() -> None:
         database = Path(directory) / "runtime.db"
         result = subprocess.run(
             [
-                "uv", "run", "allinluna", "--adapter", "deepseek-harness", "--db", str(database),
+                sys.executable, "-m", "allinluna_runtime.cli",
+                "--adapter", "deepseek-harness", "--db", str(database),
                 "start", "--goal", "verify allinflash adapter", "--model", "deepseek-v4-flash",
             ],
             cwd=ROOT,
@@ -183,7 +185,8 @@ def test_cli_deepseek_harness_adapter_ingests_an_exact_child_receipt() -> None:
         database = Path(directory) / "runtime.db"
         start = subprocess.run(
             [
-                "uv", "run", "allinluna", "--adapter", "deepseek-harness", "--db", str(database),
+                sys.executable, "-m", "allinluna_runtime.cli",
+                "--adapter", "deepseek-harness", "--db", str(database),
                 "start", "--goal", "verify All in Flash child receipt", "--model", "deepseek-v4-flash",
             ],
             cwd=ROOT,
@@ -217,7 +220,8 @@ def test_cli_deepseek_harness_adapter_ingests_an_exact_child_receipt() -> None:
         run_id = start_payload["run_ref"].removeprefix("run://")
         ingest = subprocess.run(
             [
-                "uv", "run", "allinluna", "--adapter", "deepseek-harness", "--db", str(database),
+                sys.executable, "-m", "allinluna_runtime.cli",
+                "--adapter", "deepseek-harness", "--db", str(database),
                 "ingest-receipt", run_id, json.dumps(receipt),
             ],
             cwd=ROOT,

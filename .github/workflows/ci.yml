@@ -29,7 +29,7 @@ jobs:
         run: python -m build
       - name: Run full pytest suite
         env:
-          ALLINLUNA_WHEEL: ${{ github.workspace }}/dist/allinluna-2.0.0rc2-py3-none-any.whl
+          ALLINLUNA_WHEEL: ${{ github.workspace }}/dist/allinluna-2.0.0rc3-py3-none-any.whl
         run: python -m pytest tests -q
       - name: Run vNext suite validator
         if: runner.os == 'Linux'

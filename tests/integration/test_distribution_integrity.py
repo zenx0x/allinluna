@@ -18,12 +18,13 @@ class DistributionIntegrityTests(unittest.TestCase):
     def test_rc_version_and_hyphen_tag_contract(self) -> None:
         self.assertTrue(is_rc_version("2.0.0-rc.1"))
         self.assertTrue(is_rc_version("2.0.0-rc.2"))
+        self.assertTrue(is_rc_version("2.0.0-rc.3"))
         self.assertFalse(is_rc_version("2.0.0"))
         self.assertFalse(is_rc_version("2.0.0-rc.0"))
-        self.assertEqual(rc_tag("allinluna", "2.0.0-rc.2"), "allinluna-v2.0.0-rc.2")
+        self.assertEqual(rc_tag("allinluna", "2.0.0-rc.3"), "allinluna-v2.0.0-rc.3")
         self.assertEqual(
-            rc_tag("research-routes", "0.3.0-rc.2"),
-            "research-routes-v0.3.0-rc.2",
+            rc_tag("research-routes", "0.3.0-rc.3"),
+            "research-routes-v0.3.0-rc.3",
         )
 
     def test_release_versions_is_the_distribution_authority(self) -> None:
@@ -36,11 +37,15 @@ class DistributionIntegrityTests(unittest.TestCase):
         self.assertFalse(authority["tag_policy"]["create_or_publish"])
         self.assertEqual(
             authority["products"]["allinluna"]["tag"],
-            "allinluna-v2.0.0-rc.2",
+            "allinluna-v2.0.0-rc.3",
+        )
+        self.assertEqual(
+            authority["products"]["allinflash"]["tag"],
+            "allinflash-v0.2.0",
         )
         self.assertEqual(
             authority["products"]["research-routes"]["tag"],
-            "research-routes-v0.3.0-rc.2",
+            "research-routes-v0.3.0-rc.3",
         )
         for spec in manifest["distributions"]:
             self.assertNotIn("version", spec)

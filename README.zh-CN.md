@@ -420,7 +420,7 @@ Keep independent parts moving in parallel where possible.
 需要显式查看和控制 run 时：
 
 ```bash
-python -m pip install -e .
+python -m pip install "allinluna==2.0.0rc3"
 
 allinluna start --goal "Finish the authentication refactor"
 allinluna status RUN_ID
@@ -435,6 +435,8 @@ allinluna --help
 
 Lane、direct-work、recovery 和诊断命令放在高级 CLI 文档中。
 
+参与仓库开发时，可将发行版安装命令替换为 `python -m pip install -e .`。
+
 ---
 
 ## DeepSeek Harness / All in Flash
@@ -446,6 +448,13 @@ Lane、direct-work、recovery 和诊断命令放在高级 CLI 文档中。
 
 - npm 包：[`@zenx0x/allinflash`](https://www.npmjs.com/package/@zenx0x/allinflash)
 - 集成说明：[`plugins/deepseek-harness/README.md`](plugins/deepseek-harness/README.md)
+
+安装 All in Luna CLI 后，一条命令即可初始化独立的 DSH profile：
+
+```bash
+npx @zenx0x/allinflash@0.2.0 init --profile allinflash
+dsh --profile allinflash
+```
 
 GitHub 搜索关键词：`deepseek-harness`、`dsh`、`dsh-plugin`、`allinflash`、
 `multi-agent-orchestration`。
@@ -500,6 +509,7 @@ All in Luna 负责把复杂工作运行起来，不替用户私自扩大目标�
 
 ### Go deeper
 
+- [宿主一致性](docs/host-conformance.md)
 - [Troubleshooting](docs/troubleshooting/common-issues.md)
 - [Public runtime surface](docs/architecture/public-surface.md)
 - [Architecture](docs/architecture/)

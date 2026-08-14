@@ -1,18 +1,48 @@
 {
   "name": "@zenx0x/allinflash",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness Cordis tools for All in Flash, powered by All in Luna",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js"
   },
+  "bin": {
+    "allinflash": "./cli.js"
+  },
+  "files": [
+    "cli.js",
+    "cordis.patch.yml",
+    "index.js",
+    "README.md"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
   "license": "Apache-2.0",
+  "keywords": [
+    "allinflash",
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "agent-orchestration",
+    "multi-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zenx0x/allinluna.git",
+    "directory": "plugins/deepseek-harness"
+  },
+  "homepage": "https://github.com/zenx0x/allinluna/tree/main/plugins/deepseek-harness",
+  "bugs": {
+    "url": "https://github.com/zenx0x/allinluna/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"

@@ -1,5 +1,5 @@
-# Add this row to a DSH profile's cordis.patch.yml after installing
-# @zenx0x/allinflash into that profile.
+# Bundle default for repository development. Public users should run
+# `npx @zenx0x/allinflash init`, which writes a deployment-specific override.
 - insert:
     - id: allinflash
       name: '@zenx0x/allinflash'

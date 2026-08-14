@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -72,7 +73,7 @@ def test_installed_cli_entrypoint_and_runtime_import(tmp_path: Path) -> None:
         env=_subprocess_environment(),
     )
     assert version.returncode == 0, version.stderr
-    assert version.stdout.startswith("allinluna ")
+    assert version.stdout.strip() == "allinluna 2.0.0rc3"
 
     help_result = subprocess.run(
         [str(executable), "--help"],
@@ -97,7 +98,17 @@ def test_installed_cli_entrypoint_and_runtime_import(tmp_path: Path) -> None:
     assert '"goal": "package smoke coverage"' in compiled.stdout
 
     imported = subprocess.run(
-        [str(python), "-c", "from allinluna_runtime.cli import main; print(main)"],
+        [
+            str(python),
+            "-c",
+            (
+                "import json, allinluna_runtime; "
+                "from importlib.metadata import metadata, version; "
+                "m=metadata('allinluna'); "
+                "print(json.dumps({'module': allinluna_runtime.__file__, 'version': version('allinluna'), "
+                "'summary': m['Summary'], 'homepage': m['Project-URL']}))"
+            ),
+        ],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -105,4 +116,18 @@ def test_installed_cli_entrypoint_and_runtime_import(tmp_path: Path) -> None:
         env=_subprocess_environment(),
     )
     assert imported.returncode == 0, imported.stderr
-    assert "function main" in imported.stdout
+    installed = json.loads(imported.stdout)
+    assert Path(installed["module"]).is_relative_to(environment)
+    assert installed["version"] == "2.0.0rc3"
+    assert "multi-agent orchestration" in installed["summary"]
+    assert "Homepage" in installed["homepage"]
+
+    check = subprocess.run(
+        [str(python), "-m", "pip", "check"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_subprocess_environment(),
+    )
+    assert check.returncode == 0, check.stdout + check.stderr

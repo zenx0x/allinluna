@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.0.0-rc.3 / 0.3.0-rc.3 / All in Flash 0.2.0 — public installation repair
+
+- All in Flash now ships an `allinflash` executable. `npx
+  @zenx0x/allinflash init` creates an idempotent managed DSH profile, enables
+  the bundle, writes runtime configuration, verifies the All in Luna CLI, and
+  installs the profile dependencies without overwriting unmanaged profiles.
+- `allinflash doctor` checks the profile, dependency resolution, bundle,
+  Cordis patch, DSH executable, and All in Luna runtime before a server starts.
+- Missing All in Luna executables now return an actionable installation error
+  instead of an opaque child-process failure.
+- The npm package declares its executable, shipped files, search keywords,
+  repository, homepage, issue tracker, and supported Node.js range.
+- The Python distribution now carries its README, search metadata, classifiers,
+  and documentation URL. Clean-wheel tests verify the installed version,
+  module origin, package metadata, CLI behavior, and `pip check` result outside
+  the source environment.
+- All in Luna and Research Routes advance together because the latter's private
+  bridge dependency now requires RC3. Release authority also tracks All in
+  Flash with its own namespaced `allinflash-v0.2.0` tag.
+
 ## 2.0.0-rc.2 / 0.3.0-rc.2 — product hardening
 
 - Lane-local execution now separates logical capability intents from

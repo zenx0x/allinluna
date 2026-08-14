@@ -8,6 +8,11 @@ The checker validates a host trace with three parts:
 - mandatory actions: `create`, `read`, `wait`, `cancel`
 - `idempotency` values for each action (`no-op`, `reuse`, `wait`)
 
+Resource evidence is reported as three separate values: the route `requested`
+by policy, the route `resolved` before dispatch, and the `actual` host
+observation. A resolved route is not proof that the requested model executed;
+missing actual telemetry remains explicitly unknown.
+
 Run the checker directly:
 
 ```powershell

@@ -113,11 +113,14 @@ async function invoke(config, args) {
       stderr: String(result.stderr ?? '').trim(),
     }
   } catch (error) {
+    const missingRuntime = error.code === 'ENOENT'
+      ? `All in Luna CLI was not found (${resolved.command}). Install it with "python -m pip install allinluna" or re-run "allinflash init" with --runtime-command.`
+      : null
     return {
       ok: false,
       exitCode: typeof error.code === 'number' ? error.code : null,
       resultJson: JSON.stringify(parseJsonOutput(error.stdout)),
-      stderr: String(error.stderr ?? error.message ?? '').trim(),
+      stderr: String(missingRuntime ?? error.stderr ?? error.message ?? '').trim(),
     }
   }
 }

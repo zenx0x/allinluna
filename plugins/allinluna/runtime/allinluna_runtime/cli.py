@@ -26,7 +26,7 @@ def _runtime_version() -> str:
         return version("allinluna")
     except PackageNotFoundError:
         # Source checkouts intentionally remain runnable through PYTHONPATH.
-        return "2.0.0-rc.2"
+        return "2.0.0-rc.3"
 
 
 def _json(value: Any) -> str:
